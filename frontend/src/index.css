@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #171310;
+  --color-surface: #211b16;
+  --color-bubble-bot: #262019;
+  --color-accent: #f0b76a;
+  --color-accent-ink: #1a1512;
+  --color-text: #f2e9de;
+  --color-text-dim: #a29284;
+  --color-border: #332b24;
+  --color-online: #86a96b;
+  --color-danger: #d97757;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+}
