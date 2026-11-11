@@ -27,10 +27,10 @@ def stream_chat(
         max_tokens,
     )
     full = ""
+    store.append(session_id, HumanMessage(content=message))
     for chunk in llm.stream(messages):
         text = chunk.content
         if text:
             full += text
             yield text
-    store.append(session_id, HumanMessage(content=message))
     store.append(session_id, AIMessage(content=full))

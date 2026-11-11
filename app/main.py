@@ -1,6 +1,8 @@
 import json
+import logging
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.config import Settings, build_llm, get_settings
@@ -9,6 +11,8 @@ from app.schemas import ChatRequest, ExtractRequest
 from app.services.chat import stream_chat
 from app.services.extract import extract_after_sale
 from app.services.session import SessionStore
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -49,9 +53,12 @@ def chat(
             settings.max_context_tokens,
         ):
             yield ServerSentEvent(raw_data=token)
-    except Exception as exc:  # noqa: BLE001 - stream already in flight, must end cleanly
+    except Exception:  # noqa: BLE001 - stream already in flight, must end cleanly
+        logger.exception("chat stream failed")
         yield ServerSentEvent(
-            raw_data=json.dumps({"error": str(exc)}, ensure_ascii=False)
+            raw_data=json.dumps(
+                {"error": "客服服务暂时不可用,请稍后重试"}, ensure_ascii=False
+            )
         )
     yield ServerSentEvent(raw_data="[DONE]")
 
@@ -59,5 +66,11 @@ def chat(
 @app.post("/extract")
 def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
     """Extract structured after-sale fields from free-form text."""
-    result = extract_after_sale(llm, req.text)
+    try:
+        result = extract_after_sale(llm, req.text)
+    except Exception:  # noqa: BLE001 - upstream/parse failure surfaced as 502
+        logger.exception("extract failed")
+        return JSONResponse(
+            status_code=502, content={"detail": "结构化提取失败,请稍后重试"}
+        )
     return result.model_dump()

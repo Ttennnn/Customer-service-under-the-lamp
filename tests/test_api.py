@@ -62,6 +62,13 @@ def test_extract_returns_three_fields(client):
     assert set(r.keys()) == {"order_id", "appeal_type", "expected_solution"}
 
 
+def test_extract_upstream_error_502(client):
+    app.dependency_overrides[get_llm_dep] = lambda: RaisingLLM()
+    r = client.post("/extract", json={"text": "订单123 退款"})
+    assert r.status_code == 502
+    assert r.json()["detail"] != ""
+
+
 def test_chat_upstream_error_not_hang(client):
     app.dependency_overrides[get_llm_dep] = lambda: RaisingLLM()
     with client.stream("POST", "/chat", json={"session_id": "s1", "message": "hi"}) as r:
