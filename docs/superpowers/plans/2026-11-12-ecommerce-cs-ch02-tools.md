@@ -66,7 +66,7 @@ app/
     chat.py                     # 改:单轮工具编排 stream_chat
 docker-compose.yml              # mysql:8.0
 tests/
-  conftest.py                   # SQLite 内存 fixture(StaticPool)+ monkeypatch get_session_factory
+  conftest.py                   # SQLite 文件 fixture(tmp_path)+ monkeypatch get_session_factory
   test_db_config.py
   test_models.py
   test_seed.py
@@ -126,7 +126,7 @@ Expected: FAIL(`database_url` 未定义 / `app.db` 模块缺失)。
 
 - [ ] **Step 3: 实现配置与骨架**
 
-`app/config.py` 加 `database_url: str` 字段。`app/db/base.py` 定义 `class Base(DeclarativeBase): pass`。`app/db/session.py` 用 `functools.lru_cache` 或模块级缓存实现 `get_engine`/`get_session_factory` 懒加载;`get_db` 为生成器依赖。`docker-compose.yml`:mysql:8.0、`MYSQL_ROOT_PASSWORD`/`MYSQL_DATABASE=cs_customer`、端口 `3306:3306`、named volume、字符集 utf8mb4。
+先装依赖:`pip install sqlalchemy pymysql`,并在 `requirements.txt` 追加 `sqlalchemy` 与 `pymysql` 两行。`app/config.py` 加 `database_url: str` 字段(带默认值)。`app/db/base.py` 定义 `class Base(DeclarativeBase): pass`。`app/db/session.py` 用 `functools.lru_cache` 实现 `get_engine`/`get_session_factory` 懒加载;`get_db` 为生成器依赖。`docker-compose.yml`:mysql:8.0、`MYSQL_ROOT_PASSWORD`/`MYSQL_DATABASE=cs_customer`、端口 `3306:3306`、named volume、字符集 utf8mb4。`.env.example` 与 `.env` 各追加一行 `DATABASE_URL=mysql+pymysql://root:root@localhost:3306/cs_customer?charset=utf8mb4`(`.env` 用实际口令,`.env` 不提交)。
 
 - [ ] **Step 4: 运行确认通过**
 
@@ -136,7 +136,7 @@ Expected: PASS。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/config.py app/db/ docker-compose.yml tests/test_db_config.py .env.example
+git add app/config.py app/db/ docker-compose.yml tests/test_db_config.py requirements.txt .env.example
 git commit -m "feat: add database config, SQLAlchemy session skeleton, and MySQL compose"
 ```
 
