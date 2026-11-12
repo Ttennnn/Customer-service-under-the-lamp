@@ -51,6 +51,28 @@ class FakeTicketLLM:
     def stream(self, messages):
         yield FakeChunk("直接"); yield FakeChunk("回答")
 
+class FakeFaqBoundLLM:
+    def invoke(self, messages):
+        return AIMessage(content="", tool_calls=[{"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
+    def stream(self, messages):
+        yield FakeChunk("已"); yield FakeChunk("查到")
+
+class FakeFaqLLM:
+    def bind_tools(self, tools):
+        return FakeFaqBoundLLM()
+    def stream(self, messages):
+        yield FakeChunk("直接"); yield FakeChunk("回答")
+
+def test_query_faq_tool_uses_extended_timeout(session, monkeypatch):
+    calls = []
+    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
+        calls.append((tool.name, args, timeout_s))
+        return "问:邮费怎么算?\n答:满 99 元包邮"
+    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    events = list(stream_chat(FakeFaqLLM(), session, ALL_TOOLS, "SYS", "u1", "邮费", 1000))
+    assert calls == [("query_faq", {"keyword": "邮费"}, 8.0)]
+    assert events[-1] == "查到"
+
 def test_create_ticket_receives_cid_across_threads(session):
     cid = get_or_create_conversation(session, "u1").id
     gen = stream_chat(FakeTicketLLM(), session, ALL_TOOLS, "SYS", "u1", "投诉", 1000)

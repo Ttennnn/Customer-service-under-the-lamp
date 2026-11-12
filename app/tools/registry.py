@@ -23,6 +23,15 @@ ALL_TOOLS: list[BaseTool] = [
 
 TOOLS_BY_NAME: dict[str, BaseTool] = {t.name: t for t in ALL_TOOLS}
 
+# 各工具的执行超时(秒);未列出的工具使用默认值。
+TOOL_TIMEOUTS: dict[str, float] = {"query_faq": 8.0}
+DEFAULT_TOOL_TIMEOUT = 5.0
+
+
+def tool_timeout(name: str) -> float:
+    """Return the execution timeout in seconds for tool *name*."""
+    return TOOL_TIMEOUTS.get(name, DEFAULT_TOOL_TIMEOUT)
+
 # 五个工具的展示名(仅为中文标签字符串,不包含工具对象)。
 TOOL_LABELS: dict[str, str] = {
     "query_order": "查订单",

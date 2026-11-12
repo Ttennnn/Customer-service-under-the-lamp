@@ -16,3 +16,8 @@ def test_registry_has_five_tools_and_five_labels():
     assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
     assert set(TOOLS_BY_NAME) == {t.name for t in ALL_TOOLS}
     assert set(TOOL_LABELS) == {"query_order", "query_product", "query_logistics", "query_faq", "create_ticket"}
+
+def test_tool_timeout_override():
+    from app.tools.registry import tool_timeout
+    assert tool_timeout("query_faq") == 8.0
+    assert tool_timeout("query_order") == 5.0

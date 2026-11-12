@@ -29,7 +29,7 @@ from app.services.context import build_messages
 from app.services.history import append_message, get_or_create_conversation, load_history
 from app.tools.context import current_conversation_id
 from app.tools.executor import execute_tool
-from app.tools.registry import TOOLS_BY_NAME, TOOL_LABELS
+from app.tools.registry import TOOLS_BY_NAME, TOOL_LABELS, tool_timeout
 
 _FALLBACK_TEXT = "抱歉,我暂时无法完成这个操作,请稍后重试或联系人工客服。"
 
@@ -94,7 +94,7 @@ def stream_chat(
             results.append((tc, f"工具 {tc['name']} 不存在,请告知用户改用人工客服。"))
             continue
         current_conversation_id.set(cid)
-        results.append((tc, execute_tool(tool, tc["args"])))
+        results.append((tc, execute_tool(tool, tc["args"], timeout_s=tool_timeout(tc["name"]))))
 
     # Persist the assistant tool_calls row and its result rows atomically, so
     # an interruption can never leave a dangling tool_calls with no results.

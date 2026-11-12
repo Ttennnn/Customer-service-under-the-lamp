@@ -1,46 +1,47 @@
-"""FAQ 检索工具。
+"""FAQ semantic retrieval tool.
 
-用 SQL LIKE 在 ``faq`` 表的问题(question)与答案(answer)字段中做模糊
-检索,命中时返回格式化问答文本,未命中返回「未找到相关问题」提示。
+Embeds the user's keyword with BGE-M3 and searches the Milvus ``knowledge``
+collection, returning the matching questions and answers formatted for the
+model.  Unlike the previous SQL ``LIKE`` implementation this is semantic
+similarity search, so paraphrases and synonyms can match.
 
-工具内部自行通过 ``get_session_factory()()`` 开启新会话(工具在子线程执行,
-不能复用调用方的会话),查询完成后关闭会话。
+Infrastructure failures (embedding API or Milvus down) are caught and turned
+into a safe apology so a retrieval problem never breaks the chat round.
 """
 
-from sqlalchemy import or_
+import logging
 
 from langchain.tools import tool
 
-from app.db import session as db_session
-from app.models import Faq
+from app.rag.embedding import get_embedder
+from app.rag.milvus_store import get_vector_store
+from app.rag.retrieval import retrieve
+
+logger = logging.getLogger(__name__)
+
+_MISS_TEXT = "未找到相关问题,请换个关键词再试试。"
+_ERROR_TEXT = "知识库暂时不可用,请稍后重试或联系人工客服。"
 
 
 @tool
 def query_faq(keyword: str) -> str:
-    """查询常见问题(FAQ)。
+    """在知识库中语义检索常见问题(FAQ)。
 
-    在 faq 表的问题(question)与答案(answer)字段中做模糊匹配,
-    返回匹配到的问题与答案文本;若没有匹配,返回未找到提示。
+    将关键词向量化后在 Milvus 知识库中做相似度检索,返回语义最接近的
+    问题与答案;若没有足够相近的内容,返回未找到提示。
 
     Args:
-        keyword: 用于模糊检索的关键词
+        keyword: 用于语义检索的问题或关键词
     """
-    s = db_session.get_session_factory()()
     try:
-        rows = (
-            s.query(Faq)
-            .filter(
-                or_(
-                    Faq.question.like(f"%{keyword}%"),
-                    Faq.answer.like(f"%{keyword}%"),
-                )
-            )
-            .all()
+        results = retrieve(
+            keyword, embedder=get_embedder(), store=get_vector_store()
         )
-    finally:
-        s.close()
+    except Exception:  # noqa: BLE001 - 工具必须返回字符串,不能打断对话
+        logger.exception("query_faq retrieval failed")
+        return _ERROR_TEXT
 
-    if not rows:
-        return "未找到相关问题,请换个关键词再试试。"
+    if not results:
+        return _MISS_TEXT
 
-    return "\n\n".join(f"问:{row.question}\n答:{row.answer}" for row in rows)
+    return "\n\n".join(f"问:{r.questions}\n答:{r.answer}" for r in results)
