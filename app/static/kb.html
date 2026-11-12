@@ -518,13 +518,21 @@
     setMessage(buildMessage, "正在启动建库…");
     try {
       await requestJSON("/kb/api/build", { method: "POST" });
+      // The 202 already means a build is running, so keep the controls
+      // disabled until a status round-trip confirms the server state.  A
+      // stale ``isRunning === false`` here would briefly re-enable them.
+      isRunning = true;
+      updateControls();
       setMessage(buildMessage, "建库已启动,正在轮询状态。");
     } catch (err) {
       setMessage(buildMessage, "启动建库失败:" + err.message, true);
     } finally {
-      buildInFlight = false;
-      updateControls();
-      await refreshStatus();
+      try {
+        await refreshStatus();
+      } finally {
+        buildInFlight = false;
+        updateControls();
+      }
     }
   });
 
