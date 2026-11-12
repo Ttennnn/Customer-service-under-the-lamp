@@ -1,4 +1,8 @@
 import threading
+from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from app.jobs.build_knowledge import BuildReport
 from app.models import KnowledgeChunk
@@ -67,12 +71,18 @@ def test_start_build_success(monkeypatch, session):
     monkeypatch.setattr(kb_build, "get_embedder", lambda: object())
     monkeypatch.setattr(kb_build, "get_vector_store", lambda: object())
 
+    calls = []
+
     def fake_build(session, docs_dir, embedder, store, *, reset=False):
+        calls.append((docs_dir, reset))
         return BuildReport(documents=1, chunks=2, inserted=2, reused=0, vectorized=2)
 
     monkeypatch.setattr(kb_build, "build_knowledge", fake_build)
-    assert kb_build.start_build() is True
+    assert kb_build.start_build() is not None
     assert kb_build.wait_for_build(2) is True
+    # A regression to reset=False would leak stale document chunks; the docs
+    # dir must come from settings, not a hard-coded path.
+    assert calls == [(Path("knowledge"), True)]
     s = kb_build.status(session)
     assert s["running"] is False and s["last_report"]["documents"] == 1
     assert s["last_error"] is None
@@ -95,8 +105,8 @@ def test_start_build_rejects_concurrent(monkeypatch, session):
         return BuildReport(0, 0, 0, 0, 0)
 
     monkeypatch.setattr(kb_build, "build_knowledge", blocking)
-    assert kb_build.start_build() is True
-    assert kb_build.start_build() is False
+    assert kb_build.start_build() is not None
+    assert kb_build.start_build() is None
     gate.set()
     assert kb_build.wait_for_build(2) is True
 
@@ -120,7 +130,7 @@ def test_done_event_tracks_build_lifecycle(monkeypatch):
     monkeypatch.setattr(kb_build, "build_knowledge", blocking)
 
     assert kb_build._done.is_set() is True  # reset: nothing to wait for
-    assert kb_build.start_build() is True
+    assert kb_build.start_build() is not None
     assert kb_build._done.is_set() is False  # build running: waiters block
     assert kb_build.wait_for_build(0) is False
     gate.set()
@@ -142,7 +152,48 @@ def test_build_failure_is_visible(monkeypatch, session):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(kb_build, "build_knowledge", boom)
-    assert kb_build.start_build() is True
+    assert kb_build.start_build() is not None
     assert kb_build.wait_for_build(2) is True
     assert "boom" in kb_build.status(session)["last_error"]
+    assert kb_build.is_running() is False
+
+
+def test_thread_start_failure_does_not_wedge_state(monkeypatch):
+    """A failed ``Thread.start`` must roll back instead of blocking every build."""
+    kb_build.reset_state_for_tests()
+    monkeypatch.setattr(
+        kb_build,
+        "get_settings",
+        lambda: type("S", (), {"knowledge_docs_dir": "knowledge"})(),
+    )
+    monkeypatch.setattr(kb_build, "get_embedder", lambda: object())
+    monkeypatch.setattr(kb_build, "get_vector_store", lambda: object())
+
+    class BoomThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("thread start failed")
+
+    real_thread = threading.Thread
+    monkeypatch.setattr(kb_build.threading, "Thread", BoomThread)
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        kb_build.start_build()
+
+    snap = kb_build.snapshot()
+    assert kb_build.is_running() is False
+    assert kb_build.wait_for_build(0) is True
+    assert snap["finished_at"] is not None
+    assert "thread start failed" in snap["last_error"]
+
+    # The state machine recovers: a later build starts normally.
+    monkeypatch.setattr(kb_build.threading, "Thread", real_thread)
+    monkeypatch.setattr(
+        kb_build,
+        "build_knowledge",
+        lambda *a, **k: BuildReport(0, 0, 0, 0, 0),
+    )
+    assert kb_build.start_build() is not None
+    assert kb_build.wait_for_build(2) is True
     assert kb_build.is_running() is False

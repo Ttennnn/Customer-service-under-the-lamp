@@ -1,5 +1,7 @@
+from datetime import datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -97,11 +99,12 @@ def test_status_database_error_is_500(monkeypatch):
 def test_build_returns_202_and_409(monkeypatch):
     import app.api.kb as kb
 
-    monkeypatch.setattr(kb.kb_build, "start_build", lambda: True)
+    started = datetime(2026, 11, 12, 20, 0, 0)
+    monkeypatch.setattr(kb.kb_build, "start_build", lambda: started)
     r = TestClient(app).post("/kb/api/build")
     assert r.status_code == 202
-    assert r.json() == {"status": "running"}
-    monkeypatch.setattr(kb.kb_build, "start_build", lambda: False)
+    assert r.json() == {"status": "running", "started_at": "2026-11-12T20:00:00"}
+    monkeypatch.setattr(kb.kb_build, "start_build", lambda: None)
     r = TestClient(app).post("/kb/api/build")
     assert r.status_code == 409
     assert r.json() == {"detail": "a build is already running"}
@@ -208,6 +211,22 @@ def test_upload_rejects_newline_category(monkeypatch, tmp_path):
         data={"content_type": "policy", "category": "a\nb"},
     )
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "separator", [chr(13), chr(0x2028), chr(0x2029), chr(0x85)]
+)
+def test_upload_rejects_other_line_separator_categories(
+    monkeypatch, tmp_path, separator
+):
+    c = _client(monkeypatch, tmp_path)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("x.md", b"# X\n", "text/markdown")},
+        data={"content_type": "policy", "category": f"a{separator}b"},
+    )
+    assert r.status_code == 400
+    assert r.json() == {"detail": "invalid category"}
 
 
 def test_upload_conflicts_with_running_build(monkeypatch, tmp_path):

@@ -504,6 +504,9 @@
       await Promise.all([refreshFiles(), refreshStatus()]);
     } catch (err) {
       setMessage(uploadMessage, "上传失败:" + err.message, true);
+      // A 409 means a build started elsewhere; resync so the controls disable
+      // again instead of staying stale until the next poll.
+      await refreshStatus();
     } finally {
       uploadInFlight = false;
       updateControls();

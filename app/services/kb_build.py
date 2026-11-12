@@ -58,18 +58,34 @@ def is_running() -> bool:
         return _state.running
 
 
-def start_build() -> bool:
-    """Start one daemon build. Returns False when a build is already running."""
+def start_build() -> datetime | None:
+    """Start one daemon build.
+
+    Returns the build's ``started_at`` timestamp, or ``None`` when a build is
+    already running.  If the thread cannot start at all the state machine is
+    rolled back (and the completion event set) before the error is re-raised,
+    so one failed ``Thread.start`` cannot wedge every later build.
+    """
     global _state
     with _lock:
         if _state.running:
-            return False
-        _state = BuildState(running=True, started_at=datetime.now())
+            return None
+        started_at = datetime.now()
+        _state = BuildState(running=True, started_at=started_at)
         _done.clear()
 
     thread = threading.Thread(target=_run_build, name="kb-build", daemon=True)
-    thread.start()
-    return True
+    try:
+        thread.start()
+    except Exception as exc:
+        logger.exception("failed to start knowledge build thread")
+        with _lock:
+            _state.running = False
+            _state.finished_at = datetime.now()
+            _state.last_error = str(exc) or type(exc).__name__
+            _done.set()
+        raise
+    return started_at
 
 
 def wait_for_build(timeout: float | None = None) -> bool:

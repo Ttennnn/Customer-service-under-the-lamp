@@ -78,3 +78,20 @@ def test_effective_paths_ignore_other_subdirectories(tmp_path):
     _write_doc(root / "a.md", "A")
     _write_doc(root / "archive" / "old.md", "Old")
     assert [p.name for p in effective_doc_paths(root)] == ["a.md"]
+
+
+def test_effective_paths_skip_directories_named_md(tmp_path):
+    root = tmp_path / "knowledge"; root.mkdir()
+    _write_doc(root / "a.md", "A")
+    (root / "fake.md").mkdir()
+    (root / "uploads" / "fake.md").mkdir(parents=True)
+    _write_doc(root / "uploads" / "b.md", "B")
+    assert [p.name for p in effective_doc_paths(root)] == ["a.md", "b.md"]
+
+
+def test_effective_paths_include_uppercase_md_suffix(tmp_path):
+    root = tmp_path / "knowledge"; root.mkdir()
+    _write_doc(root / "A.MD", "A")
+    _write_doc(root / "uploads" / "B.Md", "B")
+    assert {p.name for p in effective_doc_paths(root)} == {"A.MD", "B.Md"}
+    assert {d.title for d in load_documents(root)} == {"A", "B"}

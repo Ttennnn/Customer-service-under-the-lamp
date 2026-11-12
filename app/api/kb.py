@@ -104,9 +104,10 @@ def get_status() -> dict:
 @api_router.post("/build", status_code=202)
 def post_build() -> dict:
     """Start one background build; 409 when a build is already running."""
-    if not kb_build.start_build():
+    started_at = kb_build.start_build()
+    if started_at is None:
         raise HTTPException(status_code=409, detail="a build is already running")
-    return {"status": "running"}
+    return {"status": "running", "started_at": started_at.isoformat()}
 
 
 def _cleanup(path: Path) -> None:
@@ -138,7 +139,9 @@ def post_upload(
         )
     if kb_build.is_running():
         raise HTTPException(status_code=409, detail="a build is already running")
-    if category is not None and ("\n" in category or "\r" in category):
+    if category and category.splitlines() != [category]:
+        # Reject any value that ``splitlines()`` splits, including Unicode
+        # line separators U+2028/U+2029 the frontmatter parser honours.
         raise HTTPException(status_code=400, detail="invalid category")
 
     target_dir = uploads_dir(get_settings())

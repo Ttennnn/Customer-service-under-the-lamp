@@ -94,6 +94,21 @@ def _filename_sort_key(path: Path) -> tuple[bytes, str]:
         return (b"\xff", name)
 
 
+def _md_files(directory: Path) -> list[Path]:
+    """Return regular ``.md`` files in *directory* (suffix case-insensitive).
+
+    ``Path.glob("*.md")`` can match a directory literally named ``foo.md``
+    and misses ``.MD`` on case-sensitive filesystems, so scan and filter
+    explicitly.  Only direct children are considered; subdirectories are not
+    part of the corpus.
+    """
+    return [
+        p
+        for p in directory.iterdir()
+        if p.is_file() and p.suffix.lower() == ".md"
+    ]
+
+
 def effective_doc_paths(docs_dir: Path) -> list[Path]:
     """Return the effective corpus: root ``*.md`` plus ``uploads/*.md``.
 
@@ -102,10 +117,12 @@ def effective_doc_paths(docs_dir: Path) -> list[Path]:
     are returned sorted by filename.
     """
     docs_dir = Path(docs_dir)
-    by_name: dict[str, Path] = {p.name: p for p in docs_dir.glob("*.md")}
+    by_name: dict[str, Path] = {}
+    if docs_dir.is_dir():
+        by_name.update({p.name: p for p in _md_files(docs_dir)})
     uploads_dir = docs_dir / "uploads"
     if uploads_dir.is_dir():
-        by_name.update({p.name: p for p in uploads_dir.glob("*.md")})
+        by_name.update({p.name: p for p in _md_files(uploads_dir)})
     return sorted(by_name.values(), key=_filename_sort_key)
 
 

@@ -94,8 +94,8 @@ app/api/__init__.py             # 新包
 app/api/kb.py                   # /kb 与 /kb/api/* 路由、上传校验
 app/services/kb_build.py        # 构建状态机 + 后台线程 + 状态计数
 app/static/kb.html              # 自包含页面(HTML/CSS/JS)
-app/rag/docs.py                 # load_documents 改 rglob
-app/jobs/build_knowledge.py     # 目录校验改 rglob
+app/rag/docs.py                 # effective_doc_paths: root *.md + uploads/*.md (uploads 同名 shadow root)
+app/jobs/build_knowledge.py     # 目录校验用 effective_doc_paths
 app/main.py                     # include_router(kb_router)
 requirements.txt                # + python-multipart
 ```
@@ -258,11 +258,11 @@ class BuildState:
     last_error: str | None = None
 
 def status(session) -> dict          # 计数 + 状态快照
-def start_build() -> bool            # False = 已有构建在跑
+def start_build() -> datetime | None # None = 已有构建在跑;否则返回 started_at
 def reset_state_for_tests() -> None  # 测试用
 ```
 
-- 模块级 `threading.Lock` 保护 `running` 的检查与置位;`start_build` 返回 False 时路由返回 409。
+- 模块级 `threading.Lock` 保护 `running` 的检查与置位;`start_build` 返回 None 时路由返回 409。
 - 线程 daemon=True;异常写 `last_error` 并 `logger.exception`,不向外抛。
 - `status(session)` 的 DB 查询分两域:文档域(`content_type != 'mined_qa' OR content_type IS NULL`)按 `vectorize_status` 分组得到 `pending/done/total`;`mined_qa` 单独得到 `mined_pending/mined_done/mined_total`。
 - 状态不持久化;进程重启后空状态。
