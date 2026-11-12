@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, JSON, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -10,7 +10,11 @@ from app.db.base import Base
 class Message(Base):
     __tablename__ = "messages"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     conversation_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("conversations.id"), index=True
     )
