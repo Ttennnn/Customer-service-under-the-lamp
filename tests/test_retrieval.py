@@ -147,7 +147,7 @@ def test_retrieve_resolves_embedder_and_store_from_module(monkeypatch, session):
     monkeypatch.setattr("app.rag.retrieval.get_vector_store", fake_store)
     monkeypatch.setattr(
         "app.rag.retrieval.get_settings",
-        lambda: SimpleNamespace(faq_top_k=3, faq_score_threshold=0.35),
+        lambda: SimpleNamespace(faq_top_k=3, faq_score_threshold=0.5),
     )
     out = retrieve("x", session=session)
     assert [r.answer for r in out] == ["答A"]

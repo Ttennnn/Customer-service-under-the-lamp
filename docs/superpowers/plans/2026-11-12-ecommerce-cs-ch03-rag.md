@@ -17,7 +17,7 @@
 - MySQL 是原文权威源;`knowledge_chunks` / `qa_extraction_staging` 严格按用户 DDL,**不增删列**。
 - 向量化文本固定为 `f"{category}\n{questions}\n{answer}"`;`section_path` / `content_type` / `is_key_clause` / `prev/next` 只存不进向量。
 - `query_faq(keyword: str) -> str` 的名称、入参、返回类型、未命中话术不变;只做 dense 单路,不做关键词召回/混合/重排。
-- 默认参数:`CHUNK_MAX_CHARS=500`、`CHUNK_OVERLAP_CHARS=80`、`EMBEDDING_BATCH_SIZE=16`、`FAQ_TOP_K=3`、`FAQ_SCORE_THRESHOLD=0.35`、`QA_DEDUP_THRESHOLD=0.92`。
+- 默认参数:`CHUNK_MAX_CHARS=500`、`CHUNK_OVERLAP_CHARS=80`、`EMBEDDING_BATCH_SIZE=16`、`FAQ_TOP_K=3`、`FAQ_SCORE_THRESHOLD=0.5`(Task 15 用评估集校准;早期计划值 0.35)、`QA_DEDUP_THRESHOLD=0.92`。
 - Milvus 主键固定 `chunk_{MySQL id}`;写入用 `upsert`;集合只存 `id/chunk_id/vector`,索引 `FLAT` + `COSINE`。
 - 文档入库幂等键:`(content_type, section_path, category, questions, answer)`;`--reset` 只清文档域,`--reset-all` 才清全部且必须 `--yes`。
 - 所有密钥/连接串只走 `.env`;`.env.example` 只留空值;不得把真实 key 写进代码、测试、计划或 dev-notes。
@@ -62,7 +62,7 @@ def test_ch03_settings_defaults():
     assert s.milvus_uri == "http://localhost:19530"
     assert s.milvus_collection == "knowledge"
     assert s.faq_top_k == 3
-    assert s.faq_score_threshold == 0.35
+    assert s.faq_score_threshold == 0.5
     assert s.chunk_max_chars == 500
     assert s.chunk_overlap_chars == 80
     assert s.qa_dedup_threshold == 0.92
@@ -92,7 +92,7 @@ EMBEDDING_BATCH_SIZE=16
 MILVUS_URI=http://localhost:19530
 MILVUS_COLLECTION=knowledge
 FAQ_TOP_K=3
-FAQ_SCORE_THRESHOLD=0.35
+FAQ_SCORE_THRESHOLD=0.5
 KNOWLEDGE_DOCS_DIR=knowledge
 CHUNK_MAX_CHARS=500
 CHUNK_OVERLAP_CHARS=80

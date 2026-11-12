@@ -33,11 +33,21 @@ from app.rag.vectorize import vectorize_pending
 from app.services.qa_mining import (
     ConversationTranscript,
     ExtractedQA,
-    dedup_questions,
+    dedup_questions_with_stats,
     extract_qa_batch,
 )
 
 _BATCH_NO_FORMAT = "qa-%Y%m%d%H%M%S-"
+MAX_TRANSCRIPT_MESSAGES = 40
+
+
+@dataclass(frozen=True)
+class BatchReport:
+    """Per-batch observability: conversations sent vs. QA pairs extracted."""
+
+    batch_no: str | None
+    conversations: int
+    extracted: int
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,28 @@ class MiningReport:
     discarded: int
     inserted: int
     vectorized: int
+    exact_discarded: int = 0
+    approximate_discarded: int = 0
+    batch_details: tuple[BatchReport, ...] = ()
+
+
+def _truncate_messages(
+    messages: list[tuple[str, str]],
+    max_messages: int = MAX_TRANSCRIPT_MESSAGES,
+) -> list[tuple[str, str]]:
+    """Keep the first and last halves of an overlong transcript.
+
+    The spec asks for truncation by message count while preserving both ends
+    of the conversation, so the model still sees how the user opened and where
+    the exchange ended.  Shorter transcripts are returned unchanged.
+    """
+    if max_messages < 2:
+        raise ValueError("max_messages must be at least 2")
+    if len(messages) <= max_messages:
+        return list(messages)
+    head = max_messages // 2
+    tail = max_messages - head
+    return list(messages[:head]) + list(messages[-tail:])
 
 
 def _select_candidates(session, since=None) -> list[ConversationTranscript]:
@@ -106,7 +138,10 @@ def _select_candidates(session, since=None) -> list[ConversationTranscript]:
         if "user" not in roles or "assistant" not in roles:
             continue
         transcripts.append(
-            ConversationTranscript(source_ref=str(conversation.id), messages=turns)
+            ConversationTranscript(
+                source_ref=str(conversation.id),
+                messages=_truncate_messages(turns),
+            )
         )
     return transcripts
 
@@ -222,8 +257,12 @@ def mine_qa(
     force=False,
     dry_run=False,
     do_vectorize=True,
+    threshold: float = 0.92,
 ) -> MiningReport:
     """Extract, stage, deduplicate, and insert Q&A pairs from conversations.
+
+    ``threshold`` is the cosine cutoff forwarded to the semantic dedup stage;
+    the CLI resolves it from ``Settings.qa_dedup_threshold``.
 
     ``dry_run`` performs extraction and the same in-memory dedup but skips the
     staging cleanup and every write, including vectorization.  ``store`` may be
@@ -239,19 +278,28 @@ def mine_qa(
     used_batch_nos: set[str] = set()
     batch_nos: list[str] = []
     extracted_items: list[ExtractedQA] = []
+    batch_details: list[BatchReport] = []
     batches = 0
 
     for start in range(0, len(transcripts), batch_size):
         batch = transcripts[start : start + batch_size]
         batches += 1
+        # One fresh batch id per LLM batch; rows are committed batch by batch
+        # so an interrupted run leaves obvious half-finished staging rows.
+        batch_no = None if dry_run else _new_batch_no(used_batch_nos)
         items = extract_qa_batch(llm, batch)
         extracted_items.extend(items)
+        batch_details.append(
+            BatchReport(
+                batch_no=batch_no,
+                conversations=len(batch),
+                extracted=len(items),
+            )
+        )
         if dry_run:
             continue
 
-        # One fresh batch id per LLM batch; rows are committed batch by batch
-        # so an interrupted run leaves obvious half-finished staging rows.
-        batch_no = _new_batch_no(used_batch_nos)
+        assert batch_no is not None  # non-dry runs always allocate a batch id
         batch_nos.append(batch_no)
         for index, item in enumerate(items):
             session.add(
@@ -265,10 +313,11 @@ def mine_qa(
             )
         session.commit()
 
-    keep_flags = dedup_questions(
+    keep_flags, dedup_stats = dedup_questions_with_stats(
         [item.question for item in extracted_items],
         _existing_questions(session),
         embedder,
+        threshold=threshold,
     )
     kept = sum(keep_flags)
     discarded = len(keep_flags) - kept
@@ -281,6 +330,9 @@ def mine_qa(
             discarded=discarded,
             inserted=0,
             vectorized=0,
+            exact_discarded=dedup_stats.exact_discarded,
+            approximate_discarded=dedup_stats.approximate_discarded,
+            batch_details=tuple(batch_details),
         )
 
     rows: list[QaExtractionStaging] = []
@@ -329,6 +381,9 @@ def mine_qa(
         discarded=discarded,
         inserted=inserted,
         vectorized=vectorized,
+        exact_discarded=dedup_stats.exact_discarded,
+        approximate_discarded=dedup_stats.approximate_discarded,
+        batch_details=tuple(batch_details),
     )
 
 
@@ -406,14 +461,23 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             dry_run=args.dry_run,
             do_vectorize=do_vectorize,
+            threshold=settings.qa_dedup_threshold,
         )
     finally:
         session.close()
 
+    for detail in report.batch_details:
+        print(
+            "mine_qa: "
+            f"batch={detail.batch_no or '-'} "
+            f"conversations={detail.conversations} extracted={detail.extracted}"
+        )
     print(
         "mine_qa: "
         f"batches={report.batches} extracted={report.extracted} "
         f"kept={report.kept} discarded={report.discarded} "
+        f"exact_discarded={report.exact_discarded} "
+        f"approximate_discarded={report.approximate_discarded} "
         f"inserted={report.inserted} vectorized={report.vectorized}"
     )
     return 0

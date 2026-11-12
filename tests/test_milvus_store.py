@@ -97,6 +97,23 @@ def test_ensure_creates_schema_index_and_loads():
     assert c.loaded == ["knowledge"]
 
 
+def test_ensure_loads_existing_collection_and_caches_state():
+    c = FakeClient()
+    c.collection_exists = True
+    s = KnowledgeVectorStore(c, "knowledge", 1024)
+
+    s.ensure_collection()
+    assert c.create_calls == []
+    assert c.loaded == ["knowledge"]
+
+    # A second call must not issue any RPC: the ensured state is cached.
+    c.has_collection_calls = 0
+    c.loaded.clear()
+    s.ensure_collection()
+    assert c.has_collection_calls == 0
+    assert c.loaded == []
+
+
 def test_ensure_collection_is_idempotent_when_present():
     c = FakeClient()
     s = KnowledgeVectorStore(c, "knowledge", 1024)
@@ -107,7 +124,7 @@ def test_ensure_collection_is_idempotent_when_present():
     c.loaded.clear()
     s.ensure_collection()
 
-    assert c.has_collection_calls == 1
+    assert c.has_collection_calls == 0
     assert c.create_calls == []
     assert c.loaded == []
 
@@ -169,20 +186,18 @@ def test_search_skips_hits_without_chunk_id():
 
 
 def test_every_public_method_ensures_collection():
-    c = FakeClient()
-    s = KnowledgeVectorStore(c, "knowledge", 1024)
-
     calls = [
-        lambda: s.upsert([VectorItem("chunk_1", 1, [0.0] * 1024)]),
-        lambda: s.search([0.0] * 1024, 3),
-        lambda: s.delete_ids(["chunk_1"]),
-        lambda: s.count(),
+        lambda s: s.upsert([VectorItem("chunk_1", 1, [0.0] * 1024)]),
+        lambda s: s.search([0.0] * 1024, 3),
+        lambda s: s.delete_ids(["chunk_1"]),
+        lambda s: s.count(),
     ]
     for call in calls:
+        c = FakeClient()
+        s = KnowledgeVectorStore(c, "knowledge", 1024)
         c.has_collection_calls = 0
-        c.create_calls.clear()
         c.collection_exists = False
-        call()
+        call(s)
         assert c.has_collection_calls == 1
         assert len(c.create_calls) == 1
 

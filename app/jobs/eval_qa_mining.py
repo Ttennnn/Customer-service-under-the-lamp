@@ -17,7 +17,12 @@ import json
 from pathlib import Path
 
 from app.config import build_llm, get_settings
-from app.services.qa_mining import ConversationTranscript, extract_qa_batch
+from app.rag.embedding import get_embedder
+from app.services.qa_mining import (
+    ConversationTranscript,
+    dedup_questions,
+    extract_qa_batch,
+)
 
 _DEFAULT_SAMPLES = (
     Path(__file__).resolve().parents[2] / "tests" / "eval" / "qa_mining_samples.json"
@@ -78,6 +83,19 @@ def score_mining_case(case: dict, got: list) -> bool:
     return True
 
 
+def summarize_dedup(
+    candidates: list[str], embedder, threshold: float
+) -> tuple[int, int, list[bool]]:
+    """Run real dedup over *candidates* and return ``(kept, discarded, flags)``.
+
+    ``existing`` is empty because the eval measures within-sample duplicate
+    collapse, not collisions against production knowledge.
+    """
+    flags = dedup_questions(candidates, [], embedder, threshold=threshold)
+    kept = sum(flags)
+    return kept, len(flags) - kept, flags
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the annotated QA-mining evaluation set."
@@ -122,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
     passed = 0
     failed = 0
+    candidates: list[str] = []
     for number, sample in enumerate(samples, 1):
         source_ref = sample.get("source_ref", "")
         print(f"\n[{number}/{len(samples)}] source_ref={source_ref!r}")
@@ -139,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"Q: {_snippet(_value(item, 'question'))} | "
                 f"A: {_snippet(_value(item, 'answer'))}"
             )
+            candidates.append(str(_value(item, "question")))
         if not got:
             print("  (no QA pairs extracted)")
 
@@ -155,6 +175,40 @@ def main(argv: list[str] | None = None) -> int:
                     f"{expected.get('question_any')} "
                     f"answer_any={expected.get('answer_any')}"
                 )
+
+    print(f"\neval_qa_mining: extraction {passed} passed, {failed} failed")
+
+    # Run the real semantic dedup over every extracted candidate.  The
+    # annotated samples repeat several user questions, so dedup must collapse
+    # at least one candidate (kept < total); this exercises the 0.92 cosine
+    # path against the real BGE-M3 embedder, which extraction-only scoring
+    # never does.
+    threshold = settings.qa_dedup_threshold
+    total = len(candidates)
+    print(f"eval_qa_mining: dedup candidates={total} threshold={threshold}")
+    if total < 2:
+        print("  FAIL: expected at least two candidates to exercise dedup")
+        failed += 1
+    else:
+        try:
+            kept, discarded, flags = summarize_dedup(
+                candidates, get_embedder(), threshold
+            )
+        except Exception as exc:  # noqa: BLE001 - report embedder outages
+            print(f"  ERROR: {exc}")
+            print("  FAIL")
+            failed += 1
+        else:
+            for question, keep in zip(candidates, flags):
+                print(f"  {'KEEP' if keep else 'DROP'} Q: {_snippet(question)}")
+            print(
+                f"  kept={kept} discarded={discarded} of {total}"
+            )
+            if kept < total:
+                print("  PASS")
+            else:
+                print("  FAIL: no duplicate candidate was collapsed")
+                failed += 1
 
     print(f"\neval_qa_mining: {passed} passed, {failed} failed")
     return 0 if failed == 0 else 1

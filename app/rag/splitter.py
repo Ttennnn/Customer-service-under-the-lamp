@@ -351,11 +351,21 @@ def split_document(doc: Document, max_chars: int = 500, overlap_chars: int = 80)
     tables keep their header/separator in every row group and consecutive
     non-table chunks overlap by up to *overlap_chars*, starting at a
     sentence boundary. ``is_key_clause`` is recomputed for every chunk.
+
+    Within one document, an identical ``(category, questions, answer)`` triple
+    is emitted only once (first occurrence wins), so duplicate sections cannot
+    persist as two retrieval chunks with different ``section_path`` values.
     """
     max_chars = max(1, max_chars)
     overlap_chars = max(0, overlap_chars)
     chunks: list[Chunk] = []
+    seen: set[tuple[str, str, str]] = set()
     for path, answer in _extract_sections(doc.body):
         for piece in _split_section(answer, max_chars, overlap_chars):
-            chunks.append(_build_chunk(doc, path, piece))
+            chunk = _build_chunk(doc, path, piece)
+            key = (chunk.category, chunk.questions, chunk.answer)
+            if key in seen:
+                continue
+            seen.add(key)
+            chunks.append(chunk)
     return chunks

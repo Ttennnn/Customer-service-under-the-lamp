@@ -40,32 +40,42 @@ class KnowledgeVectorStore:
         self.client = client
         self.collection = collection
         self.dim = dim
+        self._ensured = False
 
     def ensure_collection(self) -> None:
-        """Create and load the collection when it does not exist yet."""
-        if self.client.has_collection(self.collection):
+        """Create the collection if needed and ensure it is loaded.
+
+        An existing collection is still loaded on the first call: Milvus
+        unloads collections on restart/release, and every search/upsert fails
+        until they are loaded again.  Loading is idempotent, and the result is
+        cached so steady-state queries do not pay an extra RPC.
+        """
+        if self._ensured:
             return
 
-        schema = self.client.create_schema()
-        schema.add_field(
-            "id", DataType.VARCHAR, is_primary=True, max_length=64
-        )
-        schema.add_field("chunk_id", DataType.INT64)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dim)
+        if not self.client.has_collection(self.collection):
+            schema = self.client.create_schema()
+            schema.add_field(
+                "id", DataType.VARCHAR, is_primary=True, max_length=64
+            )
+            schema.add_field("chunk_id", DataType.INT64)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dim)
 
-        index_params = self.client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector", index_type="FLAT", metric_type="COSINE"
-        )
+            index_params = self.client.prepare_index_params()
+            index_params.add_index(
+                field_name="vector", index_type="FLAT", metric_type="COSINE"
+            )
 
-        self.client.create_collection(
-            self.collection,
-            schema=schema,
-            index_params=index_params,
-            consistency_level="Strong",
-        )
+            self.client.create_collection(
+                self.collection,
+                schema=schema,
+                index_params=index_params,
+                consistency_level="Strong",
+            )
+
         if hasattr(self.client, "load_collection"):
             self.client.load_collection(self.collection)
+        self._ensured = True
 
     def upsert(self, items: list[VectorItem]) -> None:
         self.ensure_collection()

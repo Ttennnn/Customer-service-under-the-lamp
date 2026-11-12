@@ -66,7 +66,7 @@
 
 - 用真实 key 调 `POST /v1/embeddings`,`model=BAAI/bge-m3`,一次 3 条数组输入,HTTP 200。
 - 返回 3 条向量,维度均为 **1024**;`usage.prompt_tokens=59`。
-- 中文相似度量级:「邮费是多少」vs 运费说明 **0.7037**,vs 退货政策 **0.4665**。0.35 是保守起点,最终阈值以评估集校准(很可能落在 0.5 附近)。
+- 中文相似度量级:「邮费是多少」vs 运费说明 **0.7037**,vs 退货政策 **0.4665**。早期以 0.35 作为保守起点,Task 15 用评估集校准后正式默认值定为 **0.5**。
 - 结论:eval/验收可以用真实云端嵌入,不需要 fake 兜底;`EMBEDDING_API_KEY` 只写本地 `.env`,不进仓库。
 
 ## 表结构(用户提供,权威)
@@ -243,7 +243,7 @@ def query_faq(keyword: str) -> str:
 
 1. `keyword` 经同一个 EmbeddingClient 向量化。
 2. Milvus `search` top_k(默认 3),`metric_type="COSINE"`,`output_fields=["chunk_id"]`。
-3. 过滤 `distance < FAQ_SCORE_THRESHOLD`(默认 0.35,最终以评估集校准结果为准)。
+3. 过滤 `distance < FAQ_SCORE_THRESHOLD`(默认 0.5,Task 15 用评估集校准后的正式值;早期默认 0.35)。
 4. 按 `chunk_id` 到 MySQL 取 `questions`、`answer`,保持 Milvus 相似度顺序。
 5. 返回 `"\n\n".join(f"问:{row.questions}\n答:{row.answer}")`;多条问题按原样换行。
 6. 无命中返回原文案:`"未找到相关问题,请换个关键词再试试。"`
@@ -319,7 +319,7 @@ MILVUS_URI=http://localhost:19530
 MILVUS_COLLECTION=knowledge
 
 FAQ_TOP_K=3
-FAQ_SCORE_THRESHOLD=0.35
+FAQ_SCORE_THRESHOLD=0.5
 
 KNOWLEDGE_DOCS_DIR=knowledge
 CHUNK_MAX_CHARS=500
@@ -389,7 +389,7 @@ tests/eval/qa_mining_samples.json   # 挖掘标注样例
 4. **主键映射**:Milvus 主键 `chunk_{MySQL id}`,`upsert` 幂等;Milvus 只存 `id/chunk_id/vector`,元数据全在 MySQL。
 5. **文档入库幂等**:内容指纹 `(content_type, section_path, category, questions, answer)`;改文档需 `--reset`。
 6. **Milvus 索引**:`FLAT` + `COSINE`;小库精确检索,规模上来再换 HNSW/IVF_FLAT。
-7. **检索参数**:Top-3、阈值 0.35 起步,以评估集校准;未命中话术沿用第二章。
+7. **检索参数**:Top-3、阈值 0.5(Task 15 以评估集校准,早期 0.35 起步);未命中话术沿用第二章。
 8. **挖矿去重**:归一化精确去重 + 余弦 0.92 近似去重,保留最早一条;与既有 `knowledge_chunks` 一并去重。
 9. **挖矿 category**:固定枚举 `售后/物流/支付/商品/其他`,非法值归 `其他`。
 10. **任务形态**:三个独立命令(`build_knowledge` / `mine_qa` / `vectorize`),不挂调度器;部署与触发由使用方决定。

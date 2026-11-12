@@ -4,7 +4,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import Conversation, KnowledgeChunk, Message, QaExtractionStaging
-from app.jobs.mine_qa import load_transcripts, mine_qa
+from app.jobs import mine_qa as mine_qa_module
+from app.jobs.mine_qa import (
+    MAX_TRANSCRIPT_MESSAGES,
+    _truncate_messages,
+    load_transcripts,
+    mine_qa,
+)
 
 
 class FakeLLM:
@@ -20,6 +26,23 @@ class FakeLLM:
                 return schema(items=[
                     {"question": "邮费是多少", "answer": "满99包邮", "category": "物流"},
                     {"question": "邮费是多少?", "answer": "满99包邮", "category": "物流"},
+                ])
+
+        return S()
+
+
+class FakeSemanticLLM(FakeLLM):
+    """Two non-identical questions that the fake embedder maps together."""
+
+    def with_structured_output(self, schema, method=None):
+        llm = self
+
+        class S:
+            def invoke(self, messages):
+                llm.calls += 1
+                return schema(items=[
+                    {"question": "邮费是多少", "answer": "满99包邮", "category": "物流"},
+                    {"question": "邮费怎么算", "answer": "满99包邮", "category": "物流"},
                 ])
 
         return S()
@@ -90,6 +113,75 @@ def test_stale_extracted_rows_are_cleared_before_re_extract(session):
 
 
 # --- supplementary contract tests ---
+
+def test_non_default_dedup_threshold_is_forwarded(session, monkeypatch):
+    _conv(session, "u")
+    seen = []
+    real = mine_qa_module.dedup_questions_with_stats
+
+    def spy(candidates, existing, embedder, threshold=0.92):
+        seen.append(threshold)
+        return real(candidates, existing, embedder, threshold=threshold)
+
+    monkeypatch.setattr(mine_qa_module, "dedup_questions_with_stats", spy)
+    mine_qa(session, FakeLLM(), FakeEmbedder(), FakeStore(), threshold=0.42)
+    assert seen == [0.42]
+
+
+def test_truncate_messages_keeps_head_and_tail():
+    messages = [
+        ("user" if index % 2 == 0 else "assistant", f"m{index}")
+        for index in range(60)
+    ]
+    truncated = _truncate_messages(messages, max_messages=10)
+    assert truncated == messages[:5] + messages[-5:]
+    assert _truncate_messages(messages[:10], max_messages=10) == messages[:10]
+
+
+def test_load_transcripts_truncates_overlong_conversation(session):
+    turns = [
+        ("user" if index % 2 == 0 else "assistant", f"m{index}")
+        for index in range(60)
+    ]
+    c = _conv(session, "long", turns=turns)
+
+    (transcript,) = load_transcripts(session)
+    assert transcript.source_ref == str(c.id)
+    assert len(transcript.messages) == MAX_TRANSCRIPT_MESSAGES
+    assert transcript.messages[0] == ("user", "m0")
+    assert transcript.messages[-1] == ("assistant", "m59")
+    assert ("user", "m30") not in transcript.messages
+
+
+def test_report_exposes_per_batch_and_exact_discard_counts(session):
+    _conv(session, "u1")
+    _conv(session, "u2")
+
+    report = mine_qa(
+        session, FakeLLM(), FakeEmbedder(), FakeStore(), batch_size=1, do_vectorize=False
+    )
+    assert [(d.conversations, d.extracted) for d in report.batch_details] == [
+        (1, 2),
+        (1, 2),
+    ]
+    assert all(d.batch_no for d in report.batch_details)
+    assert report.extracted == 4
+    assert report.kept == 1
+    # Candidates 2-4 collide exactly with the first normalised question.
+    assert report.exact_discarded == 3
+    assert report.approximate_discarded == 0
+
+
+def test_report_counts_approximate_discards(session):
+    _conv(session, "u")
+
+    report = mine_qa(
+        session, FakeSemanticLLM(), FakeEmbedder(), FakeStore(), do_vectorize=False
+    )
+    assert report.extracted == 2 and report.kept == 1
+    assert report.exact_discarded == 0
+    assert report.approximate_discarded == 1
+
 
 def test_load_transcripts_requires_user_and_assistant_content(session):
     _conv(session, "only-user", turns=[("user", "问")])
@@ -224,7 +316,9 @@ def _wire_cli(monkeypatch, session, *, store=None):
         store = FakeStore()
     llm = FakeLLM()
     monkeypatch.setattr(
-        job, "get_settings", lambda: SimpleNamespace(qa_mining_batch_size=7)
+        job,
+        "get_settings",
+        lambda: SimpleNamespace(qa_mining_batch_size=7, qa_dedup_threshold=0.92),
     )
     monkeypatch.setattr(job, "build_llm", lambda settings: llm)
     monkeypatch.setattr(job, "get_embedder", lambda: FakeEmbedder())
@@ -240,6 +334,8 @@ def test_cli_mines_with_limit_and_no_vectorize(session, monkeypatch, capsys):
     assert job.main(["--limit", "1", "--batch-size", "1", "--no-vectorize"]) == 0
     out = capsys.readouterr().out
     assert "batches=1" in out and "extracted=2" in out and "vectorized=0" in out
+    assert "conversations=1 extracted=2" in out
+    assert "exact_discarded=1" in out and "approximate_discarded=0" in out
     session.expire_all()
     assert session.query(QaExtractionStaging).count() == 2
     assert (
@@ -248,6 +344,26 @@ def test_cli_mines_with_limit_and_no_vectorize(session, monkeypatch, capsys):
         .count()
         == 1
     )
+
+
+def test_cli_forwards_configured_dedup_threshold(session, monkeypatch):
+    _conv(session, "u")
+    job, _ = _wire_cli(monkeypatch, session)
+    monkeypatch.setattr(
+        job,
+        "get_settings",
+        lambda: SimpleNamespace(qa_mining_batch_size=7, qa_dedup_threshold=0.55),
+    )
+    seen = []
+    real = job.dedup_questions_with_stats
+
+    def spy(candidates, existing, embedder, threshold=0.92):
+        seen.append(threshold)
+        return real(candidates, existing, embedder, threshold=threshold)
+
+    monkeypatch.setattr(job, "dedup_questions_with_stats", spy)
+    assert job.main(["--dry-run", "--force"]) == 0
+    assert seen == [0.55]
 
 
 def test_cli_dry_run_never_touches_store_or_database(session, monkeypatch, capsys):

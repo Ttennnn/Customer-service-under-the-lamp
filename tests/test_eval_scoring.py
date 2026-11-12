@@ -1,6 +1,6 @@
 """Pure scoring-helper tests for the evaluation harness (no network)."""
 
-from app.jobs.eval_qa_mining import score_mining_case
+from app.jobs.eval_qa_mining import score_mining_case, summarize_dedup
 from app.jobs.eval_retrieval import score_faq_case
 from app.rag.retrieval import RetrievedChunk
 from app.services.qa_mining import ExtractedQA
@@ -66,6 +66,21 @@ def test_score_mining_case_does_not_cross_match_items():
     assert not score_mining_case(
         {"expected": [{"question_any": ["发票"], "answer_any": ["1-3"]}]}, got
     )
+
+
+class _SameVectorEmbedder:
+    def embed(self, texts):
+        return [[1.0] + [0.0] * 1023 for _ in texts]
+
+
+def test_summarize_dedup_collapses_exact_and_approximate_duplicates():
+    kept, discarded, flags = summarize_dedup(
+        ["邮费是多少", "邮费是多少?", "邮费怎么算"],
+        _SameVectorEmbedder(),
+        0.92,
+    )
+    assert (kept, discarded) == (1, 2)
+    assert flags == [True, False, False]
 
 
 def test_score_mining_case_accepts_a_single_expected_item():

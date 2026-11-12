@@ -67,3 +67,20 @@ def test_faq_regex_not_key_clause(tmp_path):
     (c,) = split_document(d)
     assert c.is_key_clause is False
     assert c.content_type == "faq"
+
+
+def test_identical_triple_within_document_keeps_first_only(tmp_path):
+    d = _doc(
+        tmp_path,
+        "# FAQ\n\n"
+        "## 可以退货吗?\n\n签收后 7 天内可退。\n\n"
+        "## 可以退货吗?\n\n签收后 7 天内可退。\n\n"
+        "## 可以换货吗?\n\n签收后 7 天内可换。\n",
+        "faq",
+        "售后",
+    )
+    chunks = split_document(d)
+    assert [(c.category, c.questions, c.answer) for c in chunks] == [
+        ("售后", "可以退货吗?", "签收后 7 天内可退。"),
+        ("售后", "可以换货吗?", "签收后 7 天内可换。"),
+    ]

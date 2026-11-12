@@ -127,18 +127,27 @@ def extract_qa_batch(llm, transcripts: list[ConversationTranscript]) -> list[Ext
     return extracted
 
 
-def dedup_questions(
+@dataclass(frozen=True)
+class DedupStats:
+    """How many candidates each dedup stage dropped."""
+
+    exact_discarded: int
+    approximate_discarded: int
+
+
+def dedup_questions_with_stats(
     candidates: list[str],
     existing: list[str],
     embedder,
     threshold: float = 0.92,
-) -> list[bool]:
-    """Return one keep/drop flag per candidate, in input order.
+) -> tuple[list[bool], DedupStats]:
+    """Return keep/drop flags plus exact/approximate discard counts.
 
-    A candidate is dropped when its normalised text matches an existing
-    question or an earlier kept candidate exactly; surviving candidates are
-    then embedded and dropped when their cosine similarity reaches
-    ``threshold`` against any existing question or already-kept candidate.
+    A candidate is dropped *exactly* when it is blank or its normalised text
+    matches an existing question or an earlier kept candidate; surviving
+    candidates are then embedded and dropped *approximately* when their cosine
+    similarity reaches ``threshold`` against any existing question or
+    already-kept candidate.
     """
     existing_texts = [q for q in existing if (q or "").strip()]
 
@@ -150,33 +159,52 @@ def dedup_questions(
 
     result = [False] * len(candidates)
     to_embed: list[int] = []
+    exact_discarded = 0
     for index, candidate in enumerate(candidates):
         norm = normalize_question(candidate)
         # Empty (punctuation-only / blank) questions are not storable knowledge.
         if not norm or norm in kept_norms:
+            exact_discarded += 1
             continue
         kept_norms.add(norm)
         to_embed.append(index)
 
-    if not to_embed:
-        return result
+    approximate_discarded = 0
+    if to_embed:
+        candidate_vectors = embedder.embed([candidates[i] for i in to_embed])
+        existing_vectors = embedder.embed(existing_texts) if existing_texts else []
+        if len(candidate_vectors) != len(to_embed):
+            raise ValueError(
+                f"embedder returned {len(candidate_vectors)} vectors for {len(to_embed)} candidates"
+            )
+        if len(existing_vectors) != len(existing_texts):
+            raise ValueError(
+                f"embedder returned {len(existing_vectors)} vectors for {len(existing_texts)} existing questions"
+            )
 
-    candidate_vectors = embedder.embed([candidates[i] for i in to_embed])
-    existing_vectors = embedder.embed(existing_texts) if existing_texts else []
-    if len(candidate_vectors) != len(to_embed):
-        raise ValueError(
-            f"embedder returned {len(candidate_vectors)} vectors for {len(to_embed)} candidates"
-        )
-    if len(existing_vectors) != len(existing_texts):
-        raise ValueError(
-            f"embedder returned {len(existing_vectors)} vectors for {len(existing_texts)} existing questions"
-        )
+        kept_vectors: list[list[float]] = [list(vector) for vector in existing_vectors]
+        for index, vector in zip(to_embed, candidate_vectors):
+            if any(_cosine(vector, kept) >= threshold for kept in kept_vectors):
+                approximate_discarded += 1
+                continue
+            result[index] = True
+            kept_vectors.append(list(vector))
 
-    kept_vectors: list[list[float]] = [list(vector) for vector in existing_vectors]
-    for index, vector in zip(to_embed, candidate_vectors):
-        if any(_cosine(vector, kept) >= threshold for kept in kept_vectors):
-            continue
-        result[index] = True
-        kept_vectors.append(list(vector))
+    return result, DedupStats(exact_discarded, approximate_discarded)
 
-    return result
+
+def dedup_questions(
+    candidates: list[str],
+    existing: list[str],
+    embedder,
+    threshold: float = 0.92,
+) -> list[bool]:
+    """Return one keep/drop flag per candidate, in input order.
+
+    Thin wrapper over :func:`dedup_questions_with_stats`; callers that also
+    need exact/approximate counts should use the latter directly.
+    """
+    keep_flags, _ = dedup_questions_with_stats(
+        candidates, existing, embedder, threshold=threshold
+    )
+    return keep_flags
