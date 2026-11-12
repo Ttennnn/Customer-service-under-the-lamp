@@ -90,7 +90,7 @@ tests/
 
 **Interfaces:**
 - Produces:
-  - `app.config.Settings.database_url: str`(新增字段,读 `DATABASE_URL`,格式 `mysql+pymysql://<user>:<pass>@<host>:<port>/<db>?charset=utf8mb4`)
+  - `app.config.Settings.database_url: str`(新增字段,读 `DATABASE_URL`,默认 `mysql+pymysql://root:root@localhost:3306/cs_customer?charset=utf8mb4`,可被 `DATABASE_URL` 覆盖;给默认值以免破坏 ch01 的 `Settings()` 测试)
   - `app.db.base.Base(DeclarativeBase)`
   - `app.db.session.get_engine() -> Engine`(懒加载,`create_engine(get_settings().database_url, pool_pre_ping=True)`)
   - `app.db.session.get_session_factory() -> sessionmaker`(懒加载,`sessionmaker(bind=get_engine(), autoflush=False, expire_on_commit=False)`)
@@ -251,7 +251,7 @@ Expected: 第一次 FAIL(`FAQ_SEED`/`seed_faq` 未定义,或 `session` fixture �
 
 - [ ] **Step 3: 实现 `app/db/seed.py`**
 
-`FAQ_SEED` 提供 4~6 条真实问答(退货政策、换货、退款到账、物流时效、发货时间等),刻意不含「邮费」。`seed_faq` 用 `session.add_all([Faq(**r) for r in FAQ_SEED])` 后 `flush` 返回条数。`tests/conftest.py` 提供 `session` fixture:SQLite 内存引擎(`create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)`)+ `Base.metadata.create_all` + 一个 `Session`,并把 `app.db.session.get_session_factory` monkeypatch 成该引擎的 sessionmaker(供工具在子线程内共享同一内存库)。
+`FAQ_SEED` 提供 4~6 条真实问答(退货政策、换货、退款到账、物流时效、发货时间等),刻意不含「邮费」。`seed_faq` 用 `session.add_all([Faq(**r) for r in FAQ_SEED])` 后 `flush` 返回条数。`tests/conftest.py` 提供 `session` fixture:SQLite 文件库(`create_engine(f"sqlite:///{tmp_path}/test.db", connect_args={"check_same_thread": False})`,用文件库避免内存库 `StaticPool` 单连接在工具子线程/跨会话时的共享连接冲突)+ `Base.metadata.create_all` + 一个 `Session`,并把 `app.db.session.get_session_factory` monkeypatch 成该引擎的 sessionmaker(供工具在其自己的会话/子线程里访问同一库)。
 
 - [ ] **Step 4: 运行确认通过** → `pytest tests/test_seed.py -v` → PASS
 
@@ -295,11 +295,11 @@ def test_query_logistics_has_node():
     assert data["order_id"] == "1001"
     assert set(data) >= {"logistics_no", "carrier", "current_node", "traces"}
 
-def test_registry_has_five_tools():
+def test_registry_has_three_business_tools_and_five_labels():
     from app.tools.registry import ALL_TOOLS, TOOLS_BY_NAME, TOOL_LABELS
-    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
+    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics"]
     assert set(TOOLS_BY_NAME) == {t.name for t in ALL_TOOLS}
-    assert TOOL_LABELS["query_faq"] == "查常见问题"
+    assert set(TOOL_LABELS) == {"query_order", "query_product", "query_logistics", "query_faq", "create_ticket"}
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -400,6 +400,10 @@ def test_create_ticket_without_context_errors(session):
     current_conversation_id.set(None)
     out = create_ticket.invoke({"description": "x", "ticket_type": "咨询"}).content
     assert "失败" in out or "错误" in out
+
+def test_registry_has_five_tools():
+    from app.tools.registry import ALL_TOOLS
+    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
 ```
 
 - [ ] **Step 2: 运行确认失败** → `pytest tests/test_tools_ticket.py -v` → FAIL
@@ -423,7 +427,7 @@ def test_create_ticket_without_context_errors(session):
 **Interfaces:**
 - Consumes: 任意 `BaseTool`(含 Task 4/5/6 工具)
 - Produces:
-  - `app.tools.executor.execute_tool(tool: BaseTool, args: dict, timeout_s: float = 5, retries: int = 1) -> str`:先用 `tool.args_schema` 校验参数(非法返回错误串)→ 在子线程(`concurrent.futures.ThreadPoolExecutor`)执行 `tool.invoke(args)` 并取 `.content` → 超时/异常重试 `retries` 次 → 仍失败返回「工具执行失败」串。任何路径都返回 `str`,不抛异常。
+  - `app.tools.executor.execute_tool(tool: BaseTool, args: dict, timeout_s: float = 5, retries: int = 1) -> str`:先用 `tool.args_schema` 校验参数(非法返回错误串)→ 在 daemon 子线程执行 `tool.invoke(args)` 并取 `.content` → 超时/异常重试 `retries` 次 → 仍失败返回「工具执行失败」串。任何路径都返回 `str`,不抛异常。
 
 - [ ] **Step 1: 写失败的测试(用假工具)**
 
@@ -467,7 +471,7 @@ def test_execute_exception_returns_error():
 
 - [ ] **Step 3: 实现 `execute_tool`**
 
-参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 `ThreadPoolExecutor.submit` + `future.result(timeout=timeout_s)`,捕获 `TimeoutError`/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 的返回类型(`ToolMessage`,取 `.content`)。
+参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 daemon 线程(`threading.Thread(daemon=True)` + `queue.Queue`,`queue.get(timeout=timeout_s)`),避免超时后非 daemon 线程池阻塞进程退出;捕获 `queue.Empty`(超时)/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 的返回类型(`ToolMessage`,取 `.content`)。
 
 - [ ] **Step 4: 运行确认通过** → `pytest tests/test_executor.py -v` → PASS
 
@@ -537,13 +541,25 @@ def test_build_messages_keeps_tool_round_atomic():
     hist = [
         HumanMessage(content="old"),
         AIMessage(content="", tool_calls=[{"name": "query_order", "args": {}, "id": "c1"}]),
+        ToolMessage(content="X" * 20, tool_call_id="c1"),
+        AIMessage(content="answer"),
+    ]
+    msgs = build_messages(system, hist, HumanMessage(content="now"), max_tokens=30)
+    # 只裁掉最旧的 HumanMessage("old"),tool_calls+tool 对作为一块保留
+    names = [type(m).__name__ for m in msgs]
+    assert names == ["SystemMessage", "AIMessage", "ToolMessage", "AIMessage", "HumanMessage"]
+
+def test_build_messages_drops_tool_round_atomically():
+    system = SystemMessage(content="S")
+    hist = [
+        AIMessage(content="", tool_calls=[{"name": "query_order", "args": {}, "id": "c1"}]),
         ToolMessage(content="X" * 100, tool_call_id="c1"),
         AIMessage(content="answer"),
     ]
     msgs = build_messages(system, hist, HumanMessage(content="now"), max_tokens=30)
-    # 最旧的 HumanMessage("old") 被整块裁掉,但 tool_calls+tool 对必须同存同弃
+    # tool 结果太大 → tool_calls 与其 tool 结果整块丢弃,不能只丢一半留下孤儿 ToolMessage
     names = [type(m).__name__ for m in msgs]
-    assert names == ["SystemMessage", "AIMessage", "ToolMessage", "AIMessage", "HumanMessage"]
+    assert names == ["SystemMessage", "AIMessage", "HumanMessage"]
 ```
 
 - [ ] **Step 2: 运行确认失败** → `pytest tests/test_history.py tests/test_context.py -v` → FAIL
