@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {"query": "邮费是多少", "expect_hit": true, "expect_any": ["包邮", "运费", "8 元"]},
+    {"query": "退货运费谁承担", "expect_hit": true, "expect_any": ["商家承担", "买家承担"]},
+    {"query": "几天能退款", "expect_hit": true, "expect_any": ["1-3", "1 到 3", "工作日"]},
+    {"query": "怎么开发票", "expect_hit": true, "expect_any": ["发票"]},
+    {"query": "尺码怎么选", "expect_hit": true, "expect_any": ["尺码", "脚长"]},
+    {"query": "你们老板是谁", "expect_hit": false}
+  ]
+}
