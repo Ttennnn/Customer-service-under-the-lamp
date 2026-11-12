@@ -2,29 +2,28 @@
 
 集中登记客服机器人可用的业务工具,供后续 Agent / 路由统一查找。
 
-当前只收录三个已实现的 mock 业务工具;Task 5/6 落地后会把
-``query_faq`` 与 ``create_ticket`` 依次追加进 ``ALL_TOOLS``,
-保持最终顺序 ``["query_order", "query_product", "query_logistics",
-"query_faq", "create_ticket"]``。
+当前已收录五个业务工具,最终顺序为 ``["query_order", "query_product",
+"query_logistics", "query_faq", "create_ticket"]``。
 """
 
 from langchain_core.tools import BaseTool
 
 from app.tools.business import query_logistics, query_order, query_product
 from app.tools.faq import query_faq
+from app.tools.ticket import create_ticket
 
-# 已实现的业务工具,按最终注册顺序排列(Task 6 追加 create_ticket)。
+# 已实现的业务工具,按最终注册顺序排列。
 ALL_TOOLS: list[BaseTool] = [
     query_order,
     query_product,
     query_logistics,
     query_faq,
+    create_ticket,
 ]
 
 TOOLS_BY_NAME: dict[str, BaseTool] = {t.name: t for t in ALL_TOOLS}
 
-# 五个工具的展示名(仅为中文标签字符串,不包含工具对象;
-# query_faq / create_ticket 由 Task 5/6 补齐)。
+# 五个工具的展示名(仅为中文标签字符串,不包含工具对象)。
 TOOL_LABELS: dict[str, str] = {
     "query_order": "查订单",
     "query_product": "查商品",
