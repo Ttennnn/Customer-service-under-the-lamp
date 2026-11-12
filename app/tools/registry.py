@@ -11,9 +11,15 @@
 from langchain_core.tools import BaseTool
 
 from app.tools.business import query_logistics, query_order, query_product
+from app.tools.faq import query_faq
 
-# 三个 mock 业务工具,按最终注册顺序排列。
-ALL_TOOLS: list[BaseTool] = [query_order, query_product, query_logistics]
+# 已实现的业务工具,按最终注册顺序排列(Task 6 追加 create_ticket)。
+ALL_TOOLS: list[BaseTool] = [
+    query_order,
+    query_product,
+    query_logistics,
+    query_faq,
+]
 
 TOOLS_BY_NAME: dict[str, BaseTool] = {t.name: t for t in ALL_TOOLS}
 
