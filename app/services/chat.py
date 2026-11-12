@@ -3,14 +3,19 @@
 ``stream_chat`` wires the pieces from earlier tasks together:
 
 1. Resolve (or create) the active conversation for ``user_id``.
-2. Set the ``current_conversation_id`` contextvar so tools like
-   ``create_ticket`` can read it (the executor propagates it into its
-   worker thread via ``copy_context``).
-3. Rebuild history, assemble the prompt within the token budget, and
+2. Rebuild history, assemble the prompt within the token budget, and
    persist the user turn before hitting the model.
-4. Bind tools and ask the model once. If it emits tool calls, execute them,
+3. Bind tools and ask the model once. If it emits tool calls, execute them,
    persist the tool round, feed the results back, and stream the final
    answer. Single round only — no looping.
+
+``current_conversation_id`` is a thread-local ``ContextVar``. Starlette's
+``EventSourceResponse`` iterates this generator via ``iterate_in_threadpool``,
+which may call ``next()`` on a different thread each time, so the contextvar
+must be set on the SAME thread that calls ``execute_tool`` (immediately before
+it, with no ``yield`` in between) rather than once at the top of the
+generator. It is intentionally not reset: each tool call re-sets it, and a
+cross-thread ``reset`` would raise ``ValueError``.
 """
 
 import json
@@ -49,63 +54,61 @@ def stream_chat(
     conversation = get_or_create_conversation(session, user_id)
     cid = conversation.id
 
-    token = current_conversation_id.set(cid)
-    try:
-        history = load_history(session, cid)
-        messages = build_messages(
-            SystemMessage(content=system_prompt),
-            history,
-            HumanMessage(content=message),
-            max_tokens,
-        )
-        append_message(session, cid, "user", message)
-        session.commit()
+    history = load_history(session, cid)
+    messages = build_messages(
+        SystemMessage(content=system_prompt),
+        history,
+        HumanMessage(content=message),
+        max_tokens,
+    )
+    append_message(session, cid, "user", message)
+    session.commit()
 
-        bound = llm.bind_tools(tools)
-        ai_msg = bound.invoke(messages)
+    bound = llm.bind_tools(tools)
+    ai_msg = bound.invoke(messages)
 
-        if not getattr(ai_msg, "tool_calls", None):
-            full = ""
-            for chunk in llm.stream(messages):
-                text = getattr(chunk, "content", None) or ""
-                if text:
-                    full += text
-                    yield text
-            append_message(session, cid, "assistant", full)
-            session.commit()
-            return
-
-        append_message(session, cid, "assistant", tool_calls=ai_msg.tool_calls)
-        tool_messages: list[ToolMessage] = []
-        for tc in ai_msg.tool_calls:
-            yield json.dumps(
-                {"type": "tool", "tool": tc["name"], "label": TOOL_LABELS[tc["name"]]},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            result = execute_tool(TOOLS_BY_NAME[tc["name"]], tc["args"])
-            append_message(session, cid, "tool", result, tool_call_id=tc["id"])
-            tool_messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
-
-        final_messages = [*messages, ai_msg, *tool_messages]
-        final_full = ""
-        final_tool_calls: list = []
-        for chunk in bound.stream(final_messages):
+    if not getattr(ai_msg, "tool_calls", None):
+        full = ""
+        for chunk in llm.stream(messages):
             text = getattr(chunk, "content", None) or ""
             if text:
-                final_full += text
+                full += text
                 yield text
-            tcs = getattr(chunk, "tool_calls", None)
-            if tcs:
-                final_tool_calls.extend(tcs)
-
-        # Single-round only: if the model wanted another tool round and said
-        # nothing, emit a fallback rather than looping.
-        if not final_full and final_tool_calls:
-            yield _FALLBACK_TEXT
-            final_full = _FALLBACK_TEXT
-
-        append_message(session, cid, "assistant", final_full)
+        append_message(session, cid, "assistant", full)
         session.commit()
-    finally:
-        current_conversation_id.reset(token)
+        return
+
+    append_message(session, cid, "assistant", tool_calls=ai_msg.tool_calls)
+    session.commit()
+    tool_messages: list[ToolMessage] = []
+    for tc in ai_msg.tool_calls:
+        yield json.dumps(
+            {"type": "tool", "tool": tc["name"], "label": TOOL_LABELS[tc["name"]]},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        current_conversation_id.set(cid)
+        result = execute_tool(TOOLS_BY_NAME[tc["name"]], tc["args"])
+        append_message(session, cid, "tool", result, tool_call_id=tc["id"])
+        tool_messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+
+    final_messages = [*messages, ai_msg, *tool_messages]
+    final_full = ""
+    final_tool_calls: list = []
+    for chunk in bound.stream(final_messages):
+        text = getattr(chunk, "content", None) or ""
+        if text:
+            final_full += text
+            yield text
+        tcs = getattr(chunk, "tool_calls", None)
+        if tcs:
+            final_tool_calls.extend(tcs)
+
+    # Single-round only: if the model wanted another tool round and said
+    # nothing, emit a fallback rather than looping.
+    if not final_full and final_tool_calls:
+        yield _FALLBACK_TEXT
+        final_full = _FALLBACK_TEXT
+
+    append_message(session, cid, "assistant", final_full)
+    session.commit()
