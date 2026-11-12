@@ -210,6 +210,74 @@ def test_cli_reset_all_with_yes_clears_everything(
     assert "documents=2" in out and "inserted=2" in out and "vectorized=0" in out
 
 
+def test_reset_with_missing_docs_dir_deletes_nothing(
+    session, tmp_path, monkeypatch, capsys
+):
+    d = _docs(tmp_path)
+    build_knowledge(session, d, FakeEmbedder(), FakeStore())
+    missing = tmp_path / "typo-dir"
+
+    from app.jobs import build_knowledge as job
+
+    monkeypatch.setattr(job, "get_settings", lambda: _settings(missing))
+    monkeypatch.setattr(
+        job, "get_session_factory", lambda: pytest.fail("must not open a session")
+    )
+    monkeypatch.setattr(
+        job, "get_vector_store", lambda: pytest.fail("must not touch Milvus")
+    )
+    monkeypatch.setattr(
+        job, "get_embedder", lambda: pytest.fail("must not embed")
+    )
+
+    assert job.main(["--docs-dir", str(missing), "--reset"]) == 1
+    err = capsys.readouterr().err
+    assert "not found" in err
+    assert session.query(KnowledgeChunk).count() == 2
+
+
+def test_reset_all_yes_with_empty_docs_dir_deletes_nothing(
+    session, tmp_path, monkeypatch, capsys
+):
+    d = _docs(tmp_path)
+    build_knowledge(session, d, FakeEmbedder(), FakeStore())
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    from app.jobs import build_knowledge as job
+
+    monkeypatch.setattr(job, "get_settings", lambda: _settings(empty))
+    monkeypatch.setattr(
+        job, "get_session_factory", lambda: pytest.fail("must not open a session")
+    )
+    monkeypatch.setattr(
+        job, "get_vector_store", lambda: pytest.fail("must not touch Milvus")
+    )
+    monkeypatch.setattr(
+        job, "get_embedder", lambda: pytest.fail("must not embed")
+    )
+
+    assert job.main(["--docs-dir", str(empty), "--reset-all", "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "no *.md" in err
+    assert session.query(KnowledgeChunk).count() == 2
+
+
+def test_parse_error_happens_before_reset(session, tmp_path):
+    d = _docs(tmp_path)
+    build_knowledge(session, d, FakeEmbedder(), FakeStore())
+    (d / "z_bad.md").write_text("missing frontmatter", encoding="utf-8")
+
+    store = FakeStore()
+    with pytest.raises(ValueError, match="missing frontmatter"):
+        build_knowledge(
+            session, d, FakeEmbedder(), store, reset=True, do_vectorize=False
+        )
+
+    assert store.deleted == []
+    assert session.query(KnowledgeChunk).count() == 2
+
+
 def test_vectorize_cli_processes_pending(session, tmp_path, monkeypatch, capsys):
     d = _docs(tmp_path)
     build_knowledge(

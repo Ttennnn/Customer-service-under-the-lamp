@@ -12,6 +12,7 @@ never link across document boundaries.
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,10 @@ DEFAULT_MAX_CHARS = 500
 DEFAULT_OVERLAP_CHARS = 80
 
 
+class CorpusError(ValueError):
+    """Raised when the docs directory is missing or contains no markdown."""
+
+
 @dataclass(frozen=True)
 class BuildReport:
     documents: int
@@ -40,6 +45,17 @@ class BuildReport:
     inserted: int
     reused: int
     vectorized: int
+
+
+def _validate_docs_dir(docs_dir: Path) -> None:
+    """Refuse destructive work when the corpus path is clearly unusable."""
+    if not docs_dir.is_dir():
+        raise CorpusError(f"knowledge docs directory not found: {docs_dir}")
+    if not any(docs_dir.glob("*.md")):
+        raise CorpusError(
+            f"no *.md knowledge documents found in {docs_dir}; "
+            "refusing to build or reset from an empty corpus"
+        )
 
 
 def build_knowledge(
@@ -59,13 +75,20 @@ def build_knowledge(
 
     ``reset_all`` wins over ``reset`` when both are true.  Each document's
     chunks are ingested as one batch so neighbor links stay document-local.
+
+    The whole corpus is validated and parsed *before* any reset runs: a typo
+    in ``docs_dir`` or a malformed document must never delete existing rows
+    and vectors that the run then fails to rebuild.
     """
+    docs_path = Path(docs_dir)
+    _validate_docs_dir(docs_path)
+    documents = load_documents(docs_path)
+
     if reset_all:
         reset_all_chunks(session, store)
     elif reset:
         reset_document_domain(session, store)
 
-    documents = load_documents(Path(docs_dir))
     chunk_count = 0
     inserted = 0
     reused = 0
@@ -158,6 +181,12 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = get_settings()
     docs_dir = Path(args.docs_dir or settings.knowledge_docs_dir)
+    try:
+        _validate_docs_dir(docs_dir)
+    except CorpusError as exc:
+        print(f"build_knowledge: error: {exc}", file=sys.stderr)
+        return 1
+
     max_chars = (
         args.max_chars if args.max_chars is not None else settings.chunk_max_chars
     )
@@ -188,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
             do_vectorize=do_vectorize,
             max_chunks=args.max_chunks,
         )
+    except CorpusError as exc:
+        # The corpus can disappear between validation and loading (TOCTOU).
+        print(f"build_knowledge: error: {exc}", file=sys.stderr)
+        return 1
     finally:
         session.close()
 
