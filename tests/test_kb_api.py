@@ -105,3 +105,152 @@ def test_build_returns_202_and_409(monkeypatch):
     r = TestClient(app).post("/kb/api/build")
     assert r.status_code == 409
     assert r.json() == {"detail": "a build is already running"}
+
+
+def _client(monkeypatch, tmp_path):
+    import app.api.kb as kb
+
+    monkeypatch.setattr(kb, "get_settings", lambda: _settings(tmp_path))
+    return TestClient(app)
+
+
+def test_upload_plain_md_injects_frontmatter(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("new.md", b"# New\n\nBody\n", "text/markdown")},
+        data={"content_type": "policy", "category": "售后"},
+    )
+    assert r.status_code == 200
+    saved = r.json()["saved"][0]
+    assert saved["content_type"] == "policy" and saved["name"] == "new.md"
+    p = tmp_path / "knowledge" / "uploads" / "new.md"
+    text = p.read_text(encoding="utf-8")
+    assert text.startswith("---\ncontent_type: policy\ncategory: 售后\n---")
+    assert p.read_bytes().startswith(
+        "---\ncontent_type: policy\ncategory: 售后\n---\n\n# New".encode()
+    )
+    from app.rag.docs import load_document
+
+    assert load_document(p).title == "New"
+
+
+def test_upload_existing_frontmatter_wins(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    body = "---\ncontent_type: faq\ncategory: 商品\n---\n# FAQ\n\n## 尺码怎么选?\n\n按脚长。\n"
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("faq.md", body.encode(), "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.json()["saved"][0]["content_type"] == "faq"
+
+
+def test_upload_rejects_bad_files(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    for name, data in [
+        ("a.txt", b"# A\n"),
+        ("bad.md", b"\xff\xfe"),
+        ("noh1.md", b"no heading\n"),
+    ]:
+        r = c.post(
+            "/kb/api/upload",
+            files={"files": (name, data, "text/markdown")},
+            data={"content_type": "policy"},
+        )
+        assert r.status_code == 200 and r.json()["saved"] == []
+    assert not any((tmp_path / "knowledge" / "uploads").glob("*.md"))
+
+
+def test_upload_rejects_path_traversal_and_invalid_type(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("../x.md", b"# X\n", "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.json()["saved"] == []
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("x.md", b"# X\n", "text/markdown")},
+        data={"content_type": "blog"},
+    )
+    assert r.status_code == 400
+
+
+def test_upload_rejects_oversized_file(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    data = b"# X\n" + b"x" * (2 * 1024 * 1024)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("big.md", data, "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.json()["saved"] == []
+    assert (
+        "2 MiB" in r.json()["rejected"][0]["reason"]
+        or "size" in r.json()["rejected"][0]["reason"].lower()
+    )
+
+
+def test_upload_rejects_too_many_files(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    files = [("files", (f"f{i}.md", b"# X\n", "text/markdown")) for i in range(21)]
+    r = c.post("/kb/api/upload", files=files, data={"content_type": "policy"})
+    assert r.status_code == 400
+
+
+def test_upload_rejects_newline_category(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("x.md", b"# X\n", "text/markdown")},
+        data={"content_type": "policy", "category": "a\nb"},
+    )
+    assert r.status_code == 400
+
+
+def test_upload_conflicts_with_running_build(monkeypatch, tmp_path):
+    import app.api.kb as kb
+
+    c = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(kb.kb_build, "is_running", lambda: True)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("x.md", b"# X\n", "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.status_code == 409
+
+
+def test_upload_accepts_bom_and_overwrites_same_name(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    first = "﻿# One\n\nfirst\n".encode("utf-8")
+    second = "# Two\n\nsecond\n"
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("same.md", first, "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.status_code == 200 and r.json()["saved"][0]["name"] == "same.md"
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("same.md", second.encode(), "text/markdown")},
+        data={"content_type": "manual"},
+    )
+    assert r.status_code == 200 and r.json()["saved"][0]["content_type"] == "manual"
+    text = (tmp_path / "knowledge" / "uploads" / "same.md").read_text(encoding="utf-8")
+    assert text.startswith("---\ncontent_type: manual\n---\n\n# Two\n")
+    assert "# One" not in text
+
+
+def test_upload_cleans_temp_file_on_validation_failure(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    r = c.post(
+        "/kb/api/upload",
+        files={"files": ("noh1.md", b"no heading\n", "text/markdown")},
+        data={"content_type": "policy"},
+    )
+    assert r.status_code == 200 and r.json()["saved"] == []
+    uploads = tmp_path / "knowledge" / "uploads"
+    assert list(uploads.glob(".tmp-*")) == []
