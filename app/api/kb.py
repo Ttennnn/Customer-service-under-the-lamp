@@ -1,8 +1,9 @@
-"""JSON endpoints backing the ``/kb`` knowledge-base page.
+"""JSON endpoints and page route backing the ``/kb`` knowledge-base UI.
 
-Only the data API lives here; the HTML page itself is served elsewhere.
-``/files`` lists the *effective* corpus (root seed + uploads, with uploads
-shadowing same-named seed files) so the page can show what a build will read.
+The page is a self-contained static HTML file served from ``app/static``; the
+``/kb/api/*`` endpoints below supply its data.  ``/files`` lists the *effective*
+corpus (root seed + uploads, with uploads shadowing same-named seed files) so
+the page can show what a build will read.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.db import session as db_session
@@ -22,11 +24,20 @@ from app.services import kb_build
 
 logger = logging.getLogger(__name__)
 
+page_router = APIRouter()
 api_router = APIRouter(prefix="/kb/api")
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_FILES = 20
 ALLOWED_CONTENT_TYPES = {"policy", "faq", "manual"}
+
+KB_PAGE = Path(__file__).resolve().parents[1] / "static" / "kb.html"
+
+
+@page_router.get("/kb", response_class=FileResponse)
+def kb_page() -> FileResponse:
+    """Serve the self-contained knowledge-entry page."""
+    return FileResponse(KB_PAGE, media_type="text/html")
 
 
 def has_frontmatter(text: str) -> bool:

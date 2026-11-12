@@ -244,6 +244,26 @@ def test_upload_accepts_bom_and_overwrites_same_name(monkeypatch, tmp_path):
     assert "# One" not in text
 
 
+def test_kb_page_is_served():
+    r = TestClient(app).get("/kb")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    for needle in [
+        "知识库录入",
+        'id="upload"',
+        'id="build"',
+        'id="status"',
+        "/kb/api/upload",
+        "/kb/api/build",
+        "/kb/api/status",
+        "/kb/api/files",
+        'accept=".md"',
+        "不要暴露公网",
+    ]:
+        assert needle in body
+
+
 def test_upload_cleans_temp_file_on_validation_failure(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     r = c.post(
