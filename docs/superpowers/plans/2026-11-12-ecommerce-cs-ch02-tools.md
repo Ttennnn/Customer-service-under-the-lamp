@@ -286,12 +286,12 @@ import json
 from app.tools.business import query_order, query_product, query_logistics
 
 def test_query_order_echoes_id():
-    data = json.loads(query_order.invoke({"order_id": "1001"}).content)
+    data = json.loads(query_order.invoke({"order_id": "1001"}))
     assert data["order_id"] == "1001"
     assert set(data) >= {"order_id", "items", "amount", "status"}
 
 def test_query_logistics_has_node():
-    data = json.loads(query_logistics.invoke({"order_id": "1001"}).content)
+    data = json.loads(query_logistics.invoke({"order_id": "1001"}))
     assert data["order_id"] == "1001"
     assert set(data) >= {"logistics_no", "carrier", "current_node", "traces"}
 
@@ -309,7 +309,7 @@ Expected: FAIL(模块缺失)。
 
 - [ ] **Step 3: 实现工具与注册表**
 
-实现前 Context7 查 `langchain.tools` 的 `@tool` 与 `.invoke(dict)` 返回(`ToolMessage`,取 `.content`)。mock 工具内部用 `random` 生成价格/库存/物流节点等字段,`order_id`/`product_name` 原样回显;`json.dumps(..., ensure_ascii=False)`。`registry.py` 汇总五个工具(name 固定为上述五个)。注意 Task 5/6 的工具尚未实现时,先让 `registry.py` 只 import 已存在的 business 三工具并留出占位,等 Task 5/6 落地后补齐 import(或本任务先以 `# noqa` 容忍缺失)。**为让测试可跑**,本任务 `registry.py` 先只导出 business 三工具 + 预留 `TOOL_LABELS` 五键;Task 5/6 完成后各自把新工具挂进 `ALL_TOOLS` 并补测试。
+实现前 Context7 查 `langchain.tools` 的 `@tool` 与 `.invoke(dict)` 返回(`str`,裸参数 dict 直接返回字符串,不带 `id` 不包装为 `ToolMessage`)。mock 工具内部用 `random` 生成价格/库存/物流节点等字段,`order_id`/`product_name` 原样回显;`json.dumps(..., ensure_ascii=False)`。`registry.py` 汇总五个工具(name 固定为上述五个)。注意 Task 5/6 的工具尚未实现时,先让 `registry.py` 只 import 已存在的 business 三工具并留出占位,等 Task 5/6 落地后补齐 import(或本任务先以 `# noqa` 容忍缺失)。**为让测试可跑**,本任务 `registry.py` 先只导出 business 三工具 + 预留 `TOOL_LABELS` 五键;Task 5/6 完成后各自把新工具挂进 `ALL_TOOLS` 并补测试。
 
 - [ ] **Step 4: 运行确认通过** → `pytest tests/test_tools_business.py -v` → PASS
 
@@ -338,12 +338,12 @@ from app.tools.faq import query_faq
 
 def test_query_faq_hits_return_policy(session):
     seed_faq(session); session.commit()
-    out = query_faq.invoke({"keyword": "退货"}).content
+    out = query_faq.invoke({"keyword": "退货"})
     assert "退货" in out
 
 def test_query_faq_misses_shipping(session):
     seed_faq(session); session.commit()
-    out = query_faq.invoke({"keyword": "邮费"}).content
+    out = query_faq.invoke({"keyword": "邮费"})
     assert "未找到" in out
 ```
 
@@ -389,7 +389,7 @@ def _make_conversation(session):
 def test_create_ticket_writes_and_archives(session):
     cid = _make_conversation(session)
     current_conversation_id.set(cid)
-    out = create_ticket.invoke({"description": "屏幕碎了", "ticket_type": "售后"}).content
+    out = create_ticket.invoke({"description": "屏幕碎了", "ticket_type": "售后"})
     session.expire_all()
     assert re.match(r"T\d{8}\d{3}", out)
     t = session.query(Ticket).one()
@@ -398,7 +398,7 @@ def test_create_ticket_writes_and_archives(session):
 
 def test_create_ticket_without_context_errors(session):
     current_conversation_id.set(None)
-    out = create_ticket.invoke({"description": "x", "ticket_type": "咨询"}).content
+    out = create_ticket.invoke({"description": "x", "ticket_type": "咨询"})
     assert "失败" in out or "错误" in out
 
 def test_registry_has_five_tools():
@@ -427,7 +427,7 @@ def test_registry_has_five_tools():
 **Interfaces:**
 - Consumes: 任意 `BaseTool`(含 Task 4/5/6 工具)
 - Produces:
-  - `app.tools.executor.execute_tool(tool: BaseTool, args: dict, timeout_s: float = 5, retries: int = 1) -> str`:先用 `tool.args_schema` 校验参数(非法返回错误串)→ 在 daemon 子线程执行 `tool.invoke(args)` 并取 `.content` → 超时/异常重试 `retries` 次 → 仍失败返回「工具执行失败」串。任何路径都返回 `str`,不抛异常。
+  - `app.tools.executor.execute_tool(tool: BaseTool, args: dict, timeout_s: float = 5, retries: int = 1) -> str`:先用 `tool.args_schema` 校验参数(非法返回错误串)→ 在 daemon 子线程执行 `tool.invoke(args)` 得 `str` 直接用(裸参数 dict → 返回字符串,不取 `.content`)→ 超时/异常重试 `retries` 次 → 仍失败返回「工具执行失败」串。任何路径都返回 `str`,不抛异常。
 
 - [ ] **Step 1: 写失败的测试(用假工具)**
 
@@ -471,7 +471,7 @@ def test_execute_exception_returns_error():
 
 - [ ] **Step 3: 实现 `execute_tool`**
 
-参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 daemon 线程(`threading.Thread(daemon=True)` + `queue.Queue`,`queue.get(timeout=timeout_s)`),避免超时后非 daemon 线程池阻塞进程退出;捕获 `queue.Empty`(超时)/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 的返回类型(`ToolMessage`,取 `.content`)。
+参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 daemon 线程(`threading.Thread(daemon=True)` + `queue.Queue`,`queue.get(timeout=timeout_s)`),避免超时后非 daemon 线程池阻塞进程退出;捕获 `queue.Empty`(超时)/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 对裸参数 dict 直接返回 `str`(langchain-core 1.x:不带 `id` 的 dict 不包装为 `ToolMessage`)。
 
 - [ ] **Step 4: 运行确认通过** → `pytest tests/test_executor.py -v` → PASS
 
