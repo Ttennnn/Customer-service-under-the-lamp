@@ -84,4 +84,6 @@ def load_history(session, conversation_id: int) -> list[BaseMessage]:
             messages.append(
                 ToolMessage(content=row.content or "", tool_call_id=row.tool_call_id)
             )
+        else:
+            raise ValueError(f"未知消息角色: {row.role!r}")
     return messages
