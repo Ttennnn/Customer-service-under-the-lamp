@@ -1,5 +1,5 @@
 interface HeaderProps {
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 export function Header({ onClose }: HeaderProps) {
@@ -22,26 +22,28 @@ export function Header({ onClose }: HeaderProps) {
           </div>
         </div>
       </div>
-      <button
-        onClick={onClose}
-        aria-label="关闭"
-        className="rounded-lg p-1.5 text-text-dim transition-colors hover:bg-surface hover:text-text"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
+      {onClose && (
+        <button
+          onClick={onClose}
+          aria-label="关闭"
+          className="rounded-lg p-1.5 text-text-dim transition-colors hover:bg-surface hover:text-text"
         >
-          <path
-            d="M4 4l8 8M12 4l-8 8"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 4l8 8M12 4l-8 8"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

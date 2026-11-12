@@ -35,5 +35,32 @@ body,
 
 body {
   margin: 0;
-  background: transparent;
+  color: #f2e9de;
+  /* 灯下:深暖棕打底 + 顶部一盏暖光往下晕 */
+  background-color: #120e0a;
+  background-image: radial-gradient(
+      ellipse 55% 40% at 50% -4%,
+      rgba(240, 183, 106, 0.14),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 80% 60% at 50% 50%,
+      rgba(240, 183, 106, 0.05),
+      transparent 72%
+    );
+  background-repeat: no-repeat;
+}
+
+/* 4:3 窗口,占页面 70%,同时保证高度不溢出 */
+.lamp-window {
+  aspect-ratio: 4 / 3;
+  width: min(70vw, calc(70vh * 4 / 3));
+}
+
+@media (max-width: 640px) {
+  .lamp-window {
+    aspect-ratio: auto;
+    width: 100%;
+    height: calc(100vh - 2rem);
+  }
 }

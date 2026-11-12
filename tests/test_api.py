@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
 from app.config import Settings, get_settings
-from app.main import app, get_llm_dep, get_store_dep
+from app.main import app, get_llm_dep
 from app.schemas import AfterSaleExtraction, AppealType
-from app.services.session import SessionStore
 
 
 class FakeChunk:
@@ -21,7 +21,18 @@ class FakeStructured:
         )
 
 
+class FakeBoundLLM:
+    def invoke(self, messages):
+        return AIMessage(content="")
+
+    def stream(self, messages):
+        yield FakeChunk("你")
+
+
 class FakeLLM:
+    def bind_tools(self, tools):
+        return FakeBoundLLM()
+
     def stream(self, messages):
         yield FakeChunk("你")
 
@@ -29,7 +40,18 @@ class FakeLLM:
         return FakeStructured()
 
 
+class RaisingBoundLLM:
+    def invoke(self, messages):
+        raise RuntimeError("upstream boom")
+
+    def stream(self, messages):
+        raise RuntimeError("upstream boom")
+
+
 class RaisingLLM:
+    def bind_tools(self, tools):
+        return RaisingBoundLLM()
+
     def stream(self, messages):
         raise RuntimeError("upstream boom")
 
@@ -38,10 +60,9 @@ class RaisingLLM:
 
 
 @pytest.fixture
-def client():
+def client(session):
     app.dependency_overrides[get_settings] = lambda: Settings(openai_api_key="test")
     app.dependency_overrides[get_llm_dep] = lambda: FakeLLM()
-    app.dependency_overrides[get_store_dep] = lambda: SessionStore()
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

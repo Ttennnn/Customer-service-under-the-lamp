@@ -10,3 +10,9 @@ def test_render_contains_role_and_constraints():
 
 def test_render_default_business_name():
     assert "本店" in render_system_prompt()
+
+
+def test_render_mentions_tools():
+    p = render_system_prompt()
+    assert "订单" in p and "物流" in p and "工单" in p
+    assert "转人工" in p

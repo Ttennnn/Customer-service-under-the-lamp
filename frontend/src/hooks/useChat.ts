@@ -34,7 +34,7 @@ interface ChatState {
 type Action =
   | { type: "send"; message: string }
   | { type: "resend" }
-  | { type: "stream_start" }
+  | { type: "stream_start"; tool?: { name: string; label: string } }
   | { type: "token"; text: string }
   | { type: "error_frame"; text: string }
   | { type: "fail"; kind: ChatErrorKind }
@@ -70,7 +70,12 @@ function reducer(state: ChatState, action: Action): ChatState {
         status: "streaming",
         messages: [
           ...state.messages,
-          { id: crypto.randomUUID(), role: "assistant", content: "" },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "",
+            ...(action.tool ? { tool: action.tool } : {}),
+          },
         ],
       };
     case "token": {
@@ -133,6 +138,7 @@ function reducer(state: ChatState, action: Action): ChatState {
 export function useChat() {
   const sessionIdRef = useRef<string>(getOrCreateSessionId());
   const abortRef = useRef<AbortController | null>(null);
+  const pendingToolRef = useRef<{ name: string; label: string } | null>(null);
   const [state, dispatch] = useReducer(reducer, {
     sessionId: sessionIdRef.current,
     messages: [],
@@ -158,9 +164,14 @@ export function useChat() {
         onToken: (t) => {
           if (!started) {
             started = true;
-            dispatch({ type: "stream_start" });
+            const tool = pendingToolRef.current;
+            pendingToolRef.current = null;
+            dispatch({ type: "stream_start", tool: tool ?? undefined });
           }
           dispatch({ type: "token", text: t });
+        },
+        onTool: (tool) => {
+          pendingToolRef.current = tool;
         },
         onErrorFrame: (t) => dispatch({ type: "error_frame", text: t }),
         onError: (kind) => dispatch({ type: "fail", kind }),

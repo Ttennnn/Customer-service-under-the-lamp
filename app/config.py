@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     max_context_tokens: int = 4096
+    database_url: str = "mysql+pymysql://root:root@localhost:3306/cs_customer?charset=utf8mb4"
 
 
 def build_llm(settings: Settings) -> ChatOpenAI:
