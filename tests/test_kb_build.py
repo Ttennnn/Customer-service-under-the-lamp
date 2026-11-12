@@ -101,6 +101,33 @@ def test_start_build_rejects_concurrent(monkeypatch, session):
     assert kb_build.wait_for_build(2) is True
 
 
+def test_done_event_tracks_build_lifecycle(monkeypatch):
+    """Regression: completion event and running state must move together."""
+    kb_build.reset_state_for_tests()
+    gate = threading.Event()
+    monkeypatch.setattr(
+        kb_build,
+        "get_settings",
+        lambda: type("S", (), {"knowledge_docs_dir": "knowledge"})(),
+    )
+    monkeypatch.setattr(kb_build, "get_embedder", lambda: object())
+    monkeypatch.setattr(kb_build, "get_vector_store", lambda: object())
+
+    def blocking(*a, **k):
+        gate.wait(5)
+        return BuildReport(0, 0, 0, 0, 0)
+
+    monkeypatch.setattr(kb_build, "build_knowledge", blocking)
+
+    assert kb_build._done.is_set() is True  # reset: nothing to wait for
+    assert kb_build.start_build() is True
+    assert kb_build._done.is_set() is False  # build running: waiters block
+    assert kb_build.wait_for_build(0) is False
+    gate.set()
+    assert kb_build.wait_for_build(2) is True
+    assert kb_build._done.is_set() is True  # completed build wakes waiters
+
+
 def test_build_failure_is_visible(monkeypatch, session):
     kb_build.reset_state_for_tests()
     monkeypatch.setattr(

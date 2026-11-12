@@ -132,7 +132,9 @@ def reset_state_for_tests() -> None:
     global _state
     with _lock:
         _state = BuildState()
-    _done.set()
+        # Same invariant as a finished build: state and completion event move
+        # together while holding the lock, so start_build cannot interleave.
+        _done.set()
 
 
 def _run_build() -> None:
@@ -164,4 +166,8 @@ def _run_build() -> None:
         with _lock:
             _state.running = False
             _state.finished_at = datetime.now()
-        _done.set()
+            # Keep the completion event update under the same lock as the
+            # state transition. Setting it after releasing the lock would let
+            # a concurrent start_build clear it for build B before this older
+            # build's stray set() woke build B's waiters early.
+            _done.set()
