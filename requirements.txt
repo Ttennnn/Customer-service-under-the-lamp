@@ -7,3 +7,4 @@ pytest
 httpx
 sqlalchemy
 pymysql
+pymilvus==3.0.3

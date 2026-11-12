@@ -13,6 +13,21 @@ class Settings(BaseSettings):
     max_context_tokens: int = 4096
     database_url: str = "mysql+pymysql://root:root@localhost:3306/cs_customer?charset=utf8mb4"
 
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_api_key: str = ""
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+    embedding_batch_size: int = 16
+    milvus_uri: str = "http://localhost:19530"
+    milvus_collection: str = "knowledge"
+    faq_top_k: int = 3
+    faq_score_threshold: float = 0.35
+    knowledge_docs_dir: str = "knowledge"
+    chunk_max_chars: int = 500
+    chunk_overlap_chars: int = 80
+    qa_mining_batch_size: int = 10
+    qa_dedup_threshold: float = 0.92
+
 
 def build_llm(settings: Settings) -> ChatOpenAI:
     return ChatOpenAI(
