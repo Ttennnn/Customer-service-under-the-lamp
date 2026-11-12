@@ -5,13 +5,15 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from sqlalchemy.orm import Session
 
 from app.config import Settings, build_llm, get_settings
+from app.db.session import get_db
 from app.prompts.customer_service import render_system_prompt
 from app.schemas import ChatRequest, ExtractRequest
 from app.services.chat import stream_chat
 from app.services.extract import extract_after_sale
-from app.services.session import SessionStore
+from app.tools.registry import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_store = SessionStore()
-
-
-def get_store_dep() -> SessionStore:
-    """Return the module-level session store singleton."""
-    return _store
-
 
 def get_llm_dep(settings: Settings = Depends(get_settings)):
     """Build the LLM from settings (overridable in tests)."""
@@ -43,7 +38,7 @@ def chat(
     req: ChatRequest,
     settings: Settings = Depends(get_settings),
     llm=Depends(get_llm_dep),
-    store=Depends(get_store_dep),
+    session: Session = Depends(get_db),
 ):
     """Stream an assistant reply as Server-Sent Events.
 
@@ -55,7 +50,8 @@ def chat(
     try:
         for token in stream_chat(
             llm,
-            store,
+            session,
+            ALL_TOOLS,
             render_system_prompt(),
             req.session_id,
             req.message,
