@@ -27,6 +27,12 @@ export type ChatErrorKind = "network" | "http" | "timeout";
 
 export type Message =
   | { id: string; role: "user"; content: string }
-  | { id: string; role: "assistant"; content: string; aborted?: boolean }
+  | {
+      id: string;
+      role: "assistant";
+      content: string;
+      aborted?: boolean;
+      tool?: { name: string; label: string };
+    }
   | { id: string; role: "system"; content: string; retryable?: boolean }
   | { id: string; role: "extract"; card: ExtractResult };

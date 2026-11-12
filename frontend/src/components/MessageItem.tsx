@@ -124,6 +124,12 @@ export function MessageItem({ message, isStreaming, onRetry }: MessageItemProps)
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-2xl bg-bubble-bot px-3.5 py-2.5 text-sm leading-relaxed text-text">
+        {message.tool && (
+          <div className="mb-1.5 flex w-fit items-center gap-1 rounded-full bg-bg px-2 py-0.5 text-xs text-accent">
+            <span aria-hidden="true">🔧</span>
+            <span>{message.tool.label}</span>
+          </div>
+        )}
         {renderMarkdown(message.content)}
         {isStreaming && (
           <span className="cursor-blink ml-0.5 inline-block h-4 w-0.5 translate-y-0.5 bg-accent" />

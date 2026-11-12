@@ -11,6 +11,7 @@ export interface StreamHandlers {
   onErrorFrame: (message: string) => void;
   onError: (kind: ChatErrorKind) => void;
   onDone: () => void;
+  onTool: (tool: { name: string; label: string }) => void;
 }
 
 /**
@@ -119,6 +120,19 @@ export async function streamChat(
       if (data.startsWith("{")) {
         try {
           const obj: unknown = JSON.parse(data);
+          if (
+            obj &&
+            typeof obj === "object" &&
+            "type" in obj &&
+            (obj as { type: unknown }).type === "tool"
+          ) {
+            const tool = obj as { tool?: unknown; label?: unknown };
+            handlers.onTool({
+              name: typeof tool.tool === "string" ? tool.tool : "",
+              label: typeof tool.label === "string" ? tool.label : "",
+            });
+            return;
+          }
           if (
             obj &&
             typeof obj === "object" &&
