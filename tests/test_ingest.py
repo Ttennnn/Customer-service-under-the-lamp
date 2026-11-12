@@ -37,6 +37,27 @@ def test_ingest_twice_is_idempotent_and_links(session):
     assert rows1[2].next_chunk_id is None
 
 
+def test_duplicate_chunks_are_chained_once_without_self_loops(session):
+    dup = _chunk(q="dup")
+    rows, report = ingest_document_chunks(session, [dup, dup])
+    assert (report.inserted, report.reused) == (1, 1)
+    assert len(rows) == 2 and rows[0] is rows[1]
+    session.expire_all()
+    assert rows[0].prev_chunk_id is None
+    assert rows[0].next_chunk_id is None
+
+    # Duplicates around distinct chunks link only the distinct rows in order.
+    other = _chunk(q="other")
+    rows, report = ingest_document_chunks(session, [dup, other, dup])
+    assert (report.inserted, report.reused) == (1, 2)
+    session.expire_all()
+    by_question = {row.questions: row for row in rows}
+    assert by_question["dup"].prev_chunk_id is None
+    assert by_question["dup"].next_chunk_id == by_question["other"].id
+    assert by_question["other"].prev_chunk_id == by_question["dup"].id
+    assert by_question["other"].next_chunk_id is None
+
+
 def test_reset_document_keeps_mined(session):
     doc_rows, _ = ingest_document_chunks(session, [_chunk(q="doc")])
     doc_rows[0].vector_id = "chunk_doc"; session.commit()

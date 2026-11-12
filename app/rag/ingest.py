@@ -134,9 +134,19 @@ def ingest_document_chunks(
         rows.append(row)
 
     session.flush()
-    for index, row in enumerate(rows):
-        row.prev_chunk_id = rows[index - 1].id if index > 0 else None
-        row.next_chunk_id = rows[index + 1].id if index + 1 < len(rows) else None
+
+    # Duplicate fingerprints map to the same row object, so chain only the
+    # distinct rows in first-occurrence order.  Chaining the raw input list
+    # would write one row twice and leave a self-loop (prev == next == itself).
+    chain: list[KnowledgeChunk] = []
+    seen: set[int] = set()
+    for row in rows:
+        if id(row) not in seen:
+            seen.add(id(row))
+            chain.append(row)
+    for index, row in enumerate(chain):
+        row.prev_chunk_id = chain[index - 1].id if index > 0 else None
+        row.next_chunk_id = chain[index + 1].id if index + 1 < len(chain) else None
     session.commit()
 
     return rows, IngestReport(inserted=inserted, reused=reused)
