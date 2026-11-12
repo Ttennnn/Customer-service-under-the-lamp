@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     milvus_uri: str = "http://localhost:19530"
     milvus_collection: str = "knowledge"
     faq_top_k: int = 3
-    faq_score_threshold: float = 0.35
+    faq_score_threshold: float = 0.5
     knowledge_docs_dir: str = "knowledge"
     chunk_max_chars: int = 500
     chunk_overlap_chars: int = 80

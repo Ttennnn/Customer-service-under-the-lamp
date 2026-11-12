@@ -24,7 +24,7 @@ def test_ch03_settings_defaults():
     assert s.milvus_uri == "http://localhost:19530"
     assert s.milvus_collection == "knowledge"
     assert s.faq_top_k == 3
-    assert s.faq_score_threshold == 0.35
+    assert s.faq_score_threshold == 0.5
     assert s.chunk_max_chars == 500
     assert s.chunk_overlap_chars == 80
     assert s.qa_dedup_threshold == 0.92
