@@ -471,7 +471,7 @@ def test_execute_exception_returns_error():
 
 - [ ] **Step 3: 实现 `execute_tool`**
 
-参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 daemon 线程(`threading.Thread(daemon=True)` + `queue.Queue`,`queue.get(timeout=timeout_s)`),避免超时后非 daemon 线程池阻塞进程退出;捕获 `queue.Empty`(超时)/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 对裸参数 dict 直接返回 `str`(langchain-core 1.x:不带 `id` 的 dict 不包装为 `ToolMessage`)。
+参数校验用 `tool.args_schema.model_validate(args)`,捕获 `ValidationError`。执行用 daemon 线程(`threading.Thread(daemon=True)` + `queue.Queue`,`queue.get(timeout=timeout_s)`),避免超时后非 daemon 线程池阻塞进程退出;开线程前 `ctx = contextvars.copy_context()`、线程内 `ctx.run(lambda: tool.invoke(args))` 以把 contextvar(如 `current_conversation_id`)传播进子线程;捕获 `queue.Empty`(超时)/`Exception`;重试逻辑包在外层循环。实现前 Context7 确认 `tool.invoke(dict)` 对裸参数 dict 直接返回 `str`(langchain-core 1.x:不带 `id` 的 dict 不包装为 `ToolMessage`)。
 
 - [ ] **Step 4: 运行确认通过** → `pytest tests/test_executor.py -v` → PASS
 
