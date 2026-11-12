@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from sqlalchemy.orm import Session
 
+from app.api.kb import api_router
 from app.config import Settings, build_llm, get_settings
 from app.db.session import get_db
 from app.prompts.customer_service import render_system_prompt
@@ -26,6 +27,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_router)
 
 
 def get_llm_dep(settings: Settings = Depends(get_settings)):
