@@ -278,6 +278,15 @@ def test_parse_error_happens_before_reset(session, tmp_path):
     assert session.query(KnowledgeChunk).count() == 2
 
 
+def test_build_accepts_uploads_only_corpus(session, tmp_path):
+    d = tmp_path / "knowledge"; (d / "uploads").mkdir(parents=True)
+    (d / "uploads" / "only.md").write_text(
+        "---\ncontent_type: policy\n---\n# 只有上传\n\n正文。\n", encoding="utf-8"
+    )
+    r = build_knowledge(session, d, FakeEmbedder(), FakeStore(), do_vectorize=False)
+    assert r.documents == 1 and r.chunks == 1
+
+
 def test_vectorize_cli_processes_pending(session, tmp_path, monkeypatch, capsys):
     d = _docs(tmp_path)
     build_knowledge(

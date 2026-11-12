@@ -80,7 +80,35 @@ def load_document(path: Path) -> Document:
     )
 
 
+def _filename_sort_key(path: Path) -> tuple[bytes, str]:
+    """Sort filenames deterministically, pinyin-friendly for Chinese names.
+
+    GBK (like Windows Explorer) orders common Chinese characters by pinyin,
+    so sorting on the GBK bytes keeps ``退货`` before ``运费``.  Names that
+    cannot be encoded as GBK sort after encodable ones by Unicode order.
+    """
+    name = path.name
+    try:
+        return (name.encode("gbk"), name)
+    except UnicodeEncodeError:
+        return (b"\xff", name)
+
+
+def effective_doc_paths(docs_dir: Path) -> list[Path]:
+    """Return the effective corpus: root ``*.md`` plus ``uploads/*.md``.
+
+    Files in ``uploads`` shadow same-named files in the root seed directory.
+    Only these two layers are read; other subdirectories are ignored.  Paths
+    are returned sorted by filename.
+    """
+    docs_dir = Path(docs_dir)
+    by_name: dict[str, Path] = {p.name: p for p in docs_dir.glob("*.md")}
+    uploads_dir = docs_dir / "uploads"
+    if uploads_dir.is_dir():
+        by_name.update({p.name: p for p in uploads_dir.glob("*.md")})
+    return sorted(by_name.values(), key=_filename_sort_key)
+
+
 def load_documents(docs_dir: Path) -> list[Document]:
-    """Load every ``*.md`` file in *docs_dir*, sorted by filename."""
-    paths = sorted(Path(docs_dir).glob("*.md"), key=lambda p: p.name)
-    return [load_document(p) for p in paths]
+    """Load the effective corpus (see :func:`effective_doc_paths`)."""
+    return [load_document(p) for p in effective_doc_paths(docs_dir)]

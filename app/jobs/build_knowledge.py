@@ -18,7 +18,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.db.session import get_session_factory
-from app.rag.docs import load_documents
+from app.rag.docs import effective_doc_paths, load_documents
 from app.rag.embedding import get_embedder
 from app.rag.ingest import (
     ingest_document_chunks,
@@ -51,7 +51,7 @@ def _validate_docs_dir(docs_dir: Path) -> None:
     """Refuse destructive work when the corpus path is clearly unusable."""
     if not docs_dir.is_dir():
         raise CorpusError(f"knowledge docs directory not found: {docs_dir}")
-    if not any(docs_dir.glob("*.md")):
+    if not effective_doc_paths(docs_dir):
         raise CorpusError(
             f"no *.md knowledge documents found in {docs_dir}; "
             "refusing to build or reset from an empty corpus"
