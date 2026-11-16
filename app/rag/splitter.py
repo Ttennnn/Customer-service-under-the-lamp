@@ -326,13 +326,14 @@ def _split_section(answer: str, max_chars: int, overlap_chars: int) -> list[str]
 
 def _build_chunk(doc: Document, path: tuple[str, ...], answer: str) -> Chunk:
     leaf = path[-1]
-    if doc.content_type == "faq":
-        # FAQ wording lives in the heading; category comes from frontmatter.
-        category = doc.category or doc.title
-    else:
-        # Policy/manual: category is the parent heading path (or doc title
-        # when the section itself is top-level).
-        category = _PATH_SEP.join(path[:-1]) if len(path) > 1 else doc.title
+    # Explicit frontmatter category wins for every content type.  Without it,
+    # FAQ falls back to the document title and policy/manual use the parent
+    # heading path (or the document title for a top-level section).
+    category = doc.category or (
+        doc.title
+        if doc.content_type == "faq"
+        else (_PATH_SEP.join(path[:-1]) if len(path) > 1 else doc.title)
+    )
 
     return Chunk(
         category=category,
