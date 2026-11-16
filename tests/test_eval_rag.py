@@ -425,6 +425,18 @@ def test_main_retrieval_only_writes_report_with_fallback_counts(
     assert "- cases with fallback rewrite: 1 / 2" in report
     assert "skipped (--retrieval-only)" in report
 
+    sidecar = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert sidecar["cases"] == 2
+    assert sidecar["mode"] == "retrieval-only"
+    assert sidecar["fallbacks"]["rerank"]["runs"] == 1
+    assert sidecar["fallbacks"]["rewrite"]["cases"] == 1
+    dense = sidecar["overall"]["dense"]
+    assert dense["retrieval"]["n"] == 2
+    assert dense["retrieval"]["recall_at_10"] == 1.0
+    assert "evidence_case_coverage" in dense["retrieval"]
+    assert "answer_coverage" in dense["generation"]
+    assert "hybrid_rerank" in sidecar["overall"]
+
 
 def test_main_writes_faith_cases_and_counts_new_vs_recurrence(
     monkeypatch, tmp_path

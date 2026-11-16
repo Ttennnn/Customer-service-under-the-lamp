@@ -399,11 +399,18 @@ def _retrieval_summary(runs: list[CaseRun], strategy: str) -> dict:
         and not run.rerank_failed
         and run.score is not None
     ]
+    with_evidence = sum(
+        1 for run in scored if run.score is not None and run.score.recall_at_10 > 0
+    )
     return {
         "n": len(scored),
         "recall_at_5": _mean([run.score.recall_at_5 for run in scored]),
         "recall_at_10": _mean([run.score.recall_at_10 for run in scored]),
         "mrr_at_10": _mean([run.score.mrr_at_10 for run in scored]),
+        "cases_with_evidence": with_evidence,
+        "evidence_case_coverage": (
+            with_evidence / len(scored) if scored else None
+        ),
     }
 
 
@@ -426,6 +433,8 @@ def _generation_summary(runs: list[CaseRun], strategy: str) -> dict:
         run for run in relevant if run.status in _GENERATION_ATTEMPT_STATUSES
     ]
     refusals = [run for run in attempts if run.status == "refusal"]
+    answerable_attempts = [run for run in attempts if run.answerable]
+    answered = [run for run in answerable_attempts if run.status == "answered"]
     return {
         "n": len(attempts),
         "refusal_rate": (
@@ -437,6 +446,11 @@ def _generation_summary(runs: list[CaseRun], strategy: str) -> dict:
         ),
         "model_refusals": sum(
             1 for run in attempts if run.status == "model_refusal"
+        ),
+        "answer_coverage": (
+            len(answered) / len(answerable_attempts)
+            if answerable_attempts
+            else None
         ),
     }
 
@@ -584,6 +598,95 @@ def _git_commit() -> str:
     except Exception:  # noqa: BLE001 - reporting must not fail the run
         return "unknown"
     return result.stdout.strip() or "unknown"
+
+
+def _strategy_summary(runs: list[CaseRun], strategy: str) -> dict:
+    """Structured metrics for one strategy, used by the JSON page."""
+    retrieval = _retrieval_summary(runs, strategy)
+    generation = _generation_summary(runs, strategy)
+    evaluable, refusals, model_refusals, other = _d_accuracy(runs, strategy)
+    accuracy = (
+        (refusals + model_refusals) / evaluable if evaluable else None
+    )
+    status_counts: dict[str, int] = {}
+    for run in runs:
+        if run.strategy == strategy and not run.rerank_failed:
+            status_counts[run.status] = status_counts.get(run.status, 0) + 1
+    return {
+        "retrieval": retrieval,
+        "generation": generation,
+        "d_accuracy": {
+            "evaluable": evaluable,
+            "refusal": refusals,
+            "model_refusal": model_refusals,
+            "other": other,
+            "accuracy": accuracy,
+        },
+        "status_counts": status_counts,
+    }
+
+
+def _build_summary(
+    *,
+    cases: list[dict],
+    runs: list[CaseRun],
+    strategies: list[RetrievalStrategy],
+    settings,
+    args: argparse.Namespace,
+    faith: FaithStats,
+    commit: str,
+) -> dict:
+    """Build the machine-readable sidecar consumed by the ``/rag-eval`` page."""
+    strategy_names = [strategy.value for strategy in strategies]
+    buckets = sorted({run.bucket for run in runs if run.bucket})
+    fallback_runs = [run for run in runs if run.rerank_failed]
+    rewrite_fallback_ids = {
+        run.case_id for run in runs if run.analysis_by == "fallback"
+    }
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "commit": commit,
+        "cases": len(cases),
+        "strategies": strategy_names,
+        "mode": "retrieval-only" if args.retrieval_only else "full",
+        "run": {
+            "model": settings.model_name,
+            "embedding_model": settings.embedding_model,
+            "rerank_model": settings.rerank_model,
+            "recall_top_k": settings.hybrid_recall_top_k,
+            "rrf_k": settings.hybrid_rrf_k,
+            "top_k": TOP_K,
+        },
+        "overall": {
+            name: _strategy_summary(runs, name) for name in strategy_names
+        },
+        "buckets": {
+            bucket: {
+                name: _strategy_summary(
+                    [run for run in runs if run.bucket == bucket], name
+                )
+                for name in strategy_names
+            }
+            for bucket in buckets
+        },
+        "fallbacks": {
+            "rerank": {
+                "runs": len(fallback_runs),
+                "case_ids": sorted({run.case_id for run in fallback_runs}),
+            },
+            "rewrite": {
+                "cases": len(rewrite_fallback_ids),
+                "case_ids": sorted(rewrite_fallback_ids),
+            },
+        },
+        "faith_cases": {
+            "enabled": faith.enabled,
+            "new": faith.new,
+            "recurrence": faith.recurrence,
+            "errors": faith.errors,
+            "entries": faith.entries,
+        },
+    }
 
 
 def _render_report(
@@ -860,7 +963,22 @@ def main(argv: list[str] | None = None) -> int:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report, encoding="utf-8")
+    summary = _build_summary(
+        cases=cases,
+        runs=runs,
+        strategies=strategies,
+        settings=settings,
+        args=args,
+        faith=faith,
+        commit=_git_commit(),
+    )
+    json_path = out_path.with_suffix(".json")
+    json_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     print(f"eval_rag: report written to {out_path}")
+    print(f"eval_rag: summary written to {json_path}")
     return 0
 
 

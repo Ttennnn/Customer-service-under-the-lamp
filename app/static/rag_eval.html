@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAG 评估 · 四策略对照</title>
+<style>
+  :root {
+    --bg: #171310;
+    --surface: #211b16;
+    --surface-2: #2a231c;
+    --border: #332b24;
+    --text: #f2e9de;
+    --dim: #a29284;
+    --accent: #f0b76a;
+    --green: #86a96b;
+    --red: #d97757;
+    --blue: #8fb1d9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: var(--text);
+    background:
+      radial-gradient(ellipse 60% 40% at 50% -10%, rgba(240,183,106,.12), transparent 70%),
+      var(--bg);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .02em; }
+  .sub { color: var(--dim); font-size: 13px; line-height: 1.6; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button, .linkbtn {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 13px;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  button:hover, .linkbtn:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: #1a1512; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { color: #1a1512; filter: brightness(1.04); }
+  .status { font-size: 12px; color: var(--dim); min-height: 18px; }
+  .status.error { color: var(--red); }
+  .meta {
+    margin: 18px 0 6px;
+    display: flex;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .meta b { color: var(--text); font-weight: 600; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+  @media (max-width: 860px) { .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: linear-gradient(180deg, rgba(42,35,28,.75), rgba(33,27,22,.9));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 4px; letter-spacing: .03em; }
+  .card .hint { color: var(--dim); font-size: 11px; margin-bottom: 14px; line-height: 1.5; }
+  .bar-row { display: grid; grid-template-columns: 92px 1fr 58px; gap: 8px; align-items: center; margin: 9px 0; font-size: 12px; }
+  .bar-name { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { height: 8px; border-radius: 999px; background: #15110e; overflow: hidden; border: 1px solid #2b241d; }
+  .bar-fill { height: 100%; border-radius: 999px; background: var(--accent); }
+  .bar-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+  .table-card { margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 9px 10px; border-bottom: 1px solid rgba(51,43,36,.75); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--dim); font-weight: 500; font-size: 11.5px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .num { font-variant-numeric: tabular-nums; }
+  .best { color: var(--accent); font-weight: 600; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 10px; }
+  .tab { border: 1px solid var(--border); background: transparent; color: var(--dim); border-radius: 999px; padding: 5px 11px; font-size: 12px; }
+  .tab.active { color: var(--accent); border-color: var(--accent); background: rgba(240,183,106,.08); }
+  .empty { color: var(--dim); padding: 42px 16px; text-align: center; line-height: 1.8; }
+  .foot { margin-top: 18px; color: var(--dim); font-size: 11.5px; line-height: 1.7; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); font-size: 11px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 11px; margin-top: 10px; }
+  .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>RAG 评估 · 四策略对照</h1>
+      <div class="sub">检索排序 · 证据覆盖 · 端到端答案覆盖 —— dense / bm25 / hybrid / hybrid_rerank</div>
+    </div>
+    <div class="actions">
+      <button id="run" class="primary" type="button">重跑评估</button>
+      <a class="linkbtn" id="md" href="/rag-eval/api/report.md" target="_blank" rel="noreferrer">Markdown 报告</a>
+      <a class="linkbtn" href="/kb">知识录入页</a>
+    </div>
+  </header>
+
+  <div id="status" class="status"></div>
+  <div id="meta" class="meta"></div>
+
+  <main id="content">
+    <div class="card empty" id="empty">尚无评估报告。点击「重跑评估」生成四策略对比。</div>
+  </main>
+
+  <div class="foot">
+    <span class="pill">口径</span>
+    Recall/MRR 只统计可答题，并按 section_path 去重；hybrid_rerank 的 rerank fallback 不参与其指标聚合。
+    端到端答案覆盖率 = 可答题中实际产出答案的比例；Faithfulness / Citation validity 只统计成功裁判的答案。
+    D 桶拒答准确率单独统计。完整口径见 Markdown 报告。
+  </div>
+</div>
+
+<script>
+(() => {
+  const STRATEGY_COLORS = {
+    dense: "#8fb1d9",
+    bm25: "#c9a86a",
+    hybrid: "#86a96b",
+    hybrid_rerank: "#f0b76a",
+  };
+  const BUCKET_LABELS = {
+    A_policy: "A · 政策",
+    B_model: "B · 型号",
+    C_colloquial: "C · 口语",
+    D_unanswerable: "D · 不可答",
+    E_multi: "E · 多跳",
+  };
+
+  const $ = (id) => document.getElementById(id);
+  let report = null;
+  let activeBucket = null;
+
+  function fmt(v) {
+    return (typeof v === "number" && Number.isFinite(v)) ? v.toFixed(3) : "n/a";
+  }
+  function pct(v) {
+    return (typeof v === "number" && Number.isFinite(v)) ? `${(v * 100).toFixed(1)}%` : "n/a";
+  }
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function barRows(container, values, labelFn) {
+    const entries = Object.entries(values);
+    const max = Math.max(0.0001, ...entries.map(([, v]) => Number(v) || 0));
+    for (const [name, value] of entries) {
+      const row = el("div", "bar-row");
+      row.appendChild(el("div", "bar-name", labelFn ? labelFn(name) : name));
+      const track = el("div", "bar-track");
+      const fill = el("div", "bar-fill");
+      fill.style.background = STRATEGY_COLORS[name] || "var(--accent)";
+      fill.style.width = `${Math.max(0, Math.min(100, (Number(value) || 0) / max * 100))}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el("div", "bar-val", fmt(value)));
+      container.appendChild(row);
+    }
+  }
+
+  function strategyValues(metric) {
+    const out = {};
+    for (const name of report.strategies) {
+      const s = report.overall[name] || {};
+      out[name] = metric(s);
+    }
+    return out;
+  }
+
+  function metricTable(rows, label) {
+    const table = el("table");
+    const thead = el("thead");
+    const hr = el("tr");
+    for (const h of ["策略", label, "n"]) hr.appendChild(el("th", null, h));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    for (const [name, value] of Object.entries(rows)) {
+      const tr = el("tr");
+      tr.appendChild(el("td", null, name));
+      tr.appendChild(el("td", "num", fmt(value)));
+      const s = report.overall[name] || {};
+      const n = label.includes("答案") ? (s.generation || {}).n : (s.retrieval || {}).n;
+      tr.appendChild(el("td", "num", String(n ?? "n/a")));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function overallTable() {
+    const table = el("table");
+    const thead = el("thead");
+    const head = ["策略", "Recall@5", "Recall@10", "MRR@10", "Faithfulness", "Citation", "答案覆盖", "拒答率", "D 正确率"];
+    const hr = el("tr");
+    for (const h of head) hr.appendChild(el("th", null, h));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    for (const name of report.strategies) {
+      const s = report.overall[name] || {};
+      const r = s.retrieval || {};
+      const g = s.generation || {};
+      const d = s.d_accuracy || {};
+      const tr = el("tr");
+      const cells = [
+        name, fmt(r.recall_at_5), fmt(r.recall_at_10), fmt(r.mrr_at_10),
+        fmt(g.faithfulness), fmt(g.citation_validity), pct(g.answer_coverage),
+        pct(g.refusal_rate), fmt(d.accuracy),
+      ];
+      cells.forEach((v, i) => tr.appendChild(el("td", i === 0 ? null : "num", v)));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function bucketTable(bucket) {
+    const table = el("table");
+    const thead = el("thead");
+    const head = ["策略", "Recall@5", "Recall@10", "MRR@10", "Faithfulness", "Citation", "答案覆盖", "拒答率"];
+    const hr = el("tr");
+    for (const h of head) hr.appendChild(el("th", null, h));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    const data = (report.buckets || {})[bucket] || {};
+    for (const name of report.strategies) {
+      const s = data[name] || {};
+      const r = s.retrieval || {};
+      const g = s.generation || {};
+      const tr = el("tr");
+      const cells = [
+        name, fmt(r.recall_at_5), fmt(r.recall_at_10), fmt(r.mrr_at_10),
+        fmt(g.faithfulness), fmt(g.citation_validity), pct(g.answer_coverage),
+        pct(g.refusal_rate),
+      ];
+      cells.forEach((v, i) => tr.appendChild(el("td", i === 0 ? null : "num", v)));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function render(r) {
+    report = r;
+    const content = $("content");
+    content.replaceChildren();
+
+    const buckets = Object.keys(report.buckets || {});
+    if (!activeBucket || !buckets.includes(activeBucket)) activeBucket = buckets[0] || null;
+
+    const grid = el("div", "grid3");
+
+    const orderCard = el("section", "card");
+    orderCard.appendChild(el("h2", null, "检索排序"));
+    orderCard.appendChild(el("div", "hint", "MRR@10 —— 首个相关章节的排名倒数，越高越靠前"));
+    barRows(orderCard, strategyValues((s) => (s.retrieval || {}).mrr_at_10));
+    grid.appendChild(orderCard);
+
+    const evidenceCard = el("section", "card");
+    evidenceCard.appendChild(el("h2", null, "证据覆盖"));
+    evidenceCard.appendChild(el("div", "hint", "Recall@10；有证据案例覆盖率见下表"));
+    barRows(evidenceCard, strategyValues((s) => (s.retrieval || {}).recall_at_10));
+    grid.appendChild(evidenceCard);
+
+    const answerCard = el("section", "card");
+    answerCard.appendChild(el("h2", null, "端到端答案覆盖"));
+    answerCard.appendChild(el("div", "hint", "Faithfulness（事实均有证据支持）"));
+    barRows(answerCard, strategyValues((s) => (s.generation || {}).faithfulness));
+    grid.appendChild(answerCard);
+
+    content.appendChild(grid);
+
+    const overall = el("section", "card table-card");
+    overall.appendChild(el("h2", null, "总体指标"));
+    overall.appendChild(overallTable());
+    content.appendChild(overall);
+
+    const evidenceTable = el("section", "card table-card");
+    evidenceTable.appendChild(el("h2", null, "证据覆盖明细"));
+    const et = el("table");
+    const eth = el("thead");
+    const ehr = el("tr");
+    for (const h of ["策略", "有证据案例", "案例覆盖率", "Recall@5", "Recall@10"]) ehr.appendChild(el("th", null, h));
+    eth.appendChild(ehr); et.appendChild(eth);
+    const etb = el("tbody");
+    for (const name of report.strategies) {
+      const r = ((report.overall[name] || {}).retrieval || {});
+      const tr = el("tr");
+      [name, String(r.cases_with_evidence ?? "n/a"), pct(r.evidence_case_coverage), fmt(r.recall_at_5), fmt(r.recall_at_10)]
+        .forEach((v, i) => tr.appendChild(el("td", i === 0 ? null : "num", v)));
+      etb.appendChild(tr);
+    }
+    et.appendChild(etb);
+    evidenceTable.appendChild(et);
+    content.appendChild(evidenceTable);
+
+    if (buckets.length) {
+      const bucketCard = el("section", "card table-card");
+      bucketCard.appendChild(el("h2", null, "分桶指标"));
+      const tabs = el("div", "tabs");
+      for (const bucket of buckets) {
+        const btn = el("button", "tab" + (bucket === activeBucket ? " active" : ""), BUCKET_LABELS[bucket] || bucket);
+        btn.type = "button";
+        btn.addEventListener("click", () => { activeBucket = bucket; render(report); });
+        tabs.appendChild(btn);
+      }
+      bucketCard.appendChild(tabs);
+      bucketCard.appendChild(bucketTable(activeBucket));
+      content.appendChild(bucketCard);
+    }
+
+    const house = el("section", "card table-card");
+    house.appendChild(el("h2", null, "运行与台账"));
+    const list = el("div", "foot");
+    const fb = report.fallbacks || {};
+    const rerank = (fb.rerank || {});
+    const rewrite = (fb.rewrite || {});
+    const faith = report.faith_cases || {};
+    const run = report.run || {};
+    const lines = [
+      `模型：${run.model || "n/a"}（温度 0）；嵌入 ${run.embedding_model || "n/a"}；重排 ${run.rerank_model || "n/a"}`,
+      `召回 Top-${run.recall_top_k ?? "?"} → 最终 Top-${run.top_k ?? "?"}；RRF k=${run.rrf_k ?? "?"}`,
+      `Rerank fallback：${rerank.runs ?? 0} 次${(rerank.case_ids || []).length ? "（" + rerank.case_ids.join(", ") + "）" : ""}；Query rewrite fallback：${rewrite.cases ?? 0} 例`,
+      `faith_cases：新增 ${faith.new ?? 0} / 复发 ${faith.recurrence ?? 0} / 写入错误 ${faith.errors ?? 0}`,
+    ];
+    for (const line of lines) list.appendChild(el("div", null, line));
+    house.appendChild(list);
+    content.appendChild(house);
+
+    const meta = $("meta");
+    meta.replaceChildren();
+    const fields = [
+      ["生成时间", report.generated_at || "n/a"],
+      ["commit", report.commit || "n/a"],
+      ["case 数", String(report.cases ?? "n/a")],
+      ["模式", report.mode || "n/a"],
+    ];
+    for (const [k, v] of fields) {
+      const span = el("span");
+      span.appendChild(el("b", null, k + "："));
+      span.appendChild(document.createTextNode(v));
+      meta.appendChild(span);
+    }
+    $("empty")?.remove();
+  }
+
+  async function fetchReport() {
+    const res = await fetch("/rag-eval/api/report", { cache: "no-store" });
+    if (res.status === 404) {
+      report = null;
+      const content = $("content");
+      content.replaceChildren();
+      const empty = el("div", "card empty", "尚无评估报告。点击「重跑评估」生成四策略对比。");
+      empty.id = "empty";
+      content.appendChild(empty);
+      return;
+    }
+    if (!res.ok) throw new Error(`report HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    render(data);
+  }
+
+  function setStatus(text, isError) {
+    const node = $("status");
+    node.textContent = text || "";
+    node.className = "status" + (isError ? " error" : "");
+  }
+
+  async function poll() {
+    let status;
+    try {
+      const res = await fetch("/rag-eval/api/status", { cache: "no-store" });
+      status = await res.json();
+    } catch (err) {
+      setStatus("状态读取失败：" + err.message, true);
+      return;
+    }
+    if (status.running) {
+      $("run").disabled = true;
+      $("run").textContent = "评估运行中…";
+      setStatus(`运行中，开始于 ${status.started_at || "?"}。全量 35×4 预计数分钟。`);
+      setTimeout(poll, 2000);
+      return;
+    }
+    $("run").disabled = false;
+    $("run").textContent = "重跑评估";
+    if (status.last_error) {
+      setStatus("上次运行失败：" + status.last_error, true);
+    } else if (status.finished_at) {
+      setStatus(`上次完成于 ${status.finished_at}（exit ${status.exit_code ?? 0}）`);
+    } else {
+      setStatus("就绪");
+    }
+    if (status.finished_at) {
+      try { await fetchReport(); } catch (err) { setStatus("报告读取失败：" + err.message, true); }
+    }
+  }
+
+  $("run").addEventListener("click", async () => {
+    $("run").disabled = true;
+    setStatus("正在启动评估…");
+    try {
+      const res = await fetch("/rag-eval/api/run", { method: "POST" });
+      if (res.status === 409) {
+        setStatus("已有评估在运行中。", true);
+      } else if (!res.ok) {
+        setStatus(`启动失败：HTTP ${res.status}`, true);
+      } else {
+        setStatus("评估已启动。");
+      }
+    } catch (err) {
+      setStatus("启动失败：" + err.message, true);
+    }
+    setTimeout(poll, 1000);
+  });
+
+  (async () => {
+    try { await fetchReport(); } catch (err) { setStatus("报告读取失败：" + err.message, true); }
+    await poll();
+  })();
+})();
+</script>
+</body>
+</html>
