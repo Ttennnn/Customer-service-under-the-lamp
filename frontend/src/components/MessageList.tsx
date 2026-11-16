@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ChatStatus, Message } from "../types";
+import type { ChatStatus, FeedbackValue, Message } from "../types";
 import { MessageItem } from "./MessageItem";
 import { QuickReplies } from "./QuickReplies";
 
@@ -8,6 +8,7 @@ interface MessageListProps {
   status: ChatStatus;
   onRetry: () => void;
   onPick: (text: string) => void;
+  onFeedback: (messageId: string, value: FeedbackValue) => void;
 }
 
 export function MessageList({
@@ -15,6 +16,7 @@ export function MessageList({
   status,
   onRetry,
   onPick,
+  onFeedback,
 }: MessageListProps) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -56,6 +58,7 @@ export function MessageList({
                 message={m}
                 isStreaming={isLastStreaming}
                 onRetry={onRetry}
+                onFeedback={onFeedback}
               />
             );
           })}
