@@ -34,6 +34,15 @@ def test_prompt_routes_model_spec_questions_to_query_faq():
     assert "必须先调用 query_faq" in p
 
 
+def test_tool_guidance_routes_model_spec_and_policy_to_faq():
+    p = render_system_prompt()
+    assert "实时价格、库存或订单快照" in p
+    assert "商品型号、规格参数、退换货政策等知识类问题" in p
+    assert "必须先查知识库(query_faq)" in p
+    assert "查询商品(query_product)" in p  # tool capability retained
+    assert "规格、价格、退换货政策时,查询商品" not in p
+
+
 def test_answer_prompt_reuses_blocks_without_tool_list():
     p = render_answer_system_prompt()
     assert "[n]" in p and "不得编造" in p
