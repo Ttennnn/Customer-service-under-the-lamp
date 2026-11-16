@@ -635,7 +635,7 @@ Rules:
 - `analysis = analysis or (analyzer or analyze)(query)`.
 - Build expr with exact quoted values; use `expr_params` if the client supports it, otherwise escape `"` and `\`.
 - `dense`: `store.dense_search(embedder.embed_one(analysis.rewritten), recall_k, expr)`; cut `top_k`.
-- `bm25`: query text = `" ".join([analysis.rewritten, *analysis.keywords])`; `store.bm25_search(...)`; cut `top_k`.
+- `bm25`: query text = deduped `" ".join([analysis.rewritten, *analysis.keywords, *expand_synonyms(analysis.original)])`; `store.bm25_search(...)`; cut `top_k`. (Spec §4/§6 requires the static expansion even when the LLM succeeds.)
 - `hybrid`: `store.hybrid_search(vector, bm25_text, recall_k, expr, rrf_k)`; cut `top_k`.
 - `hybrid_rerank`: hybrid candidates → MySQL rows → `reranker.rerank(analysis.rewritten, [f"{section_path}\n{questions}\n{answer}"...], top_n=top_k)`; on `RerankError` use hybrid order and `rerank_failed=True`.
 - MySQL backfill with one `in_` query preserving order; skip missing ids.
