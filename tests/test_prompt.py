@@ -43,9 +43,27 @@ def test_tool_guidance_routes_model_spec_and_policy_to_faq():
     assert "规格、价格、退换货政策时,查询商品" not in p
 
 
+def test_production_prompt_has_routing_and_citation_rules():
+    p = render_system_prompt()
+    assert "必须先调用 query_faq" in p
+    assert "category/content_type" in p
+    assert "不得编造或复用历史编号" in p
+
+
+def test_answer_prompt_has_citation_rules_without_tool_routing():
+    p = render_answer_system_prompt()
+    assert "必须先调用 query_faq" not in p
+    assert "query_product" not in p
+    assert "category/content_type" not in p
+    assert "[n]" in p and "不得编造或复用历史编号" in p
+    assert "每一轮都必须基于本轮检索/证据重新作答" in p
+    assert "本轮没有 [n] 时,回答中不得出现任何 [n]" in p
+    assert "明确说「知识库暂未收录/无法确认」" in p
+
+
 def test_prompt_forbids_reusing_history_citations():
     for p in (render_system_prompt(), render_answer_system_prompt()):
-        assert "每个知识类问题都必须在当前轮重新调用 query_faq" in p
+        assert "每一轮都必须基于本轮检索/证据重新作答" in p
         assert "即使历史对话里有相似答案" in p
         assert "不得从历史回答抄结论或 [n] 引用编号" in p
         assert "本轮没有 [n] 时,回答中不得出现任何 [n]" in p
@@ -55,6 +73,5 @@ def test_answer_prompt_reuses_blocks_without_tool_list():
     p = render_answer_system_prompt()
     assert "[n]" in p and "不得编造" in p
     assert "不承诺具体到账时间" in p
-    assert "query_product 只用于" in p
     assert "你可以使用以下工具能力" not in p
     assert "本店" in p
