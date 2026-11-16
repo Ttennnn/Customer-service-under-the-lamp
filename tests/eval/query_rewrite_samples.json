@@ -1,0 +1,54 @@
+{
+  "samples": [
+    {
+      "query": "邮费多少钱",
+      "expect_rewritten_any": ["运费"],
+      "expect_keywords_any": ["运费", "配送费"]
+    },
+    {
+      "query": "东西多久能退钱",
+      "expect_rewritten_any": ["退款", "到账"],
+      "expect_keywords_any": ["退款", "到账", "原路退回"]
+    },
+    {
+      "query": "灯不亮了咋整",
+      "expect_rewritten_any": ["故障", "维修"],
+      "expect_keywords_any": ["故障", "维修"]
+    },
+    {
+      "query": "我想换个新的",
+      "expect_rewritten_any": ["换货", "换新"],
+      "expect_keywords_any": ["换货", "换新"]
+    },
+    {
+      "query": "尺码咋选啊",
+      "expect_rewritten_any": ["尺码"],
+      "expect_keywords_any": ["尺码", "脚长"]
+    },
+    {
+      "query": "发票怎么弄",
+      "expect_rewritten_any": ["发票"],
+      "expect_keywords_any": ["发票", "开票"]
+    },
+    {
+      "query": "发啥快递",
+      "expect_rewritten_any": ["快递", "物流", "配送"],
+      "expect_keywords_any": ["快递", "物流", "配送"]
+    },
+    {
+      "query": "几天能发货",
+      "expect_rewritten_any": ["发货", "时效"],
+      "expect_keywords_any": ["发货", "时效"]
+    },
+    {
+      "query": "坏了能免费修吗",
+      "expect_rewritten_any": ["维修", "保修"],
+      "expect_keywords_any": ["维修", "保修"]
+    },
+    {
+      "query": "取件什么时候来",
+      "expect_rewritten_any": ["取件", "上门"],
+      "expect_keywords_any": ["上门取件", "取件"]
+    }
+  ]
+}
