@@ -4,9 +4,10 @@ One row per evaluation case, keyed by ``eval_id``. The evaluation job runs the
 same case under several retrieval strategies; re-running a case updates the
 existing row (``seen_count += 1``, ``last_seen_at`` refreshed, status reopened)
 instead of inserting one row per strategy, so the ledger stays a per-question
-view of recurring fabrications. ``resolved_at`` is intentionally preserved when
-a case recurs, so the original resolution time survives for recurrence
-analysis.
+view of recurring fabrications. When a case recurs the row reopens to
+``未解决`` and its ``resolution`` is cleared (per the DDL: "退回未解决时清空"),
+while ``resolved_at`` is intentionally preserved so the original resolution
+time survives for recurrence analysis.
 """
 
 from dataclasses import dataclass
@@ -37,8 +38,9 @@ def upsert_faith_case(session, payload: FaithCasePayload) -> FaithCase:
     New rows start ``未解决`` with ``seen_count=1`` and identical
     ``first_seen_at``/``last_seen_at``. Existing rows refresh the strategy,
     answer, reason, citations and judge model, increment ``seen_count``, bump
-    ``last_seen_at`` and reopen to ``未解决`` while keeping ``resolved_at``.
-    The caller owns the transaction and must commit; this function flushes so
+    ``last_seen_at`` and reopen to ``未解决``: ``resolution`` is cleared while
+    ``resolved_at`` is kept. The caller owns the transaction and must commit;
+    this function flushes so
     the returned row has an id.
     """
     now = datetime.now()
@@ -71,6 +73,9 @@ def upsert_faith_case(session, payload: FaithCasePayload) -> FaithCase:
         row.seen_count = (row.seen_count or 0) + 1
         row.last_seen_at = now
         row.status = "未解决"
+        row.resolution = None
+        # ``resolved_at`` is deliberately left untouched: it records the most
+        # recent resolution so a reopened row can still be flagged as recurring.
 
     session.flush()
     return row

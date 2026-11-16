@@ -276,6 +276,21 @@ def test_bm25_strategy_uses_expanded_query(session):
     assert store.bm25_calls[0][0] == "运费怎么算 运费 配送费"
 
 
+def test_bm25_merges_static_expansions_even_when_llm_returns_one(session):
+    row = _row(session, "问", "答")
+    store = FakeHybridStore(bm25=[SearchHit(row.id, 1.2)])
+    retrieve_hybrid(
+        "邮费咋算",
+        strategy=RetrievalStrategy.BM25,
+        session=session,
+        store=store,
+        analysis=QueryAnalysis("邮费咋算", "运费怎么计算", ["运费"], "llm"),
+    )
+    # LLM supplied 运费 but missed 配送费; the static expansion still lands
+    # in the BM25 query, and duplicates are removed order-preservingly.
+    assert store.bm25_calls[0][0] == "运费怎么计算 运费 配送费"
+
+
 def test_hybrid_strategy_calls_hybrid_search_with_rrf(session):
     row = _row(session, "问", "答")
     store = FakeHybridStore(hybrid=[SearchHit(row.id, 0.03)])
@@ -494,6 +509,67 @@ def test_analyzer_is_used_when_analysis_missing(session):
     assert calls == ["原问"]
     assert result.analysis.rewritten == "改写后"
     assert store.bm25_calls[0][0] == "改写后 词"
+
+
+def test_disabled_query_rewrite_skips_analyzer_and_uses_fallback(
+    session, monkeypatch
+):
+    row = _row(session, "q", "a")
+    store = FakeHybridStore(bm25=[SearchHit(row.id, 1.2)])
+    calls = []
+
+    def boom(query):
+        calls.append(query)
+        raise AssertionError("analyzer must not be called when rewrite is off")
+
+    monkeypatch.setattr(
+        "app.rag.retrieval.get_settings",
+        lambda: SimpleNamespace(
+            query_rewrite_enabled=False,
+            hybrid_recall_top_k=50,
+            rerank_top_n=10,
+            hybrid_rrf_k=60,
+        ),
+    )
+
+    result = retrieve_hybrid(
+        "邮费咋算",
+        strategy=RetrievalStrategy.BM25,
+        session=session,
+        store=store,
+        analyzer=boom,
+    )
+
+    assert calls == []
+    assert result.analysis.original == "邮费咋算"
+    assert result.analysis.rewritten == "邮费咋算"
+    assert result.analysis.keywords == ["运费", "配送费"]
+    assert result.analysis.rewritten_by == "fallback"
+    assert store.bm25_calls[0][0] == "邮费咋算 运费 配送费"
+
+
+def test_injected_analysis_wins_even_when_rewrite_disabled(session, monkeypatch):
+    row = _row(session, "q", "a")
+    store = FakeHybridStore(bm25=[SearchHit(row.id, 1.2)])
+    monkeypatch.setattr(
+        "app.rag.retrieval.get_settings",
+        lambda: SimpleNamespace(
+            query_rewrite_enabled=False,
+            hybrid_recall_top_k=50,
+            rerank_top_n=10,
+            hybrid_rrf_k=60,
+        ),
+    )
+
+    result = retrieve_hybrid(
+        "q",
+        strategy=RetrievalStrategy.BM25,
+        session=session,
+        store=store,
+        analysis=FIXED_ANALYSIS,
+    )
+
+    assert result.analysis is FIXED_ANALYSIS
 
 
 def test_default_strategy_is_hybrid_rerank(session):

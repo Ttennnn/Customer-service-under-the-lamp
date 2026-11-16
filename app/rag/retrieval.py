@@ -37,7 +37,7 @@ from app.db import session as db_session
 from app.models import KnowledgeChunk
 from app.rag.embedding import get_embedder
 from app.rag.milvus_store import get_vector_store
-from app.rag.query_understanding import QueryAnalysis, analyze
+from app.rag.query_understanding import QueryAnalysis, analyze, expand_synonyms
 from app.rag.rerank import RerankError, get_reranker
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,17 @@ def build_filter_expr(
     if content_type is not None:
         clauses.append(f"content_type == {_quote(content_type)}")
     return " and ".join(clauses) or None
+
+
+def _dedupe(tokens: list[str]) -> list[str]:
+    """Drop empty/duplicate tokens while preserving first-seen order."""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token and token not in seen:
+            seen.add(token)
+            unique.append(token)
+    return unique
 
 
 def _as_chunk(row: KnowledgeChunk, score: float) -> RetrievedChunk:
@@ -198,8 +209,10 @@ def retrieve_hybrid(
     """Run one of the four retrieval strategies and return ranked chunks.
 
     ``analysis`` takes precedence over ``analyzer``; when neither is supplied
-    :func:`analyze` runs the LLM rewrite (with its deterministic fallback).
-    Recall defaults to ``settings.hybrid_recall_top_k`` and the final cut to
+    :func:`analyze` runs the LLM rewrite (with its deterministic fallback),
+    unless ``settings.query_rewrite_enabled`` is false, in which case the
+    deterministic analysis is built directly without the LLM.  Recall defaults
+    to ``settings.hybrid_recall_top_k`` and the final cut to
     ``settings.rerank_top_n``.
 
     Scores carry the strategy's own semantics and must not be compared across
@@ -215,13 +228,33 @@ def retrieve_hybrid(
         top_k = settings.rerank_top_n
 
     if analysis is None:
-        analysis = (analyzer or analyze)(query)
+        if settings.query_rewrite_enabled:
+            analysis = (analyzer or analyze)(query)
+        else:
+            # Rewrite disabled: skip the LLM entirely and use the same
+            # deterministic analysis :func:`analyze` falls back to.
+            analysis = QueryAnalysis(
+                original=query,
+                rewritten=query,
+                keywords=expand_synonyms(query),
+                rewritten_by="fallback",
+            )
 
     if store is None:
         store = get_vector_store()
 
     expr = build_filter_expr(category, content_type)
-    bm25_text = " ".join([analysis.rewritten, *analysis.keywords])
+    # Spec §4/§6: BM25 query = rewritten + LLM keywords + static expansions,
+    # even when the LLM already returned some of the synonyms.
+    bm25_text = " ".join(
+        _dedupe(
+            [
+                analysis.rewritten,
+                *analysis.keywords,
+                *expand_synonyms(analysis.original),
+            ]
+        )
+    )
 
     if strategy is RetrievalStrategy.DENSE:
         if embedder is None:

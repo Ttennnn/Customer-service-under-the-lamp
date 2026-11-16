@@ -101,7 +101,7 @@ def test_upsert_one_row_per_eval_id_across_strategies(session):
     assert later.last_seen_at >= first_seen_at
 
 
-def test_upsert_reopens_without_clearing_resolution_metadata(session):
+def test_upsert_reopens_clears_resolution_keeps_resolved_at(session):
     first = upsert_faith_case(session, make_payload())
     first.status = "已解决"
     first.resolution = "已补充 FAQ"
@@ -113,5 +113,5 @@ def test_upsert_reopens_without_clearing_resolution_metadata(session):
 
     assert again.id == first.id
     assert again.status == "未解决"
+    assert again.resolution is None
     assert again.resolved_at == datetime(2026, 11, 2)
-    assert again.resolution == "已补充 FAQ"

@@ -87,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     print(
         f"eval_retrieval: cases={len(cases)} "
-        f"top_k={settings.faq_top_k} threshold={settings.faq_score_threshold}"
+        f"dense_top_k={settings.faq_top_k} "
+        f"score_threshold={settings.faq_score_threshold} "
+        f"(legacy dense Top-K + cutoff)"
     )
 
     passed = 0
@@ -97,7 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         expect_hit = case.get("expect_hit", True)
         print(f"\n[{number}/{len(cases)}] query={query!r} expect_hit={expect_hit}")
         try:
-            hits = retrieve(query)
+            # Explicit threshold keeps the ch03 dense Top-K + score cutoff
+            # contract; without it retrieve() defaults to hybrid_rerank and
+            # the negative (expect_hit=false) cases would always see hits.
+            hits = retrieve(query, threshold=settings.faq_score_threshold)
         except Exception as exc:  # noqa: BLE001 - an eval run reports, never crashes
             failed += 1
             print(f"  ERROR: {exc}")
