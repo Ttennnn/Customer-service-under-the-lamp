@@ -1,9 +1,26 @@
 """Pure scoring-helper tests for the evaluation harness (no network)."""
 
 from app.jobs.eval_qa_mining import score_mining_case, summarize_dedup
+from app.jobs.eval_rag import citation_validity, score_retrieval_case
 from app.jobs.eval_retrieval import score_faq_case
 from app.rag.retrieval import RetrievedChunk
 from app.services.qa_mining import ExtractedQA
+
+
+def make_chunk(chunk_id: int, section_path: str) -> RetrievedChunk:
+    return RetrievedChunk(chunk_id, 0.9, "问", "答", section_path, "售后", "faq")
+
+
+def test_recall_dedupes_same_section_and_handles_multi_hop():
+    chunks = [make_chunk(1, "A > X"), make_chunk(2, "A > X"), make_chunk(3, "A > Y")]
+    case = {"answerable": True, "ground_truth": {"section_paths": ["A > X", "A > Y"]}}
+    s = score_retrieval_case(case, chunks[:2])
+    assert s.recall_at_5 == 0.5 and s.mrr_at_10 == 1.0
+
+
+def test_citation_validity_counts_unknown_numbers():
+    assert citation_validity("见 [1] 和 [9]", [{"n": 1}]) == 0.5
+    assert citation_validity("没有编号", [{"n": 1}]) is None
 
 
 def test_score_hit_by_keyword():
