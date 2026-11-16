@@ -10,6 +10,15 @@ def test_ddl_contains_both_tables_and_utf8_statement():
     assert TABLES == ("low_confidence_questions", "faith_cases")
 
 
+def test_low_confidence_fk_column_matches_signed_conversations_id():
+    sql = "\n".join(_load_statements())
+    # Existing ch01 conversations.id is signed BIGINT; MySQL rejects an
+    # UNSIGNED FK column (error 3780). The user approved this one-word
+    # deviation on 2026-11-16.
+    assert "conversation_id BIGINT UNSIGNED" not in sql
+    assert "conversation_id BIGINT          NULL" in sql
+
+
 def test_load_statements_drops_comments_and_empty_statements():
     statements = _load_statements()
     assert len(statements) == len(TABLES) + 1  # SET NAMES + one CREATE per table

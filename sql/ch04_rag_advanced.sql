@@ -9,9 +9,11 @@
 -- (否则 latin1 默认的 mysql client 会把中文 double-encode,ENUM 值存成乱码)
 SET NAMES utf8mb4;
 
+-- 2026-11-16 用户拍板:现有 conversations.id 是 signed BIGINT(不是 UNSIGNED),
+-- 新表 conversation_id 改为 signed BIGINT 以匹配 FK;其余 DDL 保持用户原文。
 CREATE TABLE low_confidence_questions (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  conversation_id BIGINT UNSIGNED NULL                    COMMENT '来源会话',
+  conversation_id BIGINT          NULL                    COMMENT '来源会话',
   raw_question    TEXT            NOT NULL                COMMENT '用户原话,带情绪口语',
   source          ENUM('retrieval_low_conf','self_check','user_feedback') NOT NULL COMMENT '入池入口:检索证据低 / 生成自评不足 / 用户反馈未解决',
   reason          TEXT            NULL                    COMMENT '判不能的原因,留作复盘',
