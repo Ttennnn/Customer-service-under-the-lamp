@@ -28,3 +28,21 @@ def test_ch03_settings_defaults():
     assert s.chunk_max_chars == 500
     assert s.chunk_overlap_chars == 80
     assert s.qa_dedup_threshold == 0.92
+
+
+def test_ch04_defaults_exist():
+    s = Settings(openai_api_key="x")
+    assert s.milvus_hybrid_collection == "knowledge_hybrid"
+    assert s.hybrid_recall_top_k == 50 and s.hybrid_rrf_k == 60
+    assert s.rerank_top_n == 10
+    assert s.rerank_model == "BAAI/bge-reranker-v2-m3"
+    assert s.rerank_base_url == ""
+    assert s.rerank_api_key == ""
+    assert s.rerank_timeout_s == 10.0
+    assert s.query_rewrite_enabled is True
+
+
+def test_build_llm_accepts_temperature():
+    s = Settings(_env_file=None, openai_api_key="sk-test")
+    assert build_llm(s).temperature == 0.7
+    assert build_llm(s, temperature=0.0).temperature == 0.0

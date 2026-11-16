@@ -11,13 +11,19 @@ class FakeClient:
         self.search_result = [
             [{"id": "chunk_1", "distance": 0.8, "entity": {"chunk_id": 1}}]
         ]
+        self.hybrid_result = [
+            [{"id": "chunk_1", "distance": 0.9, "entity": {"chunk_id": 1}}]
+        ]
         self.collection_exists = False
         self.has_collection_calls = 0
         self.fields = []
+        self.functions = []
         self.indexes = []
         self.create_calls = []
         self.loaded = []
         self.search_calls = []
+        self.hybrid_calls = []
+        self.dropped = []
 
     def has_collection(self, name):
         self.has_collection_calls += 1
@@ -25,10 +31,14 @@ class FakeClient:
 
     def create_schema(self, **kw):
         fields = self.fields
+        functions = self.functions
 
         class S:
             def add_field(self, name, datatype, **kwargs):
                 fields.append({"name": name, "datatype": datatype, **kwargs})
+
+            def add_function(self, function):
+                functions.append(function)
 
         return S()
 
@@ -66,6 +76,25 @@ class FakeClient:
         self.search_calls.append(kw)
         return self.search_result
 
+    def hybrid_search(
+        self, collection_name, reqs, ranker=None, limit=10, output_fields=None, **kw
+    ):
+        self.hybrid_calls.append(
+            {
+                "collection_name": collection_name,
+                "reqs": reqs,
+                "ranker": ranker,
+                "limit": limit,
+                "output_fields": output_fields,
+                **kw,
+            }
+        )
+        return self.hybrid_result
+
+    def drop_collection(self, name):
+        self.dropped.append(name)
+        self.collection_exists = False
+
     def get_collection_stats(self, name):
         return {"row_count": 7}
 
@@ -86,14 +115,35 @@ def test_ensure_creates_schema_index_and_loads():
         },
         {"name": "chunk_id", "datatype": DataType.INT64},
         {"name": "vector", "datatype": DataType.FLOAT_VECTOR, "dim": 1024},
+        {
+            "name": "text",
+            "datatype": DataType.VARCHAR,
+            "max_length": 8192,
+            "enable_analyzer": True,
+            "analyzer_params": {"type": "chinese"},
+        },
+        {"name": "sparse", "datatype": DataType.SPARSE_FLOAT_VECTOR},
+        {"name": "category", "datatype": DataType.VARCHAR, "max_length": 255},
+        {"name": "content_type", "datatype": DataType.VARCHAR, "max_length": 32},
+        {"name": "section_path", "datatype": DataType.VARCHAR, "max_length": 512},
     ]
     assert c.indexes == [
         {
             "field_name": "vector",
             "index_type": "FLAT",
             "metric_type": "COSINE",
-        }
+        },
+        {
+            "field_name": "sparse",
+            "index_name": "sparse_inverted",
+            "index_type": "SPARSE_INVERTED_INDEX",
+            "metric_type": "BM25",
+            "params": {"bm25_k1": 1.2, "bm25_b": 0.75},
+        },
+        {"field_name": "category", "index_type": "INVERTED"},
+        {"field_name": "content_type", "index_type": "INVERTED"},
     ]
+    assert c.functions and c.functions[0].name == "bm25_fn"
     assert c.loaded == ["knowledge"]
 
 
@@ -139,6 +189,10 @@ def test_ensure_upsert_search_delete():
         "id": "chunk_1",
         "chunk_id": 1,
         "vector": [0.0] * 1024,
+        "text": "",
+        "category": "",
+        "content_type": "",
+        "section_path": "",
     }
     assert s.search([0.0] * 1024, 3)[0].chunk_id == 1
     s.delete_ids(["chunk_1"])
@@ -216,6 +270,7 @@ def test_get_vector_store_builds_and_caches(monkeypatch):
     class FakeSettings:
         milvus_uri = "http://milvus:19530"
         milvus_collection = "knowledge"
+        milvus_hybrid_collection = "knowledge_hybrid"
         embedding_dim = 1024
 
     class FakeMilvusClient:
@@ -229,5 +284,109 @@ def test_get_vector_store_builds_and_caches(monkeypatch):
     store = store_module.get_vector_store()
     assert store_module.get_vector_store() is store
     assert created == ["http://milvus:19530"]
-    assert store.collection == "knowledge"
+    assert store.collection == "knowledge_hybrid"
     assert store.dim == 1024
+
+
+def test_hybrid_schema_has_text_bm25_function_and_scalar_fields():
+    c = FakeClient()
+    KnowledgeVectorStore(c, "knowledge_hybrid", 1024).ensure_collection()
+    names = {f["name"] for f in c.fields}
+    assert {
+        "id",
+        "chunk_id",
+        "vector",
+        "text",
+        "sparse",
+        "category",
+        "content_type",
+        "section_path",
+    } <= names
+    text = next(f for f in c.fields if f["name"] == "text")
+    assert text["enable_analyzer"] is True
+    assert text["analyzer_params"] == {"type": "chinese"}
+    assert c.functions and c.functions[0].name == "bm25_fn"
+    assert any(
+        i["field_name"] == "sparse" and i["metric_type"] == "BM25"
+        for i in c.indexes
+    )
+
+
+def test_upsert_includes_bm25_text_and_metadata():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    s.upsert(
+        [
+            VectorItem(
+                "chunk_1",
+                1,
+                [0.0] * 1024,
+                "商品\n型号\nLX-A100",
+                "商品",
+                "manual",
+                "商品型号与参数 > LX-A100 落地灯",
+            )
+        ]
+    )
+    assert c.upserted[1][0]["text"] == "商品\n型号\nLX-A100"
+    assert c.upserted[1][0]["category"] == "商品"
+
+
+def test_dense_search_passes_vector_and_filter():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    hits = s.dense_search([0.5] * 1024, 50, expr='content_type == "manual"')
+
+    call = c.search_calls[-1]
+    assert call["data"] == [[0.5] * 1024]
+    assert call["anns_field"] == "vector"
+    assert call["search_params"] == {"metric_type": "COSINE"}
+    assert call["filter"] == 'content_type == "manual"'
+    assert hits[0].chunk_id == 1
+
+
+def test_bm25_search_passes_raw_text_and_filter():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    s.bm25_search("LX-A100", 50, expr='category == "商品"')
+    call = c.search_calls[-1]
+    assert call["data"] == ["LX-A100"]
+    assert call["anns_field"] == "sparse"
+    assert call["search_params"] == {"metric_type": "BM25"}
+    assert call["filter"] == 'category == "商品"'
+
+
+def test_hybrid_search_builds_two_requests_and_rrf():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    hits = s.hybrid_search([0.1] * 1024, "LX-A100", 50, rrf_k=60)
+    reqs = c.hybrid_calls[-1]["reqs"]
+    assert [r.anns_field for r in reqs] == ["vector", "sparse"]
+    # pymilvus 3.0.3's RRFRanker stores k privately; use its public dict().
+    assert c.hybrid_calls[-1]["ranker"].dict()["params"]["k"] == 60
+    assert c.hybrid_calls[-1]["limit"] == 50
+    assert c.hybrid_calls[-1]["output_fields"] == ["chunk_id"]
+    assert hits[0].chunk_id == 1
+
+
+def test_hybrid_search_passes_filter_to_both_requests():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    s.hybrid_search(
+        [0.1] * 1024, "LX-A100", 50, expr='category == "商品"'
+    )
+    reqs = c.hybrid_calls[-1]["reqs"]
+    assert [r.expr for r in reqs] == ['category == "商品"', 'category == "商品"']
+
+
+def test_recreate_collection_drops_only_hybrid_and_recreates():
+    c = FakeClient()
+    s = KnowledgeVectorStore(c, "knowledge_hybrid", 1024)
+    s.ensure_collection()
+    assert s._ensured is True
+
+    s.recreate_collection()
+
+    assert c.dropped == ["knowledge_hybrid"]
+    assert s._ensured is True
+    assert len(c.create_calls) == 2

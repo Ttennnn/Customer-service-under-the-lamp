@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 16
     milvus_uri: str = "http://localhost:19530"
     milvus_collection: str = "knowledge"
+    milvus_hybrid_collection: str = "knowledge_hybrid"
+    hybrid_recall_top_k: int = 50
+    hybrid_rrf_k: int = 60
+    rerank_top_n: int = 10
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_base_url: str = ""
+    rerank_api_key: str = ""
+    rerank_timeout_s: float = 10.0
+    query_rewrite_enabled: bool = True
     faq_top_k: int = 3
     faq_score_threshold: float = 0.5
     knowledge_docs_dir: str = "knowledge"
@@ -29,13 +38,13 @@ class Settings(BaseSettings):
     qa_dedup_threshold: float = 0.92
 
 
-def build_llm(settings: Settings) -> ChatOpenAI:
+def build_llm(settings: Settings, temperature: float = 0.7) -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.model_name,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         streaming=True,
-        temperature=0.7,
+        temperature=temperature,
     )
 
 

@@ -1,15 +1,21 @@
-"""Thin Milvus wrapper for the ``knowledge`` collection.
+"""Thin Milvus wrapper for the hybrid ``knowledge_hybrid`` collection.
 
-The collection stores one vector per knowledge chunk::
+Each record mirrors one MySQL knowledge chunk::
 
-    id        VARCHAR(64)  primary key (``chunk_{chunk_id}``)
-    chunk_id  INT64        MySQL ``knowledge_chunks.id``
-    vector    FLOAT_VECTOR(1024)  BGE-M3 embedding
+    id            VARCHAR(64)  primary key (``chunk_{chunk_id}``)
+    chunk_id      INT64        MySQL ``knowledge_chunks.id``
+    vector        FLOAT_VECTOR(1024)  BGE-M3 dense embedding
+    text          VARCHAR(8192)       analyzed text (BM25 input)
+    sparse        SPARSE_FLOAT_VECTOR BM25 function output
+    category      VARCHAR(255)
+    content_type  VARCHAR(32)
+    section_path  VARCHAR(512)
 
-The index is ``FLAT`` with ``COSINE`` metric and the collection uses strong
-consistency, so a write is immediately visible to the next search.  The
-wrapper is deliberately small: it does not embed text, own sessions, or
-interpret chunk content.
+Dense search uses ``FLAT``/``COSINE``; BM25 uses the native Milvus ``text``
+analyzer (Chinese) plus a ``SPARSE_INVERTED_INDEX`` and the ``BM25`` metric.
+Hybrid search issues one dense and one BM25 request and fuses them with RRF.
+The wrapper is deliberately small: it does not embed text, own sessions, or
+interpret chunk content.  The legacy ``knowledge`` collection is untouched.
 """
 
 from __future__ import annotations
@@ -17,7 +23,14 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from pymilvus import DataType, MilvusClient
+from pymilvus import (
+    AnnSearchRequest,
+    DataType,
+    Function,
+    FunctionType,
+    MilvusClient,
+    RRFRanker,
+)
 
 from app.config import get_settings
 
@@ -27,6 +40,10 @@ class VectorItem:
     vector_id: str
     chunk_id: int
     vector: list[float]
+    text: str = ""
+    category: str = ""
+    content_type: str | None = None
+    section_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,10 +77,40 @@ class KnowledgeVectorStore:
             )
             schema.add_field("chunk_id", DataType.INT64)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dim)
+            schema.add_field(
+                "text",
+                DataType.VARCHAR,
+                max_length=8192,
+                enable_analyzer=True,
+                analyzer_params={"type": "chinese"},
+            )
+            schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
+            schema.add_field("category", DataType.VARCHAR, max_length=255)
+            schema.add_field("content_type", DataType.VARCHAR, max_length=32)
+            schema.add_field("section_path", DataType.VARCHAR, max_length=512)
+            schema.add_function(
+                Function(
+                    name="bm25_fn",
+                    function_type=FunctionType.BM25,
+                    input_field_names=["text"],
+                    output_field_names=["sparse"],
+                )
+            )
 
             index_params = self.client.prepare_index_params()
             index_params.add_index(
                 field_name="vector", index_type="FLAT", metric_type="COSINE"
+            )
+            index_params.add_index(
+                field_name="sparse",
+                index_name="sparse_inverted",
+                index_type="SPARSE_INVERTED_INDEX",
+                metric_type="BM25",
+                params={"bm25_k1": 1.2, "bm25_b": 0.75},
+            )
+            index_params.add_index(field_name="category", index_type="INVERTED")
+            index_params.add_index(
+                field_name="content_type", index_type="INVERTED"
             )
 
             self.client.create_collection(
@@ -77,6 +124,18 @@ class KnowledgeVectorStore:
             self.client.load_collection(self.collection)
         self._ensured = True
 
+    def recreate_collection(self) -> None:
+        """Drop and recreate only this (hybrid) collection, then reload.
+
+        The legacy ``knowledge`` collection is never involved: this store is
+        bound to a single collection name.  Any cached "ensured" state is
+        reset so the next call rebuilds the schema/function/index.
+        """
+        if self.client.has_collection(self.collection):
+            self.client.drop_collection(self.collection)
+        self._ensured = False
+        self.ensure_collection()
+
     def upsert(self, items: list[VectorItem]) -> None:
         self.ensure_collection()
         self.client.upsert(
@@ -86,12 +145,20 @@ class KnowledgeVectorStore:
                     "id": item.vector_id,
                     "chunk_id": item.chunk_id,
                     "vector": item.vector,
+                    "text": item.text,
+                    "category": item.category,
+                    # Milvus VARCHAR fields here are not nullable; empty string
+                    # keeps 3-arg VectorItem constructors insertable while the
+                    # authoritative value still lives in MySQL.
+                    "content_type": item.content_type or "",
+                    "section_path": item.section_path or "",
                 }
                 for item in items
             ],
         )
 
     def search(self, vector: list[float], top_k: int) -> list[SearchHit]:
+        """Legacy dense alias kept for existing ch03 callers/tests."""
         self.ensure_collection()
         results = self.client.search(
             collection_name=self.collection,
@@ -101,6 +168,76 @@ class KnowledgeVectorStore:
             limit=top_k,
             output_fields=["chunk_id"],
         )
+        return self._parse_hits(results)
+
+    def dense_search(
+        self, vector: list[float], top_k: int, expr: str | None = None
+    ) -> list[SearchHit]:
+        self.ensure_collection()
+        results = self.client.search(
+            collection_name=self.collection,
+            data=[vector],
+            anns_field="vector",
+            search_params={"metric_type": "COSINE"},
+            limit=top_k,
+            filter=expr or "",
+            output_fields=["chunk_id"],
+        )
+        return self._parse_hits(results)
+
+    def bm25_search(
+        self, query_text: str, top_k: int, expr: str | None = None
+    ) -> list[SearchHit]:
+        self.ensure_collection()
+        results = self.client.search(
+            collection_name=self.collection,
+            # BM25 search takes the raw query string; the analyzer runs server
+            # side against the ``text`` field via the BM25 function.
+            data=[query_text],
+            anns_field="sparse",
+            search_params={"metric_type": "BM25"},
+            limit=top_k,
+            filter=expr or "",
+            output_fields=["chunk_id"],
+        )
+        return self._parse_hits(results)
+
+    def hybrid_search(
+        self,
+        vector: list[float],
+        query_text: str,
+        top_k: int,
+        expr: str | None = None,
+        rrf_k: int = 60,
+    ) -> list[SearchHit]:
+        self.ensure_collection()
+        reqs = [
+            AnnSearchRequest(
+                [vector],
+                "vector",
+                {"metric_type": "COSINE"},
+                limit=top_k,
+                expr=expr,
+            ),
+            AnnSearchRequest(
+                [query_text],
+                "sparse",
+                {"metric_type": "BM25"},
+                limit=top_k,
+                expr=expr,
+            ),
+        ]
+        results = self.client.hybrid_search(
+            self.collection,
+            reqs,
+            ranker=RRFRanker(k=rrf_k),
+            limit=top_k,
+            output_fields=["chunk_id"],
+        )
+        return self._parse_hits(results)
+
+    @staticmethod
+    def _parse_hits(results) -> list[SearchHit]:
         if not results:
             return []
 
@@ -132,7 +269,7 @@ _store_lock = threading.Lock()
 
 
 def get_vector_store() -> KnowledgeVectorStore:
-    """Return the process-wide Milvus store, building it from settings once."""
+    """Return the process-wide hybrid Milvus store, built from settings once."""
     global _store
 
     with _store_lock:
@@ -140,7 +277,7 @@ def get_vector_store() -> KnowledgeVectorStore:
             settings = get_settings()
             _store = KnowledgeVectorStore(
                 MilvusClient(uri=settings.milvus_uri),
-                collection=settings.milvus_collection,
+                collection=settings.milvus_hybrid_collection,
                 dim=settings.embedding_dim,
             )
         return _store
