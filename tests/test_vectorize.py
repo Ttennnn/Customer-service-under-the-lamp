@@ -2,7 +2,12 @@ import pytest
 
 from app.models import KnowledgeChunk
 from app.rag.milvus_store import VectorItem
-from app.rag.vectorize import vector_id_for, vectorization_text, vectorize_pending
+from app.rag.vectorize import (
+    vector_id_for,
+    vectorization_text,
+    vectorize_all,
+    vectorize_pending,
+)
 
 
 class FakeEmbedder:
@@ -175,3 +180,21 @@ def test_wrong_dimension_fails_before_upsert_and_stays_pending(session):
 def test_empty_pending_returns_zero_report(session):
     r = vectorize_pending(session, FakeEmbedder(), FakeStore())
     assert (r.processed, r.failed) == (0, 0)
+
+
+def test_vectorize_pending_writes_bm25_text_and_metadata(session):
+    c = _chunk(session)
+    s = FakeStore()
+    vectorize_pending(session, FakeEmbedder(), s)
+    item = s.items[0]
+    assert item.text == "售后\n问\n答"
+    assert item.category == "售后" and item.content_type == "faq"
+    assert item.section_path == "文档 > 节"
+
+
+def test_vectorize_all_reprocesses_done_rows(session):
+    c = _chunk(session, status="done")
+    e = FakeEmbedder()
+    s = FakeStore()
+    r = vectorize_all(session, e, s)
+    assert r.processed == 1 and s.items[0].chunk_id == c.id
