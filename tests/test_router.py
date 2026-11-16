@@ -13,6 +13,7 @@ from app.rag.router import is_pure_knowledge_question
         "退款多久到账",
         "可以开发票吗",
         "能不能上门取件",
+        "快递费怎么算",
     ],
 )
 def test_pure_knowledge_question_is_true(message):
@@ -26,6 +27,10 @@ def test_pure_knowledge_question_is_true(message):
         "查一下物流进度",
         "帮我催单",
         "快递单号是多少",
+        "能不能帮我转人工",
+        "帮我催一下",
+        "我要投诉",
+        "物流到哪了",
         "你好",
         "",
         "LX-Z900 的色温是多少，另外我的订单1001到哪了",
