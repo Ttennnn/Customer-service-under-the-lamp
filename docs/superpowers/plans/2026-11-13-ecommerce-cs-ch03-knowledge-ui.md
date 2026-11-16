@@ -1,4 +1,6 @@
-# ch04 知识录入页(`/kb`) Implementation Plan
+# ch03 知识录入页(`/kb`) Implementation Plan(原 ch04)
+
+> 2026-11-16 章节归位:本计划原编号 ch04,已并入 ch03;原 ch04 让位给「RAG 进阶」。分支名 `feature/ch04-knowledge-ui` 为历史记录,保留不改。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.13, FastAPI 0.162.4, Starlette 1.10.0, SQLAlchemy 2.x, MySQL, python-multipart, pytest, 原生 HTML/CSS/JS.
 
-**Spec:** `docs/superpowers/specs/2026-11-12-ecommerce-cs-ch04-knowledge-ui-design.md`
+**Spec:** `docs/superpowers/specs/2026-11-12-ecommerce-cs-ch03-knowledge-ui-design.md`
 
 ## Global Constraints
 
@@ -21,7 +23,7 @@
 - 不新增数据库表;不改 `sql/ch03_knowledge.sql`;不改 Milvus 集合 schema。
 - 无认证,本地 demo;页面与交付说明明确不要暴露公网。
 - 构建中上传/建库均返回 409;构建状态只存单进程内存。
-- 后端 TDD;每个任务完成即追加 `dev-notes/ch04.md`(四件事:用户原话/产出/拒绝纠偏/翻车返工)。
+- 后端 TDD;每个任务完成即追加 `dev-notes/ch03.md`(四件事:用户原话/产出/拒绝纠偏/翻车返工)。
 - 分支:`feature/ch04-knowledge-ui`,从 `feature/ch02-tools` 起(ch03 已合并)。
 - 新增依赖仅 `python-multipart`;不引入前端框架/队列/新库。
 
@@ -37,7 +39,7 @@
 
 ### Before Task 1: 计划评审留痕
 
-- [ ] **Append the plan-review entry to `dev-notes/ch04.md`** under `## 阶段:计划评审通过`: user's approval words, plan path, self-review conclusion (spec coverage / step scan / type consistency / review focus / proportion), rejections/corrections, rework. Do this before Task 1.
+- [ ] **Append the plan-review entry to `dev-notes/ch03.md`** under `## 阶段:计划评审通过`: user's approval words, plan path, self-review conclusion (spec coverage / step scan / type consistency / review focus / proportion), rejections/corrections, rework. Do this before Task 1.
 
 ---
 
@@ -118,7 +120,7 @@ Expected: PASS; existing ch03 loader/build tests unchanged.
 - [ ] **Step 5: Append dev-notes + commit**
 
 ```bash
-git add app/rag/docs.py app/jobs/build_knowledge.py tests/test_docs.py tests/test_build_knowledge.py dev-notes/ch04.md
+git add app/rag/docs.py app/jobs/build_knowledge.py tests/test_docs.py tests/test_build_knowledge.py dev-notes/ch03.md
 git commit -m "feat: load root and uploads with upload shadowing"
 ```
 
@@ -238,7 +240,7 @@ Expected: PASS.
 - [ ] **Step 5: Append dev-notes + commit**
 
 ```bash
-git add app/services/kb_build.py tests/test_kb_build.py dev-notes/ch04.md
+git add app/services/kb_build.py tests/test_kb_build.py dev-notes/ch03.md
 git commit -m "feat: add KB build state machine and status counts"
 ```
 
@@ -327,7 +329,7 @@ Expected: PASS.
 - [ ] **Step 5: Append dev-notes + commit**
 
 ```bash
-git add app/api/__init__.py app/api/kb.py app/main.py requirements.txt tests/test_kb_api.py dev-notes/ch04.md
+git add app/api/__init__.py app/api/kb.py app/main.py requirements.txt tests/test_kb_api.py dev-notes/ch03.md
 git commit -m "feat: add KB files/status/build API"
 ```
 
@@ -423,7 +425,7 @@ Expected: PASS.
 - [ ] **Step 5: Append dev-notes + commit**
 
 ```bash
-git add app/api/kb.py tests/test_kb_api.py dev-notes/ch04.md
+git add app/api/kb.py tests/test_kb_api.py dev-notes/ch03.md
 git commit -m "feat: add validated markdown upload with metadata injection"
 ```
 
@@ -477,7 +479,7 @@ Run uvicorn and `curl -fsS http://localhost:8000/kb | head`; expected 200/HTML. 
 - [ ] **Step 5: Append dev-notes + commit**
 
 ```bash
-git add app/static/kb.html app/api/kb.py app/main.py tests/test_kb_api.py dev-notes/ch04.md
+git add app/static/kb.html app/api/kb.py app/main.py tests/test_kb_api.py dev-notes/ch03.md
 git commit -m "feat: add /kb knowledge entry page"
 ```
 
@@ -486,7 +488,7 @@ git commit -m "feat: add /kb knowledge entry page"
 ### Task 6: Integration acceptance and delivery notes
 
 **Files:**
-- Modify: `dev-notes/ch04.md`
+- Modify: `dev-notes/ch03.md`
 
 **Interfaces:**
 - Consumes all prior tasks.
@@ -545,7 +547,7 @@ Optionally upload a same-name file (e.g. `退货政策.md`) and confirm `/kb/api
 
 - [ ] **Step 5: Append dev-notes + commit**
 
-Append `## 阶段:验收与交付` to `dev-notes/ch04.md` with:
+Append `## 阶段:验收与交付` to `dev-notes/ch03.md` with:
 - user's range words (`上传 Markdown → 触发建库 → 看 pending/done`; `/kb` at 8000);
 - demo commands and test counts;
 - acceptance results (upload metadata injection, build status, shadowing, invalid file rejection);
@@ -553,19 +555,19 @@ Append `## 阶段:验收与交付` to `dev-notes/ch04.md` with:
 - spec/plan paths.
 
 ```bash
-git add dev-notes/ch04.md
+git add dev-notes/ch03.md
 git commit -m "docs: record ch04 knowledge UI acceptance"
 ```
 
 - [ ] **Step 6: Request code review, then finish**
 
-Use `superpowers:requesting-code-review` (or `/code-review`) on the ch04 branch; append the review conclusion and any fixes to `dev-notes/ch04.md`. Then use `superpowers:finishing-a-development-branch` to merge/retain the branch, and append the finish decision to dev-notes.
+Use `superpowers:requesting-code-review` (or `/code-review`) on the ch04 branch; append the review conclusion and any fixes to `dev-notes/ch03.md`. Then use `superpowers:finishing-a-development-branch` to merge/retain the branch, and append the finish decision to dev-notes.
 
 ---
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-11-13-ecommerce-cs-ch04-knowledge-ui.md`. Please review the plan. Which execution approach would you prefer?
+Plan complete and saved to `docs/superpowers/plans/2026-11-13-ecommerce-cs-ch03-knowledge-ui.md`. Please review the plan. Which execution approach would you prefer?
 
 - **Subagent-driven** — a fresh subagent implements each task and a fresh reviewer checks it before the next one starts, then a whole-branch review at the end. Most thorough; costs a fresh context per task and per review.
 - **Native** — I implement every task myself in this session, then one fresh reviewer on the most capable model checks the whole branch. Cheapest and fastest; no independent review until the end.

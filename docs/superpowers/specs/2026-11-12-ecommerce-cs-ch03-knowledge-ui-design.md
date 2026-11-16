@@ -1,13 +1,15 @@
-# 电商智能客服系统 · 第四章:知识录入页(`/kb`)— 设计文档
+# 电商智能客服系统 · 第三章补记:知识录入页(`/kb`)— 设计文档
 
 日期:2026-11-12
-状态:待批准(待 builder 预审 / 待用户批准)
+状态:已实现并合并(2026-11-13);2026-11-16 由原「第四章」并入第三章
+
+> 章节归位说明:原第四章「知识录入页」并入第三章;原第四章编号让位给「RAG 进阶」。本文档内容除标题/编号外保持原样。
 
 ## Intent & Why
 
 ch03 已经把知识库后端流水线做完了:Markdown 结构感知切分、MySQL + Milvus 双写、历史对话挖矿、`query_faq` 向量检索,验收通过。但知识录入目前只有 CLI:`build_knowledge`、`mine_qa`、`vectorize`。知识运营人员没有页面可用。
 
-第四章在**现有 FastAPI 8000 端口**上提供一个知识录入页 `http://localhost:8000/kb`:
+知识录入页在**现有 FastAPI 8000 端口**上提供一个入口 `http://localhost:8000/kb`:
 
 - 上传 Markdown;
 - 一键触发建库;
@@ -60,7 +62,7 @@ ch03 已经把知识库后端流水线做完了:Markdown 结构感知切分、My
 - 不新增数据库表;`knowledge_chunks` / `qa_extraction_staging` 以用户 DDL 为准。
 - 只做文档建库;不触发 `mine_qa`。
 - 所有密钥/连接串继续只走 `.env`;页面不展示、不接收 API key。
-- 后端 TDD;每个任务完成补 `dev-notes/ch04.md`。
+- 后端 TDD;每个任务完成补 `dev-notes/ch03.md`。
 
 ## Context7 已核实的接口事实
 

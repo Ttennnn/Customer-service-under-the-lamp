@@ -8,6 +8,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     func,
@@ -72,3 +73,67 @@ class QaExtractionStaging(Base):
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class LowConfidenceQuestion(Base):
+    __tablename__ = "low_confidence_questions"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    conversation_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("conversations.id")
+    )
+    raw_question: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(
+        Enum(
+            "retrieval_low_conf",
+            "self_check",
+            "user_feedback",
+            name="low_confidence_source",
+        ),
+        index=True,
+    )
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
+class FaithCase(Base):
+    __tablename__ = "faith_cases"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    eval_id: Mapped[str] = mapped_column(String(16), unique=True)
+    bucket: Mapped[str] = mapped_column(String(24))
+    query: Mapped[str] = mapped_column(String(512))
+    strategy: Mapped[str] = mapped_column(
+        String(24), default="hybrid_rerank", server_default="hybrid_rerank"
+    )
+    answer: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+    citations: Mapped[Optional[list]] = mapped_column(JSON)
+    judge_model: Mapped[Optional[str]] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(
+        Enum("未解决", "已解决", "无需解决", name="faith_case_status"),
+        default="未解决",
+        server_default="未解决",
+        index=True,
+    )
+    seen_count: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1"
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+    resolution: Mapped[Optional[str]] = mapped_column(String(300))
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
