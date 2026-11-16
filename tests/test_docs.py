@@ -42,9 +42,9 @@ def test_load_documents_sorted_by_filename(tmp_path):
 
 def test_sample_docs_cover_shipping_fee():
     docs = load_documents(Path("knowledge"))
-    assert len(docs) >= 4
+    assert len(docs) == 4
     text = "\n".join(d.body for d in docs)
-    for needle in ["包邮", "99", "8 元", "邮费", "运费", "7 天"]:
+    for needle in ["包邮", "99", "10 元", "邮费", "运费", "7 天"]:
         assert needle in text
 
 

@@ -16,7 +16,12 @@ EVAL_PATH = Path("tests/eval/rag_cases.json")
 KNOWLEDGE_DIR = Path("knowledge")
 BUCKETS = {"A_policy", "B_model", "C_colloquial", "D_unanswerable", "E_multi"}
 DIFFICULTIES = {"easy", "medium", "hard"}
-ALLOWED_FILTERS = ({"category": "商品"}, {"content_type": "manual"})
+ALLOWED_FILTERS = (
+    {"category": "商品"},
+    {"category": "售后"},
+    {"content_type": "manual"},
+    {"content_type": "policy"},
+)
 
 
 def _load_cases() -> list[dict]:

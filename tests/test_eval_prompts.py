@@ -41,7 +41,7 @@ def test_self_check_samples_balance_and_required_queries():
     assert sum(1 for s in samples if not s["expect_useful"]) == 5
     queries = " ".join(s["query"] for s in samples)
     assert "支持以旧换新吗" in queries
-    assert "LX-Z900" in queries and "色温" in queries
+    assert "MH-Z900" in queries and "猫砂容量" in queries
     for sample in samples:
         assert isinstance(sample["sources"], list)
         assert isinstance(sample["expect_useful"], bool)

@@ -11,9 +11,9 @@
       "expect_keywords_any": ["退款", "到账", "原路退回"]
     },
     {
-      "query": "灯不亮了咋整",
-      "expect_rewritten_any": ["故障", "维修"],
-      "expect_keywords_any": ["故障", "维修"]
+      "query": "猫砂盆报错咋整",
+      "expect_rewritten_any": ["故障", "报错"],
+      "expect_keywords_any": ["故障", "报错", "售后"]
     },
     {
       "query": "我想换个新的",
@@ -21,9 +21,9 @@
       "expect_keywords_any": ["换货", "换新"]
     },
     {
-      "query": "尺码咋选啊",
-      "expect_rewritten_any": ["尺码"],
-      "expect_keywords_any": ["尺码", "脚长"]
+      "query": "猫砂盆能装多少猫砂",
+      "expect_rewritten_any": ["猫砂容量", "容量"],
+      "expect_keywords_any": ["猫砂容量", "容量"]
     },
     {
       "query": "发票怎么弄",
@@ -46,9 +46,9 @@
       "expect_keywords_any": ["维修", "保修"]
     },
     {
-      "query": "取件什么时候来",
-      "expect_rewritten_any": ["取件", "上门"],
-      "expect_keywords_any": ["上门取件", "取件"]
+      "query": "怎么找人工",
+      "expect_rewritten_any": ["人工客服", "转人工"],
+      "expect_keywords_any": ["人工客服", "人工"]
     }
   ]
 }
