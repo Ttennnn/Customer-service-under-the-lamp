@@ -14,6 +14,7 @@ export function Widget() {
         status={chat.status}
         onRetry={chat.retry}
         onPick={chat.send}
+        onFeedback={chat.onFeedback}
       />
       <Composer
         status={chat.status}

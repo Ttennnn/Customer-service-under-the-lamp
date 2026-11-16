@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>知识库录入</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1d2430;
+    --muted: #5c6675;
+    --border: #d9dee6;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4e0;
+    --warn-text: #8a4b00;
+    --error: #b42318;
+    --ok: #067647;
+    --bar: #e4e9f1;
+    --seed: #5c6675;
+    --upload: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f;
+      --panel: #1d232d;
+      --text: #e6ebf2;
+      --muted: #9aa6b6;
+      --border: #333d4c;
+      --accent: #6d9bff;
+      --accent-text: #0b1220;
+      --warn-bg: #3a2c12;
+      --warn-text: #ffd28a;
+      --error: #ff8a80;
+      --ok: #6ee7b7;
+      --bar: #2b3442;
+      --seed: #9aa6b6;
+      --upload: #6d9bff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .page-header, main { max-width: 960px; margin: 0 auto; }
+  .page-header { margin-bottom: 20px; }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  h2 { margin: 0 0 12px; font-size: 18px; }
+  h3 { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+  .subtitle { margin: 0 0 10px; color: var(--muted); }
+  .warning {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border: 1px solid currentColor;
+  }
+  main { display: grid; gap: 16px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  form { display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .field { display: grid; gap: 4px; }
+  label { font-weight: 600; }
+  input[type="file"], input[type="text"], select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+  }
+  button {
+    justify-self: start;
+    padding: 9px 18px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .hint { margin: 0; color: var(--muted); font-size: 13px; }
+  .message { margin: 10px 0 0; min-height: 1.4em; color: var(--muted); }
+  .message.error, .error { color: var(--error); }
+  .results, .files { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+  .result, .file-item {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .result.saved { color: var(--ok); }
+  .result.rejected { color: var(--error); }
+  .file-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .file-name { font-weight: 600; word-break: break-all; }
+  .file-meta { color: var(--muted); font-size: 13px; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .badge-seed { color: var(--seed); }
+  .badge-upload { color: var(--upload); }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .card {
+    display: grid;
+    gap: 2px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+  }
+  .card-label { color: var(--muted); font-size: 13px; }
+  .card strong { font-size: 24px; }
+  .progress {
+    height: 12px;
+    margin-top: 14px;
+    border-radius: 999px;
+    background: var(--bar);
+    overflow: hidden;
+  }
+  .progress-bar { width: 0; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+  .progress-text { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .mined-line { margin: 12px 0 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 12px 0 0; }
+  .meta div { display: flex; gap: 8px; }
+  .meta dt { color: var(--muted); }
+  .meta dd { margin: 0; }
+  .status-block { margin-top: 16px; }
+  .report { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .report-item { padding: 3px 10px; border-radius: 8px; background: var(--bg); }
+  .last-error { margin: 0; word-break: break-word; }
+</style>
+</head>
+<body>
+<header class="page-header">
+  <h1>知识库录入</h1>
+  <p class="subtitle">上传 Markdown 后点击「开始建库」;建库会重建文档域,保留挖矿知识。</p>
+  <p class="warning" role="note">仅供本地使用,不要暴露公网。同名上传会覆盖并 shadow 同名 seed 文档。</p>
+</header>
+
+<main>
+  <section id="upload" class="panel" aria-labelledby="upload-title">
+    <h2 id="upload-title">上传 Markdown</h2>
+    <form id="upload-form">
+      <div class="field">
+        <label for="file-input">Markdown 文件(.md,可多选)</label>
+        <input id="file-input" type="file" accept=".md" multiple>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="content-type">content_type(必选)</label>
+          <select id="content-type">
+            <option value="policy">policy</option>
+            <option value="faq">faq</option>
+            <option value="manual">manual</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="category">category(可选,FAQ 建议填)</label>
+          <input id="category" type="text" placeholder="例如:商品">
+        </div>
+      </div>
+      <p class="hint">文件已有 frontmatter 时以文件内为准;没有时由所选 content_type / category 自动补全。</p>
+      <button id="upload-button" type="submit">上传</button>
+    </form>
+    <p id="upload-message" class="message" role="status" aria-live="polite"></p>
+    <ul id="upload-results" class="results" aria-live="polite"></ul>
+  </section>
+
+  <section id="files" class="panel" aria-labelledby="files-title">
+    <h2 id="files-title">有效文档</h2>
+    <p class="hint">seed = knowledge/ 根目录;upload = knowledge/uploads/;同名上传会 shadow seed。</p>
+    <p id="files-message" class="message" role="status" aria-live="polite"></p>
+    <ul id="files-list" class="files"></ul>
+  </section>
+
+  <section id="build" class="panel" aria-labelledby="build-title">
+    <h2 id="build-title">建库</h2>
+    <p class="hint">建库使用 build_knowledge(reset=True),只重建文档域,保留挖矿知识。</p>
+    <button id="build-button" type="button">开始建库</button>
+    <p id="build-message" class="message" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="status" class="panel" aria-labelledby="status-title">
+    <h2 id="status-title">构建状态</h2>
+    <div class="cards">
+      <div class="card"><span class="card-label">pending</span><strong id="stat-pending">0</strong></div>
+      <div class="card"><span class="card-label">done</span><strong id="stat-done">0</strong></div>
+      <div class="card"><span class="card-label">total</span><strong id="stat-total">0</strong></div>
+    </div>
+    <div id="progress" class="progress" role="progressbar" aria-label="文档域构建进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <p id="progress-text" class="progress-text">0 / 0(0%)</p>
+    <p id="mined-line" class="mined-line">挖矿知识保留:0 条(pending 0 / done 0)</p>
+    <dl class="meta">
+      <div><dt>开始时间</dt><dd id="started-at">—</dd></div>
+      <div><dt>结束时间</dt><dd id="finished-at">—</dd></div>
+    </dl>
+    <div class="status-block">
+      <h3>最近一次构建报告</h3>
+      <div id="last-report" class="report">暂无</div>
+    </div>
+    <div class="status-block">
+      <h3>最近一次错误</h3>
+      <p id="last-error" class="last-error">无</p>
+    </div>
+    <p id="status-message" class="message" role="status" aria-live="polite"></p>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_INTERVAL_MS = 2000;
+
+  var uploadForm = document.getElementById("upload-form");
+  var fileInput = document.getElementById("file-input");
+  var contentType = document.getElementById("content-type");
+  var categoryInput = document.getElementById("category");
+  var uploadButton = document.getElementById("upload-button");
+  var uploadMessage = document.getElementById("upload-message");
+  var uploadResults = document.getElementById("upload-results");
+
+  var filesMessage = document.getElementById("files-message");
+  var filesList = document.getElementById("files-list");
+
+  var buildButton = document.getElementById("build-button");
+  var buildMessage = document.getElementById("build-message");
+
+  var statPending = document.getElementById("stat-pending");
+  var statDone = document.getElementById("stat-done");
+  var statTotal = document.getElementById("stat-total");
+  var progress = document.getElementById("progress");
+  var progressBar = document.getElementById("progress-bar");
+  var progressText = document.getElementById("progress-text");
+  var minedLine = document.getElementById("mined-line");
+  var startedAt = document.getElementById("started-at");
+  var finishedAt = document.getElementById("finished-at");
+  var lastReport = document.getElementById("last-report");
+  var lastError = document.getElementById("last-error");
+  var statusMessage = document.getElementById("status-message");
+
+  var isRunning = false;
+  var uploadInFlight = false;
+  var buildInFlight = false;
+  var pollTimer = null;
+  var statusSeq = 0;
+  var filesSeq = 0;
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function num(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function fmtSize(bytes) {
+    var n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return "—";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KiB";
+    return (n / (1024 * 1024)).toFixed(1) + " MiB";
+  }
+
+  function fmtTime(value) {
+    if (!value) return "—";
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function setMessage(node, text, isError) {
+    node.textContent = text ? String(text) : "";
+    node.classList.toggle("error", Boolean(isError));
+  }
+
+  async function requestJSON(url, options) {
+    var response = await fetch(url, options);
+    var raw = await response.text();
+    var data = null;
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        data = null;
+      }
+    }
+    if (!response.ok) {
+      var detail = "HTTP " + response.status;
+      if (data && typeof data.detail === "string") detail = data.detail;
+      throw new Error(detail);
+    }
+    return data;
+  }
+
+  function updateControls() {
+    var busy = isRunning || uploadInFlight || buildInFlight;
+    uploadButton.disabled = busy;
+    buildButton.disabled = busy;
+    fileInput.disabled = busy;
+    contentType.disabled = busy;
+    categoryInput.disabled = busy;
+    uploadButton.textContent = uploadInFlight ? "上传中…" : "上传";
+    if (buildInFlight) buildButton.textContent = "正在启动…";
+    else if (isRunning) buildButton.textContent = "构建中…";
+    else buildButton.textContent = "开始建库";
+  }
+
+  function renderUploadResults(data) {
+    uploadResults.replaceChildren();
+    var saved = data && Array.isArray(data.saved) ? data.saved : [];
+    var rejected = data && Array.isArray(data.rejected) ? data.rejected : [];
+    if (saved.length === 0 && rejected.length === 0) {
+      uploadResults.append(el("li", "message", "没有文件被处理。"));
+      return;
+    }
+    saved.forEach(function (item) {
+      var name = item && item.name ? String(item.name) : "未知文件";
+      var type = item && item.content_type ? String(item.content_type) : "";
+      uploadResults.append(
+        el("li", "result saved", "已保存:" + name + (type ? "(" + type + ")" : ""))
+      );
+    });
+    rejected.forEach(function (item) {
+      var name = item && item.name ? String(item.name) : "未知文件";
+      var reason = item && item.reason ? String(item.reason) : "未知原因";
+      uploadResults.append(el("li", "result rejected", "已拒绝:" + name + " — " + reason));
+    });
+  }
+
+  function renderFiles(data) {
+    filesList.replaceChildren();
+    var files = data && Array.isArray(data.files) ? data.files : [];
+    setMessage(filesMessage, files.length === 0 ? "暂无有效文档。" : "");
+    files.forEach(function (item) {
+      var name = item && item.name ? String(item.name) : "未知文件";
+      var source = item && item.source === "upload" ? "upload" : "seed";
+      var li = el("li", "file-item");
+      li.append(el("span", "file-name", name));
+      li.append(el("span", "badge badge-" + source, source));
+      li.append(
+        el(
+          "span",
+          "file-meta",
+          fmtSize(item && item.size) + " · " + fmtTime(item && item.modified_at)
+        )
+      );
+      filesList.append(li);
+    });
+  }
+
+  function renderReport(report) {
+    lastReport.replaceChildren();
+    if (!report || typeof report !== "object") {
+      lastReport.textContent = "暂无";
+      return;
+    }
+    [
+      ["documents", "文档"],
+      ["chunks", "分块"],
+      ["inserted", "写入"],
+      ["reused", "复用"],
+      ["vectorized", "本次向量化"]
+    ].forEach(function (pair) {
+      lastReport.append(
+        el("span", "report-item", pair[1] + ":" + num(report[pair[0]]))
+      );
+    });
+  }
+
+  function renderStatus(data) {
+    isRunning = Boolean(data && data.running);
+    var pending = num(data && data.pending);
+    var done = num(data && data.done);
+    var total = num(data && data.total);
+    statPending.textContent = String(pending);
+    statDone.textContent = String(done);
+    statTotal.textContent = String(total);
+
+    var pct = total > 0 ? Math.min(100, Math.max(0, Math.round((done * 100) / total))) : 0;
+    progressBar.style.width = pct + "%";
+    progress.setAttribute("aria-valuenow", String(pct));
+    progressText.textContent = done + " / " + total + "(" + pct + "%)";
+
+    var minedTotal = num(data && data.mined_total);
+    var minedPending = num(data && data.mined_pending);
+    var minedDone = num(data && data.mined_done);
+    minedLine.textContent =
+      "挖矿知识保留:" + minedTotal + " 条(pending " + minedPending + " / done " + minedDone + ")";
+
+    startedAt.textContent = fmtTime(data && data.started_at);
+    finishedAt.textContent = fmtTime(data && data.finished_at);
+
+    var error = data && data.last_error ? String(data.last_error) : "";
+    lastError.textContent = error || "无";
+    lastError.classList.toggle("error", Boolean(error));
+
+    renderReport(data && data.last_report);
+    updateControls();
+  }
+
+  function schedulePoll(shouldPoll) {
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    if (shouldPoll) {
+      pollTimer = setTimeout(function () {
+        pollTimer = null;
+        refreshStatus();
+      }, POLL_INTERVAL_MS);
+    }
+  }
+
+  async function refreshFiles() {
+    var seq = ++filesSeq;
+    try {
+      var data = await requestJSON("/kb/api/files");
+      if (seq !== filesSeq) return;
+      renderFiles(data);
+    } catch (err) {
+      if (seq !== filesSeq) return;
+      setMessage(filesMessage, "文档列表加载失败:" + err.message, true);
+    }
+  }
+
+  async function refreshStatus() {
+    var seq = ++statusSeq;
+    try {
+      var data = await requestJSON("/kb/api/status");
+      if (seq !== statusSeq) return;
+      setMessage(statusMessage, "");
+      renderStatus(data);
+      schedulePoll(isRunning || num(data && data.pending) > 0);
+    } catch (err) {
+      if (seq !== statusSeq) return;
+      setMessage(statusMessage, "状态获取失败:" + err.message, true);
+      // Keep retrying: the page may have been loaded before the API is up.
+      schedulePoll(true);
+    }
+  }
+
+  uploadForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    if (uploadInFlight || isRunning) return;
+
+    setMessage(uploadMessage, "");
+    uploadResults.replaceChildren();
+    var files = Array.prototype.slice.call(fileInput.files || []);
+    if (files.length === 0) {
+      setMessage(uploadMessage, "请选择至少一个 .md 文件。", true);
+      return;
+    }
+
+    uploadInFlight = true;
+    updateControls();
+    setMessage(uploadMessage, "正在上传…");
+
+    var form = new FormData();
+    files.forEach(function (file) {
+      form.append("files", file, file.name);
+    });
+    form.append("content_type", contentType.value);
+    var category = categoryInput.value.trim();
+    if (category) form.append("category", category);
+
+    try {
+      var data = await requestJSON("/kb/api/upload", { method: "POST", body: form });
+      renderUploadResults(data);
+      var saved = data && Array.isArray(data.saved) ? data.saved.length : 0;
+      var rejected = data && Array.isArray(data.rejected) ? data.rejected.length : 0;
+      setMessage(
+        uploadMessage,
+        "上传完成:保存 " + saved + " 个,拒绝 " + rejected + " 个。",
+        rejected > 0
+      );
+      fileInput.value = "";
+      await Promise.all([refreshFiles(), refreshStatus()]);
+    } catch (err) {
+      setMessage(uploadMessage, "上传失败:" + err.message, true);
+      // A 409 means a build started elsewhere; resync so the controls disable
+      // again instead of staying stale until the next poll.
+      await refreshStatus();
+    } finally {
+      uploadInFlight = false;
+      updateControls();
+    }
+  });
+
+  buildButton.addEventListener("click", async function () {
+    if (isRunning || buildInFlight || uploadInFlight) return;
+
+    buildInFlight = true;
+    updateControls();
+    setMessage(buildMessage, "正在启动建库…");
+    try {
+      await requestJSON("/kb/api/build", { method: "POST" });
+      // The 202 already means a build is running, so keep the controls
+      // disabled until a status round-trip confirms the server state.  A
+      // stale ``isRunning === false`` here would briefly re-enable them.
+      isRunning = true;
+      updateControls();
+      setMessage(buildMessage, "建库已启动,正在轮询状态。");
+    } catch (err) {
+      setMessage(buildMessage, "启动建库失败:" + err.message, true);
+    } finally {
+      try {
+        await refreshStatus();
+      } finally {
+        buildInFlight = false;
+        updateControls();
+      }
+    }
+  });
+
+  updateControls();
+  refreshFiles();
+  refreshStatus();
+})();
+</script>
+</body>
+</html>

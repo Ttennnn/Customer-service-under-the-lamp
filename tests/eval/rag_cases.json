@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "buckets": {
+    "A_policy": "政策条款直问",
+    "B_model": "具体型号/专有名词",
+    "C_colloquial": "口语/同义改写",
+    "D_unanswerable": "知识库没有、应拒答",
+    "E_multi": "多跳/多条款组合"
+  },
+  "cases": [
+    {"id": "A01", "bucket": "A_policy", "difficulty": "easy", "query": "无理由退货的时限是多久?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 无理由退货 > 适用范围"], "must_contain": ["7 天", "不影响二次销售"]}, "filters": {"content_type": "policy"}, "notes": "直问退货时限"},
+    {"id": "A02", "bucket": "A_policy", "difficulty": "easy", "query": "退款多久能到账?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 无理由退货 > 退款时效"], "must_contain": ["原路退回", "售后规则"]}, "filters": null, "notes": "直问退款时效"},
+    {"id": "A03", "bucket": "A_policy", "difficulty": "medium", "query": "申请换货需要满足哪些条件?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 换货政策 > 换货条件"], "must_contain": ["7 天", "配件齐全", "同款换货"]}, "filters": null, "notes": "换货条件"},
+    {"id": "A04", "bucket": "A_policy", "difficulty": "medium", "query": "换货的往返运费谁承担?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 换货政策 > 换货运费"], "must_contain": ["买家承担", "平台承担"]}, "filters": null, "notes": "换货运费承担"},
+    {"id": "A05", "bucket": "A_policy", "difficulty": "medium", "query": "商品运输途中破损了怎么处理?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 运输破损处理"], "must_contain": ["48 小时", "开箱视频", "补发"]}, "filters": null, "notes": "运输破损处理"},
+    {"id": "A06", "bucket": "A_policy", "difficulty": "hard", "query": "哪些商品不支持退货?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 不支持退货的商品"], "must_contain": ["定制类", "生鲜类", "猫砂"]}, "filters": null, "notes": "退货例外清单"},
+    {"id": "A07", "bucket": "A_policy", "difficulty": "hard", "query": "预售商品付了定金后能退定金吗?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 预售与定金"], "must_contain": ["不支持无理由退定金", "尾款"]}, "filters": null, "notes": "预售定金规则"},
+
+    {"id": "B01", "bucket": "B_model", "difficulty": "easy", "query": "MH-LP100 的猫砂容量是多少?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)"], "must_contain": ["9L", "MH-LP100"]}, "filters": {"category": "商品"}, "notes": "Pro 型号"},
+    {"id": "B02", "bucket": "B_model", "difficulty": "easy", "query": "MH-LP50 适用多重的猫咪?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)"], "must_contain": ["1.5kg", "6kg", "MH-LP50"]}, "filters": null, "notes": "Lite 型号"},
+    {"id": "B03", "bucket": "B_model", "difficulty": "medium", "query": "MH-LP200 适合多猫家庭吗?废砂盒多久倒一次?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)"], "must_contain": ["多猫家庭", "3 至 5 天", "12L"]}, "filters": {"category": "商品"}, "notes": "Max 型号"},
+    {"id": "B04", "bucket": "B_model", "difficulty": "medium", "query": "MH-W40 的水箱容量和滤芯更换周期?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 自动饮水机 Plus(型号 MH-W40)"], "must_contain": ["4L", "3 周", "MH-W40"]}, "filters": {"content_type": "manual"}, "notes": "饮水机 Plus"},
+    {"id": "B05", "bucket": "B_model", "difficulty": "medium", "query": "MH-FD30 有摄像头吗?粮桶多大?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)"], "must_contain": ["1080P", "6L", "MH-FD30"]}, "filters": null, "notes": "喂食器摄像头版"},
+    {"id": "B06", "bucket": "B_model", "difficulty": "hard", "query": "MH-CAM1 的分辨率和存储方式是什么?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 全景看护摄像头(型号 MH-CAM1)"], "must_contain": ["2K", "128G", "TF 卡"]}, "filters": null, "notes": "摄像头型号"},
+    {"id": "B07", "bucket": "B_model", "difficulty": "hard", "query": "MH-LP100、MH-LP50、MH-LP200 三款的猫砂容量分别是多少?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)", "灯下商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)", "灯下商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)"], "must_contain": ["9L", "6L", "12L"]}, "filters": {"category": "商品"}, "notes": "三型号对比;需三条 section"},
+
+    {"id": "C01", "bucket": "C_colloquial", "difficulty": "easy", "query": "邮费咋算?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品与购物 FAQ > 运费怎么算"], "must_contain": ["满 99 元包邮", "10 元"]}, "filters": {"category": "商品"}, "notes": "邮费=运费"},
+    {"id": "C02", "bucket": "C_colloquial", "difficulty": "medium", "query": "钱啥时候能退回来?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 无理由退货 > 退款时效"], "must_contain": ["原路退回", "售后规则"]}, "filters": null, "notes": "口语退款时效"},
+    {"id": "C03", "bucket": "C_colloquial", "difficulty": "medium", "query": "猫砂盆一直报错咋办?", "answerable": true, "ground_truth": {"section_paths": ["灯下售后手册 > 常见故障自查"], "must_contain": ["废砂盒", "滚筒", "重启"]}, "filters": null, "notes": "口语故障自查"},
+    {"id": "C04", "bucket": "C_colloquial", "difficulty": "medium", "query": "饮水机不出水了怎么回事?", "answerable": true, "ground_truth": {"section_paths": ["灯下售后手册 > 常见故障自查"], "must_contain": ["水位", "水泵", "断电清洗"]}, "filters": null, "notes": "口语故障自查"},
+    {"id": "C05", "bucket": "C_colloquial", "difficulty": "medium", "query": "发票怎么搞?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品与购物 FAQ > 发票如何开具"], "must_contain": ["申请开票", "3 个工作日", "邮箱"]}, "filters": null, "notes": "口语发票"},
+    {"id": "C06", "bucket": "C_colloquial", "difficulty": "hard", "query": "怎么找人工客服?", "answerable": true, "ground_truth": {"section_paths": ["灯下售后手册 > 人工客服入口与时间"], "must_contain": ["联系客服", "9:00", "22:00"]}, "filters": null, "notes": "人工入口"},
+    {"id": "C07", "bucket": "C_colloquial", "difficulty": "hard", "query": "电子设备保修多久?", "answerable": true, "ground_truth": {"section_paths": ["灯下售后手册 > 保修说明"], "must_contain": ["12 个月", "人为损坏"]}, "filters": null, "notes": "保修时长"},
+
+    {"id": "D01", "bucket": "D_unanswerable", "difficulty": "easy", "query": "你们支持以旧换新吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "知识库无此政策"},
+    {"id": "D02", "bucket": "D_unanswerable", "difficulty": "easy", "query": "MH-Z900 的猫砂容量是多少?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "无此型号"},
+    {"id": "D03", "bucket": "D_unanswerable", "difficulty": "medium", "query": "能开增值税专用发票吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "只写了电子发票,无专票"},
+    {"id": "D04", "bucket": "D_unanswerable", "difficulty": "medium", "query": "有旧机回收服务吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "知识库无回收"},
+    {"id": "D05", "bucket": "D_unanswerable", "difficulty": "medium", "query": "支持企业月结吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "知识库无月结"},
+    {"id": "D06", "bucket": "D_unanswerable", "difficulty": "hard", "query": "可以购买延保服务吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "知识库无延保"},
+    {"id": "D07", "bucket": "D_unanswerable", "difficulty": "hard", "query": "你们提供宠物保险吗?", "answerable": false, "ground_truth": {"section_paths": [], "must_contain": []}, "filters": null, "notes": "知识库无保险"},
+
+    {"id": "E01", "bucket": "E_multi", "difficulty": "easy", "query": "MH-LP100 保修多久?保修期内换货,运费谁承担?", "answerable": true, "ground_truth": {"section_paths": ["灯下售后手册 > 保修说明", "灯下退货退款政策 > 换货政策 > 换货运费"], "must_contain": ["12 个月", "平台承担"]}, "filters": null, "notes": "型号+保修+换货运费"},
+    {"id": "E02", "bucket": "E_multi", "difficulty": "easy", "query": "无理由退货的时限是多久?退款多久到账?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 无理由退货 > 适用范围", "灯下退货退款政策 > 无理由退货 > 退款时效"], "must_contain": ["7 天", "原路退回"]}, "filters": null, "notes": "退货时限+退款时效"},
+    {"id": "E03", "bucket": "E_multi", "difficulty": "medium", "query": "换货需要什么条件?换货处理时限多久?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 换货政策 > 换货条件", "灯下售后手册 > 常见问题处理时限"], "must_contain": ["配件齐全", "5 个工作日"]}, "filters": null, "notes": "换货条件+处理时限"},
+    {"id": "E04", "bucket": "E_multi", "difficulty": "medium", "query": "MH-LP200 的猫砂容量多大?保修多久?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)", "灯下售后手册 > 保修说明"], "must_contain": ["12L", "12 个月"]}, "filters": null, "notes": "型号+保修"},
+    {"id": "E05", "bucket": "E_multi", "difficulty": "hard", "query": "金卡会员的运费权益和售后权益分别是什么?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品与购物 FAQ > 会员运费权益", "灯下售后手册 > 会员专属售后权益"], "must_contain": ["3 次免运费", "优先客服"]}, "filters": null, "notes": "会员两类权益"},
+    {"id": "E06", "bucket": "E_multi", "difficulty": "hard", "query": "MH-FD30 支持远程投喂吗?保修多久?", "answerable": true, "ground_truth": {"section_paths": ["灯下商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)", "灯下售后手册 > 保修说明"], "must_contain": ["App 远程", "12 个月"]}, "filters": null, "notes": "型号功能+保修"},
+    {"id": "E07", "bucket": "E_multi", "difficulty": "hard", "query": "运输破损怎么处理?相关运费谁承担?", "answerable": true, "ground_truth": {"section_paths": ["灯下退货退款政策 > 运输破损处理", "灯下退货退款政策 > 退换货运费承担"], "must_contain": ["48 小时", "平台承担"]}, "filters": null, "notes": "破损处理+运费承担"}
+  ]
+}

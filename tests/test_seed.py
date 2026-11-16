@@ -1,5 +1,7 @@
 # tests/test_seed.py
-from app.db.seed import FAQ_SEED, seed_faq
+from sqlalchemy import create_engine, inspect
+
+from app.db.seed import FAQ_SEED, init_db, seed_faq
 from app.models import Conversation, Message
 
 def test_faq_seed_has_return_policy_and_no_shipping():
@@ -7,6 +9,19 @@ def test_faq_seed_has_return_policy_and_no_shipping():
     answers = " ".join(r["answer"] for r in FAQ_SEED)
     assert "退货" in qs or "退货" in answers
     assert "邮费" not in qs and "邮费" not in answers
+
+def test_init_db_does_not_create_ch03_knowledge_tables(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path}/seed.db")
+    init_db(engine)
+    try:
+        names = set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+    assert {"conversations", "messages", "faq", "tickets"} <= names
+    assert "knowledge_chunks" not in names
+    assert "qa_extraction_staging" not in names
+
 
 def test_seed_faq_inserts_rows(session):
     n = seed_faq(session)

@@ -1,11 +1,21 @@
-"""Table initialization and FAQ seed data.
+"""Create the pre-ch03 tables and seed demo FAQ data.
 
-This module creates all tables (via ``Base.metadata.create_all``) and seeds the
-``faq`` table with a small, curated set of Chinese Q&A entries used by the
-chatbot's FAQ retrieval tool.
+This module creates only the conversation-domain tables (``conversations``,
+``messages``, ``faq``, ``tickets``) and seeds the ``faq`` table with a small,
+curated set of Chinese Q&A entries.
 
-Note: the seed intentionally does NOT include any entry about 邮费 (shipping
-fee) — that is a documented expected miss for the FAQ retrieval acceptance.
+It deliberately does **not** create ``knowledge_chunks`` or
+``qa_extraction_staging``.  The ch03 schema is owned by
+``sql/ch03_knowledge.sql`` and applied by ``python -m app.db.init_ch03``; run
+``init_ch03`` before (or independently of) this seed on a fresh MySQL database.
+Letting this seed create ORM-shaped knowledge tables would make ``init_ch03``
+see the tables as already present and silently bypass the authoritative DDL.
+
+The ``faq`` table remains as demo/seed data (retained by design) but no longer
+feeds retrieval — ch03's ``query_faq`` reads the vector knowledge base.  The
+seed intentionally contains no 邮费 (shipping fee) entry; that is no longer an
+expected retrieval miss because shipping-fee knowledge now comes from
+``knowledge/运费与配送说明.md``.
 """
 
 from sqlalchemy.engine import Engine
@@ -13,7 +23,16 @@ from sqlalchemy.orm import Session
 
 from app.db.base import Base
 from app.db.session import get_engine, get_session_factory
-from app.models import Faq
+from app.models import Conversation, Faq, Message, Ticket
+
+# The ch02-and-earlier table set.  Knowledge tables are intentionally absent:
+# they must come from the authoritative DDL via ``python -m app.db.init_ch03``.
+SEED_TABLES = (
+    Conversation.__table__,
+    Message.__table__,
+    Faq.__table__,
+    Ticket.__table__,
+)
 
 FAQ_SEED: list[dict] = [
     {
@@ -52,8 +71,12 @@ def seed_faq(session: Session) -> int:
 
 
 def init_db(engine: Engine) -> None:
-    """Create all tables from ``Base.metadata``."""
-    Base.metadata.create_all(engine)
+    """Create only the pre-ch03 tables listed in :data:`SEED_TABLES`.
+
+    The ch03 knowledge tables are created by ``app.db.init_ch03`` from
+    ``sql/ch03_knowledge.sql``, never by this seed path.
+    """
+    Base.metadata.create_all(engine, tables=list(SEED_TABLES))
 
 
 def main() -> None:

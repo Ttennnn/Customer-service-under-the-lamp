@@ -1,4 +1,8 @@
-import type { ChatErrorKind, ChatRequest } from "../types";
+import type {
+  ChatErrorKind,
+  ChatRequest,
+  CitationSource,
+} from "../types";
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -12,6 +16,31 @@ export interface StreamHandlers {
   onError: (kind: ChatErrorKind) => void;
   onDone: () => void;
   onTool: (tool: { name: string; label: string }) => void;
+  onSources: (sources: CitationSource[]) => void;
+}
+
+/** 把后端 sources 帧转成前端类型;字段缺失时降级,非法元素直接丢弃。 */
+function toCitationSources(value: unknown): CitationSource[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: CitationSource[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.n !== "number") continue;
+    out.push({
+      n: row.n,
+      chunk_id: typeof row.chunk_id === "number" ? row.chunk_id : 0,
+      section_path:
+        typeof row.section_path === "string" ? row.section_path : "",
+      question: typeof row.question === "string" ? row.question : "",
+      answer: typeof row.answer === "string" ? row.answer : "",
+      category: typeof row.category === "string" ? row.category : "",
+      content_type:
+        typeof row.content_type === "string" ? row.content_type : "",
+      score: typeof row.score === "number" ? row.score : 0,
+    });
+  }
+  return out;
 }
 
 /**
@@ -116,10 +145,22 @@ export async function streamChat(
         return;
       }
       resetTimer();
-      // 后端 error 帧是唯一带 JSON 的 data
+      // 后端的 tool / sources / error 帧都是 JSON data
       if (data.startsWith("{")) {
         try {
           const obj: unknown = JSON.parse(data);
+          if (
+            obj &&
+            typeof obj === "object" &&
+            "type" in obj &&
+            (obj as { type: unknown }).type === "sources"
+          ) {
+            const sources = toCitationSources(
+              (obj as { sources?: unknown }).sources,
+            );
+            if (sources) handlers.onSources(sources);
+            return;
+          }
           if (
             obj &&
             typeof obj === "object" &&

@@ -4,11 +4,45 @@ import { extractAfterSale } from "../api/extract";
 import type {
   ChatErrorKind,
   ChatStatus,
+  CitationSource,
   ExtractResult,
+  FeedbackValue,
   Message,
 } from "../types";
 
 const SESSION_KEY = "lamp-cs-session-id";
+const FEEDBACK_KEY = "lamp-cs-feedback";
+
+interface FeedbackRecord {
+  sessionId: string;
+  messageId: string;
+  value: FeedbackValue;
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * 追加一条反馈记录。按 messageId 幂等:StrictMode 下 reducer 可能被重复执行,
+ * 再次调用不应写出第二条。
+ */
+function appendFeedbackRecord(record: FeedbackRecord): void {
+  try {
+    const raw = localStorage.getItem(FEEDBACK_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    const list: unknown[] = Array.isArray(parsed) ? parsed : [];
+    const exists = list.some(
+      (item) =>
+        !!item &&
+        typeof item === "object" &&
+        (item as { messageId?: unknown }).messageId === record.messageId,
+    );
+    if (exists) return;
+    list.push(record);
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage 不可用(隐私模式/配额满)时不阻断交互
+  }
+}
 
 function getOrCreateSessionId(): string {
   const existing = sessionStorage.getItem(SESSION_KEY);
@@ -34,8 +68,13 @@ interface ChatState {
 type Action =
   | { type: "send"; message: string }
   | { type: "resend" }
-  | { type: "stream_start"; tool?: { name: string; label: string } }
+  | {
+      type: "stream_start";
+      tool?: { name: string; label: string };
+      sources?: CitationSource[];
+    }
   | { type: "token"; text: string }
+  | { type: "feedback"; messageId: string; value: FeedbackValue }
   | { type: "error_frame"; text: string }
   | { type: "fail"; kind: ChatErrorKind }
   | { type: "done" }
@@ -75,9 +114,27 @@ function reducer(state: ChatState, action: Action): ChatState {
             role: "assistant",
             content: "",
             ...(action.tool ? { tool: action.tool } : {}),
+            ...(action.sources ? { sources: action.sources } : {}),
           },
         ],
       };
+    case "feedback": {
+      const idx = state.messages.findIndex((m) => m.id === action.messageId);
+      if (idx < 0) return state;
+      const target = state.messages[idx];
+      // 一次性锁定:已有反馈的消息不再改变,也不写第二条记录
+      if (target.role !== "assistant" || target.feedback) return state;
+      appendFeedbackRecord({
+        sessionId: state.sessionId,
+        messageId: action.messageId,
+        value: action.value,
+        content: target.content,
+        createdAt: new Date().toISOString(),
+      });
+      const messages = [...state.messages];
+      messages[idx] = { ...target, feedback: action.value };
+      return { ...state, messages };
+    }
     case "token": {
       const messages = [...state.messages];
       const last = messages[messages.length - 1];
@@ -139,6 +196,7 @@ export function useChat() {
   const sessionIdRef = useRef<string>(getOrCreateSessionId());
   const abortRef = useRef<AbortController | null>(null);
   const pendingToolRef = useRef<{ name: string; label: string } | null>(null);
+  const pendingSourcesRef = useRef<CitationSource[] | null>(null);
   const [state, dispatch] = useReducer(reducer, {
     sessionId: sessionIdRef.current,
     messages: [],
@@ -150,6 +208,8 @@ export function useChat() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    // 新一轮开始,清掉上一轮未消费的 sources,避免串到新回答
+    pendingSourcesRef.current = null;
 
     if (appendUser) {
       dispatch({ type: "send", message: text });
@@ -166,12 +226,21 @@ export function useChat() {
             started = true;
             const tool = pendingToolRef.current;
             pendingToolRef.current = null;
-            dispatch({ type: "stream_start", tool: tool ?? undefined });
+            const sources = pendingSourcesRef.current;
+            pendingSourcesRef.current = null;
+            dispatch({
+              type: "stream_start",
+              tool: tool ?? undefined,
+              sources: sources ?? undefined,
+            });
           }
           dispatch({ type: "token", text: t });
         },
         onTool: (tool) => {
           pendingToolRef.current = tool;
+        },
+        onSources: (sources) => {
+          pendingSourcesRef.current = sources;
         },
         onErrorFrame: (t) => dispatch({ type: "error_frame", text: t }),
         onError: (kind) => dispatch({ type: "fail", kind }),
@@ -203,6 +272,10 @@ export function useChat() {
     dispatch({ type: "abort" });
   }, []);
 
+  const onFeedback = useCallback((messageId: string, value: FeedbackValue) => {
+    dispatch({ type: "feedback", messageId, value });
+  }, []);
+
   const extract = useCallback(async () => {
     const lastUser = [...state.messages]
       .reverse()
@@ -226,6 +299,7 @@ export function useChat() {
     retry,
     stop,
     extract,
+    onFeedback,
     hasUserMessage,
   };
 }
