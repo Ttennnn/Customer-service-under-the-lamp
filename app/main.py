@@ -37,11 +37,17 @@ def get_llm_dep(settings: Settings = Depends(get_settings)):
     return build_llm(settings)
 
 
+def get_self_check_llm_dep(settings: Settings = Depends(get_settings)):
+    """Build the temperature-0 LLM used for the evidence self-check."""
+    return build_llm(settings, temperature=0.0)
+
+
 @app.post("/chat", response_class=EventSourceResponse)
 def chat(
     req: ChatRequest,
     settings: Settings = Depends(get_settings),
     llm=Depends(get_llm_dep),
+    self_check_llm=Depends(get_self_check_llm_dep),
     session: Session = Depends(get_db),
 ):
     """Stream an assistant reply as Server-Sent Events.
@@ -60,6 +66,7 @@ def chat(
             req.session_id,
             req.message,
             settings.max_context_tokens,
+            self_check_llm=self_check_llm,
         ):
             yield ServerSentEvent(raw_data=token)
     except Exception:  # noqa: BLE001 - stream already in flight, must end cleanly
