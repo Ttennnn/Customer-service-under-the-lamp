@@ -19,5 +19,5 @@ def test_registry_has_five_tools_and_five_labels():
 
 def test_tool_timeout_override():
     from app.tools.registry import tool_timeout
-    assert tool_timeout("query_faq") == 8.0
+    assert tool_timeout("query_faq") == 25.0
     assert tool_timeout("query_order") == 5.0

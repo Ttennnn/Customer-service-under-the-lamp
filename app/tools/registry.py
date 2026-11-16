@@ -24,7 +24,9 @@ ALL_TOOLS: list[BaseTool] = [
 TOOLS_BY_NAME: dict[str, BaseTool] = {t.name: t for t in ALL_TOOLS}
 
 # 各工具的执行超时(秒);未列出的工具使用默认值。
-TOOL_TIMEOUTS: dict[str, float] = {"query_faq": 8.0}
+# query_faq 覆盖改写 + 召回 + 重排的完整链路,给到 25 秒(低于前端 30 秒
+# 无数据超时);配合 stream_chat 的 retries=0,超时只发生一次。
+TOOL_TIMEOUTS: dict[str, float] = {"query_faq": 25.0}
 DEFAULT_TOOL_TIMEOUT = 5.0
 
 

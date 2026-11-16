@@ -70,7 +70,7 @@ def test_query_faq_tool_uses_extended_timeout(session, monkeypatch):
         return "问:邮费怎么算?\n答:满 99 元包邮"
     monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
     events = list(stream_chat(FakeFaqLLM(), session, ALL_TOOLS, "SYS", "u1", "邮费", 1000))
-    assert calls == [("query_faq", {"keyword": "邮费"}, 8.0)]
+    assert calls == [("query_faq", {"keyword": "邮费"}, 25.0)]
     assert events[-1] == "查到"
 
 def test_create_ticket_receives_cid_across_threads(session):
