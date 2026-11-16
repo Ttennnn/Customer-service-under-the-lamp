@@ -7,7 +7,17 @@ from app.services.qa_mining import ExtractedQA
 
 
 def test_score_hit_by_keyword():
-    hits = [RetrievedChunk(1, 0.7, "邮费怎么算?", "满 99 元包邮,未满收 8 元。")]
+    hits = [
+        RetrievedChunk(
+            1,
+            0.7,
+            "邮费怎么算?",
+            "满 99 元包邮,未满收 8 元。",
+            "物流/邮费",
+            "物流",
+            "faq",
+        )
+    ]
     assert score_faq_case(
         {"query": "邮费是多少", "expect_hit": True, "expect_any": ["包邮", "运费"]},
         hits,
@@ -22,7 +32,7 @@ def test_score_negative_case():
 
 
 def test_score_negative_case_fails_when_hits_present():
-    hits = [RetrievedChunk(1, 0.7, "问", "答")]
+    hits = [RetrievedChunk(1, 0.7, "问", "答", None, "售后", "faq")]
     assert not score_faq_case({"query": "老板是谁", "expect_hit": False}, hits)
 
 
