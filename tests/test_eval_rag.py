@@ -326,6 +326,43 @@ def test_retrieval_summary_excludes_rerank_failures():
     assert summary["recall_at_5"] == 1.0
 
 
+def test_generation_summary_excludes_rerank_failures():
+    from app.jobs.eval_rag import CaseRun
+
+    def run(
+        status: str,
+        *,
+        faithful: bool | None = None,
+        validity: float | None = None,
+        failed: bool = False,
+    ) -> CaseRun:
+        return CaseRun(
+            case_id="A01",
+            bucket="A_policy",
+            query="q",
+            answerable=True,
+            strategy="hybrid_rerank",
+            status=status,
+            faithful=faithful,
+            citation_validity=validity,
+            rerank_failed=failed,
+        )
+
+    runs = [
+        run("answered", faithful=True, validity=1.0),
+        run("answered", faithful=False, validity=0.0, failed=True),
+        run("refusal", failed=True),
+    ]
+    summary = eval_rag._generation_summary(runs, "hybrid_rerank")
+    # Only the successful rerank run is evaluable: including the fallback runs
+    # would report refusal_rate=1/3, faithfulness=0.5 and validity=0.5.
+    assert summary["n"] == 1
+    assert summary["refusal_rate"] == 0.0
+    assert summary["faithfulness"] == 1.0
+    assert summary["citation_validity"] == 1.0
+    assert summary["model_refusals"] == 0
+
+
 def _fake_settings():
     return SimpleNamespace(
         model_name="deepseek-chat",

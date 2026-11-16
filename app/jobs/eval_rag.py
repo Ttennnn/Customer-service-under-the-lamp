@@ -21,9 +21,10 @@ Reporting rules that are easy to get wrong:
   the reciprocal rank of the first relevant *section*.
 * D-bucket cases have no ground truth: they never enter Recall/MRR and are
   reported separately via refusal accuracy.
-* ``(case, strategy)`` runs with ``rerank_failed=True`` are excluded from the
-  ``hybrid_rerank`` aggregate and reported as fallbacks, never counted as
-  successful reranks.
+* ``(case, strategy)`` runs with ``rerank_failed=True`` are excluded from all
+  ``hybrid_rerank`` retrieval and generation aggregates (Recall/MRR,
+  Faithfulness, Refusal rate, Citation validity) and reported as fallbacks,
+  never counted as successful reranks.
 * ``self_check_error`` and ``judge_error`` are excluded from Faithfulness and
   reported separately. A model that self-declares inability is
   ``model_refusal``, separate from the evidence-gate ``refusal``.
@@ -409,11 +410,18 @@ def _retrieval_summary(runs: list[CaseRun], strategy: str) -> dict:
 def _generation_summary(runs: list[CaseRun], strategy: str) -> dict:
     """Aggregate answer metrics for one strategy.
 
-    Refusal rate is over runs where the evidence gate completed (including D).
-    Faithfulness only over successfully judged answers. Citation validity only
-    over generated answers that cited at least one number.
+    ``rerank_failed=True`` runs are excluded from every generation metric as
+    well, so a ``hybrid_rerank`` fallback can never be credited with rerank
+    quality. Refusal rate is over runs where the evidence gate completed
+    (including D). Faithfulness only over successfully judged answers.
+    Citation validity only over generated answers that cited at least one
+    number.
     """
-    relevant = [run for run in runs if run.strategy == strategy]
+    relevant = [
+        run
+        for run in runs
+        if run.strategy == strategy and not run.rerank_failed
+    ]
     attempts = [
         run for run in relevant if run.status in _GENERATION_ATTEMPT_STATUSES
     ]
@@ -627,7 +635,8 @@ def _render_report(
         [
             "",
             "口径:Recall/MRR 只统计可答题(A/B/C/E),并按 section_path 去重;",
-            "`hybrid_rerank` 的 rerank 失败样本已从该列聚合中剔除。",
+            "`hybrid_rerank` 的 rerank 失败样本已从 Recall/MRR、Faithfulness、",
+            "Refusal rate、Citation validity 聚合中剔除(D 桶拒答准确率单独统计)。",
             "Faithfulness 只统计裁判成功且未被证据门拒答的回答;",
             "Refusal rate 的分母是证据门完成的运行(含 D 桶预期拒答);",
             "Citation validity 只统计实际带 `[n]` 的生成回答。",
@@ -666,7 +675,8 @@ def _render_report(
         [
             "",
             "口径:证据门拒答(`refusal`)与模型自述无法回答(`model_refusal`)",
-            "都算正确拒答;self-check/检索/生成错误不计入分母。",
+            "都算正确拒答;self-check/检索/生成错误不计入分母;",
+            "rerank fallback 运行不剔除(本项只判断是否拒答,不评价 rerank 质量)。",
             "",
             "## Rerank fallback",
             "",
@@ -674,7 +684,8 @@ def _render_report(
             f"- case ids: {', '.join(fallback_ids) if fallback_ids else '(none)'}",
             "",
             "`rerank_failed=True` 的运行没有被当作成功的 rerank,"
-            "已从 `hybrid_rerank` 的 Recall/MRR 聚合中剔除。",
+            "已从 `hybrid_rerank` 的 Recall/MRR、Faithfulness、Refusal rate、"
+            "Citation validity 聚合中剔除。",
             "",
             "## Query rewrite fallback",
             "",
