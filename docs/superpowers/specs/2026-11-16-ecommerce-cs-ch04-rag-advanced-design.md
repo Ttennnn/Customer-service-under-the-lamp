@@ -462,7 +462,7 @@ def assess_evidence(llm, question: str, sources: list[dict]) -> EvidenceAssessme
 - `record_low_confidence` 放在独立 service(如 `app/services/low_confidence.py`),便于单测与异常隔离。
 - 自评使用 `temperature=0.0` 的独立 LLM 实例(同 provider/model),通过 `stream_chat` 的新参数 `self_check_llm` 注入;未注入时回退用主 `llm`(测试友好)。`main.py` 新增 `get_self_check_llm_dep`,内部 `build_llm(settings, temperature=0.0)`,并传给 `stream_chat`;`stream_chat` 签名变为 `stream_chat(llm, session, tools, system_prompt, user_id, message, max_tokens, self_check_llm=None)`。
 - 拒答消息不写 `sources` 以外的东西;前端正常显示。
-- 已知风险:只有模型实际调用 `query_faq` 才触发自评。System Prompt 会强化「知识类问题必须先查」,但无法数学保证;评估集的生成段直接走证据,不受此影响;现场验收会检查 SSE 里确实出现 `query_faq` 工具帧。
+- 已知风险与缓解:只有模型实际调用 `query_faq` 才触发自评。System Prompt 强化「知识类问题必须先查」,并由 `app/rag/router.py::is_pure_knowledge_question` 做确定性路由:纯知识问题在首次模型调用上强制 `tool_choice=query_faq`,订单/物流/混合意图保持 auto;强行选择不可用时记录并回退,不伪造 sources。评估集生成段直接走证据,不受此影响;现场验收检查 SSE 里确实出现 `query_faq` 工具帧。
 
 ### 9. System Prompt(`app/prompts/customer_service.py`)
 
@@ -471,7 +471,8 @@ def assess_evidence(llm, question: str, sources: list[dict]) -> EvidenceAssessme
 ```
 【知识库与引用】
 - 涉及政策、流程、费用、时效、商品型号参数、售后规则,必须先调用 query_faq 查知识库;query_product 只用于查询某个订单商品的实时价格/库存等交易信息。
-- query_faq 返回的证据带 [n] 编号。回答中的每个事实必须能对应到本轮证据的 [n];编号只能来自本轮工具结果,不得编造或复用历史编号。
+- query_faq 返回的证据带 [n] 编号。回答中的每个事实必须能对应到本轮证据的 [n];编号只能来自本轮工具结果,不得编造。
+- **每一轮知识类问题都必须使用本轮检索/证据结果**:即使历史对话里有相似答案,也不得复用历史结论或历史 [n];本轮没有 [n] 时不要输出 [n]。
 - 证据不足以回答时,明确说「知识库暂未收录/无法确认」,并建议转人工;不得用常识或推测补全。
 - 用户明确指定品类时,可把 category/content_type 传给 query_faq;不确定就不要过滤。
 
@@ -484,7 +485,8 @@ def assess_evidence(llm, question: str, sources: list[dict]) -> EvidenceAssessme
 ```
 
 - 保留既有售后范围、工具使用、转人工等约束。
-- Prompt 单测只断言关键约束存在与渲染正常;实际行为用标注样例/评估集验证。
+- Prompt 常量拆成:`_TOOL_ROUTING_RULES`(query_faq/query_product 路由 + 品类过滤)只进 `render_system_prompt()`;`_CITATION_RULES`(本轮 [n]、禁止历史复用、证据不足)与 `_NEGATIVE_RULES` 进两个 renderer。`render_answer_system_prompt()` 用于评估生成,不绑定工具,因此不包含「必须先调用 query_faq」,但保留同样的引用/拒答约束。
+- Prompt 单测断言关键约束存在与渲染正常;实际行为用标注样例/评估集验证。
 
 ### 10. 评估体系
 
