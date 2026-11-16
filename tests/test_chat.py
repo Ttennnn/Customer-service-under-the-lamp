@@ -58,7 +58,7 @@ class FakeFaqBoundLLM:
         yield FakeChunk("已"); yield FakeChunk("查到")
 
 class FakeFaqLLM:
-    def bind_tools(self, tools):
+    def bind_tools(self, tools, **kwargs):
         return FakeFaqBoundLLM()
     def stream(self, messages):
         yield FakeChunk("直接"); yield FakeChunk("回答")

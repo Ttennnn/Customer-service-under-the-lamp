@@ -50,8 +50,10 @@ class FakeBoundLLM:
 class FakeLLM:
     def __init__(self, tool_calls, final_tokens=("已", "查到")):
         self.bound = FakeBoundLLM(tool_calls, final_tokens)
+        self.bind_calls = []
 
-    def bind_tools(self, tools):
+    def bind_tools(self, tools, **kwargs):
+        self.bind_calls.append(kwargs)
         return self.bound
 
     def stream(self, messages):
@@ -155,6 +157,95 @@ def test_query_faq_emits_sources_frame(session, monkeypatch):
 
     rows = session.query(Message).order_by(Message.id).all()
     assert rows[-1].role == "assistant" and rows[-1].content == "回答见[1]"
+
+
+def test_pure_knowledge_question_forces_query_faq_tool_choice(
+    session, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.tools.faq.retrieve_hybrid",
+        lambda *a, **k: make_result([make_chunk(1)]),
+    )
+    llm = FakeLLM([faq_call()], final_tokens=("回答见[1]",))
+    assessment = FakeAssessmentLLM(EvidenceAssessment(useful=True))
+
+    frames = list(
+        stream_chat(
+            llm,
+            session,
+            ALL_TOOLS,
+            "SYS",
+            "u1",
+            "LX-A100 的色温是多少",
+            1000,
+            self_check_llm=assessment,
+        )
+    )
+
+    forced = {"type": "function", "function": {"name": "query_faq"}}
+    assert llm.bind_calls[0] == {"tool_choice": forced}
+    # The forced choice must apply to the initial call only; the final answer
+    # streams under automatic tool choice.
+    assert llm.bind_calls[-1] == {}
+    assert len(source_frames(frames)) == 1
+    assert assessment.calls == 1
+    assert frames[-1] == "回答见[1]"
+
+
+def test_order_only_question_uses_automatic_tool_choice(session, monkeypatch):
+    calls = []
+
+    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
+        calls.append((tool.name, timeout_s, retries))
+        return '{"order_id":"1001","status":"运输中"}'
+
+    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    llm = FakeLLM([order_call()], final_tokens=("订单", "运输中"))
+
+    frames = list(
+        stream_chat(
+            llm,
+            session,
+            ALL_TOOLS,
+            "SYS",
+            "u1",
+            "我的订单到哪了",
+            1000,
+        )
+    )
+
+    assert calls == [("query_order", 5.0, 1)]
+    assert llm.bind_calls == [{}]
+    assert not source_frames(frames)
+    assert frames[-2:] == ["订单", "运输中"]
+
+
+def test_mixed_question_uses_automatic_tool_choice(session, monkeypatch):
+    calls = []
+
+    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
+        calls.append((tool.name, timeout_s, retries))
+        return '{"order_id":"1001","status":"运输中"}'
+
+    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    llm = FakeLLM([order_call()], final_tokens=("订单已查到",))
+
+    frames = list(
+        stream_chat(
+            llm,
+            session,
+            ALL_TOOLS,
+            "SYS",
+            "u1",
+            "LX-Z900 的色温是多少，另外我的订单1001到哪了",
+            1000,
+        )
+    )
+
+    assert calls == [("query_order", 5.0, 1)]
+    assert llm.bind_calls == [{}]
+    assert not source_frames(frames)
+    assert frames[-1] == "订单已查到"
 
 
 def test_query_faq_useful_false_records_pool_and_refuses(session, monkeypatch):

@@ -36,6 +36,7 @@ from collections.abc import Iterator
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 
+from app.rag.router import is_pure_knowledge_question
 from app.rag.self_check import assess_evidence
 from app.services.context import build_messages
 from app.services.history import append_message, get_or_create_conversation, load_history
@@ -68,6 +69,7 @@ _MIXED_INTENT_CONSTRAINT = (
 )
 _TOOL_FAILURE_TEXT = "工具执行失败"
 _CITATION_RE = re.compile(r"\[(\d+)\]")
+_FORCED_FAQ_TOOL_CHOICE = {"type": "function", "function": {"name": "query_faq"}}
 
 
 def _persist_assistant(session: Session, conversation_id: int, text: str) -> None:
@@ -125,10 +127,42 @@ def stream_chat(
     append_message(session, cid, "user", message)
     session.commit()
 
-    bound = llm.bind_tools(tools)
-    ai_msg = bound.invoke(messages)
+    # Knowledge-only turns deterministically force ``query_faq`` on the first
+    # call, so the model cannot answer from history without consulting the
+    # knowledge base. Mixed/order turns keep automatic tool choice.
+    force_faq = is_pure_knowledge_question(message)
+    bound = None
+    if force_faq:
+        try:
+            bound = llm.bind_tools(tools, tool_choice=_FORCED_FAQ_TOOL_CHOICE)
+        except Exception:  # noqa: BLE001 - provider may reject tool_choice
+            logger.exception(
+                "provider rejected forced query_faq tool choice at bind time; "
+                "falling back to automatic tool choice"
+            )
+            force_faq = False
+    if bound is None:
+        bound = llm.bind_tools(tools)
+
+    try:
+        ai_msg = bound.invoke(messages)
+    except Exception:
+        if not force_faq:
+            raise
+        logger.exception(
+            "provider rejected forced query_faq tool choice at call time; "
+            "retrying with automatic tool choice"
+        )
+        force_faq = False
+        bound = llm.bind_tools(tools)
+        ai_msg = bound.invoke(messages)
 
     if not getattr(ai_msg, "tool_calls", None):
+        if force_faq:
+            logger.warning(
+                "forced query_faq tool choice produced no tool call; "
+                "answering without knowledge sources"
+            )
         full = ""
         for chunk in llm.stream(messages):
             text = getattr(chunk, "content", None) or ""
@@ -138,6 +172,14 @@ def stream_chat(
         append_message(session, cid, "assistant", full)
         session.commit()
         return
+
+    if force_faq and not any(
+        tc["name"] == "query_faq" for tc in ai_msg.tool_calls
+    ):
+        logger.warning(
+            "forced query_faq tool choice was not honored; "
+            "no knowledge sources for this turn"
+        )
 
     # One collector per turn; tools register their evidence on this mutable
     # object. It is set before the loop and re-set right before each call.
@@ -245,8 +287,12 @@ def stream_chat(
                     _persist_assistant(session, cid, _LOW_CONFIDENCE_REFUSAL_TEXT)
                     return
 
+    # The forced choice applies to the initial call only: stream the final
+    # answer under automatic tool choice so it cannot force another tool call.
+    final_bound = llm.bind_tools(tools) if force_faq else bound
+
     final_full = ""
-    for chunk in bound.stream(final_messages):
+    for chunk in final_bound.stream(final_messages):
         text = getattr(chunk, "content", None) or ""
         if text:
             final_full += text
