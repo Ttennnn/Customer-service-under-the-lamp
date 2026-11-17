@@ -84,3 +84,19 @@ def test_build_messages_drops_tool_round_atomically():
     # tool 结果太大 → tool_calls 与其 tool 结果整块丢弃,不能只丢一半留下孤儿 ToolMessage
     names = [type(m).__name__ for m in msgs]
     assert names == ["SystemMessage", "AIMessage", "HumanMessage"]
+
+
+def test_trim_messages_keeps_system_and_atomic_tool_round():
+    from app.services.context import trim_messages
+
+    system = SystemMessage(content="S")
+    history = [
+        HumanMessage(content="old"),
+        AIMessage(content="", tool_calls=[{"name": "query_order", "args": {}, "id": "c1"}]),
+        ToolMessage(content="X" * 20, tool_call_id="c1"),
+        AIMessage(content="answer"),
+    ]
+    msgs = trim_messages(system, history, max_tokens=30)
+    assert [type(m).__name__ for m in msgs] == [
+        "SystemMessage", "AIMessage", "ToolMessage", "AIMessage"
+    ]
