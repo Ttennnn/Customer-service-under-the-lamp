@@ -27,6 +27,7 @@ class CustomerServiceState(TypedDict, total=False):
     confidence: float | None
     gate_passed: bool
     gate_reason: str
+    rerank_failed: bool
     answer: str
     suggested_actions: list[dict]
     step_count: int
