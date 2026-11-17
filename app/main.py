@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
@@ -128,9 +128,17 @@ def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
     return result.model_dump()
 
 
-# The chat widget is a Vite/React app. In local runs we serve its production
-# build from FastAPI so the chat page shares port 8000 with the API. The dev
-# server on 5173 still works for frontend iteration.
+# The root URL is the chat entry point. Chapter 5 owns the chat experience
+# (including the complaint buttons), so send visitors to the native page at
+# ``/ch05`` instead of the legacy React widget.
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ch05", status_code=307)
+
+
+# The legacy Vite/React widget is still mounted for any static assets when a
+# production build exists. The ``/`` route above takes precedence for the page
+# itself; ``POST /chat`` remains available for API compatibility.
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 if _FRONTEND_DIST.is_dir():
@@ -139,19 +147,3 @@ if _FRONTEND_DIST.is_dir():
         StaticFiles(directory=_FRONTEND_DIST, html=True),
         name="frontend",
     )
-else:
-    @app.get("/", response_class=HTMLResponse)
-    def frontend_build_missing():
-        return HTMLResponse(
-            """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<title>聊天页尚未构建</title>
-<body style="font-family:sans-serif;background:#171310;color:#f2e9de;padding:40px;line-height:1.8">
-<h1>聊天页尚未构建</h1>
-<p>先在 <code>frontend/</code> 下执行 <code>npm run build</code>,然后重启后端。</p>
-<p>也可以继续用 Vite 开发服务器:<code>cd frontend &amp;&amp; npm run dev</code>,地址
-<a style="color:#f0b76a" href="http://localhost:5173/">http://localhost:5173/</a>。</p>
-<p><a style="color:#f0b76a" href="/kb">知识录入页</a> ·
-<a style="color:#f0b76a" href="/rag-eval">RAG 评估</a></p>
-</body></html>""",
-            status_code=503,
-        )

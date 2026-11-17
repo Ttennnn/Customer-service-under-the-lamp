@@ -44,3 +44,11 @@ def test_ch05_page_route_serves_html():
     assert response.headers["content-type"].startswith("text/html")
     assert "转人工" in response.text
     assert "lamp-cs-ch05-session-id" in response.text
+
+
+def test_root_redirects_to_ch05_page():
+    with TestClient(app) as client:
+        response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ch05"

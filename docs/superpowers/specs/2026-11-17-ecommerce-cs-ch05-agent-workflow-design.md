@@ -105,6 +105,7 @@
 | 决策 | 选择 | 理由 |
 | --- | --- | --- |
 | 前端落点 | 新增 `/ch05` 原生页 + `/ch05/chat`，保留现有 React `/chat` | 章节隔离，满足原生技术栈要求 |
+| 根路径入口 | `GET /` 307 重定向到 `/ch05` | 用户在 8000 根路径直接测试投诉按钮；旧 React 聊天页让位，`POST /chat` 保留 |
 | 工单语义 | 修改 `create_ticket`：只写 `tickets`，不再改会话状态 | 「转人工」与「建工单」互不绑定 |
 | Checkpointer | 新增 `langgraph-checkpoint-sqlite`，SQLite 持久化 | 进程重启后仍能续聊，符合持久化要求 |
 | 置信度闸 | Top-1 重排分 ≥ `CONFIDENCE_MIN_SCORE` | 本章最简版；正式版留给可观测章节 |
@@ -481,7 +482,8 @@ final_state = graph.get_state(config).values
 
 ### 7.3 与旧页面的关系
 
-- 现有 React `/`、`POST /chat` 完全保留；ch05 只在 `/ch05` 验证新架构。
+- `GET /` 返回 307 重定向到 `/ch05`（2026-11-17 用户要求）：根路径直接进入带投诉按钮的 ch05 页面，旧 React 页面不再作为聊天入口；若存在 `frontend/dist`，其静态资源仍由 StaticFiles 挂载。
+- `POST /chat` 与旧 React 组件完全保留，供旧接口/测试兼容；`/` 不再返回 React 页面或「尚未构建」503。
 - `create_ticket` 的副作用移除会让旧 `/chat` 在 Agent 调工单时不再改会话状态；这是本次明确的产品语义修正。
 
 ## 8. 文件变更清单
