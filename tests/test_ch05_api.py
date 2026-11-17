@@ -127,7 +127,13 @@ def test_ch05_ticket_invalid_type_422(client):
 
 
 def test_ch05_ticket_failure_502(client, session, monkeypatch):
-    monkeypatch.setattr("app.api.ch05.execute_tool", lambda *args, **kwargs: "工具执行失败")
+    calls = []
+
+    def fake_execute_tool(*args, **kwargs):
+        calls.append(kwargs)
+        return "工具执行失败"
+
+    monkeypatch.setattr("app.api.ch05.execute_tool", fake_execute_tool)
 
     r = client.post(
         "/ch05/tickets", json={"session_id": "s1", "description": "描述"}
@@ -135,6 +141,8 @@ def test_ch05_ticket_failure_502(client, session, monkeypatch):
 
     assert r.status_code == 502
     assert session.query(Ticket).count() == 0
+    # 工单写入非幂等:必须禁用自动重试,超时宁可 502 让用户手动确认重试。
+    assert calls == [{"timeout_s": 5, "retries": 0}]
 
 
 def _fake_request_state():

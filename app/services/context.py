@@ -39,17 +39,26 @@ def _keep_newest_blocks(
     budget: int,
     *,
     inclusive: bool,
+    always_keep_newest: bool = False,
 ) -> list[BaseMessage]:
     """Keep the newest whole blocks that fit in *budget*.
 
     ``inclusive=True`` allows a block whose cost makes the total exactly equal
     to *budget*; ``inclusive=False`` requires the total to stay strictly below
     it. Either way a block is kept or dropped atomically.
+
+    ``always_keep_newest=True`` retains the newest block unconditionally, even
+    when it alone exceeds *budget*. The returned total may then exceed the
+    budget; only older blocks are trimmed.
     """
     kept_blocks: list[list[BaseMessage]] = []
     used = 0
-    for block in reversed(blocks):
+    for index, block in enumerate(reversed(blocks)):
         cost = sum(estimate_tokens(m.content) for m in block)
+        if index == 0 and always_keep_newest:
+            kept_blocks.append(list(block))
+            used += cost
+            continue
         fits = used + cost <= budget if inclusive else used + cost < budget
         if not fits:
             break
@@ -70,13 +79,17 @@ def trim_messages(
     first and is never dropped, even when it alone exceeds the budget. History
     blocks are atomic: a tool call and its tool result stay together.
 
-    Unlike :func:`build_messages`, the returned prompt is kept strictly below
-    ``max_tokens`` when history has to be trimmed; this leaves the Agent
-    subgraph a token of headroom on every model call.
+    The newest history block (the current user question or the latest tool
+    round) is always retained, even when it alone exceeds the budget, so the
+    Agent never loses the question or the freshest tool results. Older blocks
+    are kept strictly below ``max_tokens`` when possible; the prompt may
+    therefore exceed ``max_tokens`` when the newest block is oversized.
     """
     budget = max_tokens - estimate_tokens(system.content)
     blocks = _partition_blocks(history)
-    kept = _keep_newest_blocks(blocks, budget, inclusive=False)
+    kept = _keep_newest_blocks(
+        blocks, budget, inclusive=False, always_keep_newest=True
+    )
     return [system, *kept]
 
 

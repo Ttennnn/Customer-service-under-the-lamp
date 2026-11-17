@@ -6,7 +6,7 @@ def test_ch05_settings_defaults():
     assert s.agent_max_steps == 6
     assert s.agent_token_budget == 12000
     assert s.agent_tool_result_max_chars == 2000
-    assert s.confidence_min_score == 0.3
+    assert s.confidence_min_score == 0.1
     assert s.langgraph_checkpoint_db == ".data/ch05-checkpoints.sqlite"
 
 

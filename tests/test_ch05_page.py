@@ -19,6 +19,23 @@ def test_ch05_page_has_required_contract_strings():
     assert "confirm(" in html
 
 
+def test_ch05_page_has_no_data_timeout_contract():
+    """Pin the spec §7.2 90-second no-data watchdog and retry path."""
+    html = (Path(__file__).parents[1] / "app" / "static" / "ch05.html").read_text(
+        encoding="utf-8"
+    )
+    for text in [
+        "AbortController",
+        "90000",
+        "AbortError",
+        "setTimeout",
+        "clearTimeout",
+        "startWatchdog",
+        "重试",
+    ]:
+        assert text in html
+
+
 def test_ch05_page_route_serves_html():
     with TestClient(app) as client:
         response = client.get("/ch05")

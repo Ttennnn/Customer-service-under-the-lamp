@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     agent_max_steps: int = 6
     agent_token_budget: int = 12000
     agent_tool_result_max_chars: int = 2000
-    confidence_min_score: float = 0.3
+    confidence_min_score: float = 0.1
     langgraph_checkpoint_db: str = ".data/ch05-checkpoints.sqlite"
 
 

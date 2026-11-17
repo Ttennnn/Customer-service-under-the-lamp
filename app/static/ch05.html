@@ -227,6 +227,11 @@
   var TICKET_LABEL = "建工单";
   var TRANSFERRED_TEXT = "已转接人工客服";
   var HUMAN_GREETING = "您好，我是客服小猫，请问有什么可以帮您的？";
+  // Spec §7.2: no data for 90 seconds means the stream is dead. Agent turns
+  // can involve several tools, so this is a no-progress timeout, not a total
+  // request timeout: every reader chunk resets it.
+  var NO_DATA_TIMEOUT_MS = 90000;
+  var TIMEOUT_TEXT = "请求超时，请稍后重试。";
 
   var messages = document.getElementById("messages");
   var emptyHint = document.getElementById("empty-hint");
@@ -513,9 +518,32 @@
     appendToken(ctx, payload);
   }
 
-  function readSSE(response, onPayload) {
+  function startWatchdog(controller, onTimeout) {
+    var timer = null;
+    function touch() {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(function () {
+        timer = null;
+        onTimeout();
+        controller.abort();
+      }, NO_DATA_TIMEOUT_MS);
+    }
+    touch();
+    return {
+      touch: touch,
+      clear: function () {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+    };
+  }
+
+  function readSSE(response, onPayload, onActivity) {
     if (!response.body || typeof response.body.getReader !== "function") {
       return response.text().then(function (text) {
+        if (onActivity) onActivity();
         drainEvents(text.replace(/\r\n/g, "\n") + "\n\n", onPayload);
       });
     }
@@ -529,6 +557,9 @@
           buffer = drainEvents(buffer.replace(/\r\n/g, "\n") + "\n\n", onPayload);
           return;
         }
+        // Any bytes from the server count as progress and reset the watchdog,
+        // so a slow-but-alive stream is never cut off mid-answer.
+        if (onActivity) onActivity();
         buffer += decoder.decode(result.value, { stream: true });
         buffer = buffer.replace(/\r\n/g, "\n");
         buffer = drainEvents(buffer, onPayload);
@@ -561,10 +592,18 @@
     streaming = true;
     sendButton.disabled = true;
 
+    var controller = new AbortController();
+    var timedOut = false;
+    var watchdog = startWatchdog(controller, function () {
+      timedOut = true;
+      showError(ctx, TIMEOUT_TEXT);
+    });
+
     fetch("/ch05/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message: text })
+      body: JSON.stringify({ session_id: sessionId, message: text }),
+      signal: controller.signal
     })
       .then(function (response) {
         if (!response.ok) {
@@ -573,13 +612,21 @@
           });
         }
         return readSSE(response, function (payload) {
+          watchdog.touch();
           handlePayload(ctx, payload);
-        });
+        }, watchdog.touch);
       })
       .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          // The watchdog already showed a retryable timeout message. An abort
+          // from another source still gets one so the user can retry.
+          if (!timedOut) showError(ctx, TIMEOUT_TEXT);
+          return;
+        }
         showError(ctx, "请求失败：" + (err && err.message ? err.message : String(err)));
       })
       .finally(function () {
+        watchdog.clear();
         finishAssistantMessage(ctx);
         streaming = false;
         sendButton.disabled = false;

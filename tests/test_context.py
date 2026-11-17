@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.services.context import build_messages, estimate_tokens
+from app.services.context import build_messages, estimate_tokens, trim_messages
 
 
 def test_estimate_tokens_is_len():
@@ -100,3 +100,42 @@ def test_trim_messages_keeps_system_and_atomic_tool_round():
     assert [type(m).__name__ for m in msgs] == [
         "SystemMessage", "AIMessage", "ToolMessage", "AIMessage"
     ]
+
+
+def test_trim_messages_keeps_newest_block_when_it_exceeds_budget():
+    system = SystemMessage(content="S")
+    history = [HumanMessage(content="old"), HumanMessage(content="X" * 10)]
+    msgs = trim_messages(system, history, max_tokens=5)
+    # 最新块单块超预算也必须保留;更旧的块被裁掉。
+    assert [m.content for m in msgs] == ["S", "X" * 10]
+
+
+def test_trim_messages_keeps_newest_block_when_it_exactly_fits_strict_budget():
+    system = SystemMessage(content="S")  # budget = 5
+    history = [HumanMessage(content="old"), HumanMessage(content="abcde")]
+    msgs = trim_messages(system, history, max_tokens=6)
+    # 严格预算下恰好用满 5 的最新块不能被丢弃。
+    assert [m.content for m in msgs] == ["S", "abcde"]
+
+
+def test_trim_messages_keeps_newest_tool_round_when_it_exceeds_budget():
+    system = SystemMessage(content="S")
+    history = [
+        HumanMessage(content="older"),
+        AIMessage(content="", tool_calls=[{"name": "query_order", "args": {}, "id": "c2"}]),
+        ToolMessage(content="Y" * 10, tool_call_id="c2"),
+    ]
+    msgs = trim_messages(system, history, max_tokens=5)
+    # 最新工具轮整块超预算时仍完整保留,tool_calls 与 ToolMessage 不拆散。
+    assert [type(m).__name__ for m in msgs] == [
+        "SystemMessage", "AIMessage", "ToolMessage"
+    ]
+    assert msgs[-1].content == "Y" * 10
+
+
+def test_trim_messages_keeps_newest_block_when_system_alone_exceeds_budget():
+    system = SystemMessage(content="S" * 10)
+    history = [HumanMessage(content="older"), HumanMessage(content="new")]
+    msgs = trim_messages(system, history, max_tokens=5)
+    # system 已超预算时仍保留最新历史块,只裁更旧的块。
+    assert [m.content for m in msgs] == ["S" * 10, "new"]
