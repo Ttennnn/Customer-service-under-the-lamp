@@ -1028,6 +1028,7 @@ Tests:
 - `test_complaint_and_chitchat_do_not_call_llm`: intents `"投诉"` / `"闲聊"`; pass an Agent LLM that raises if `.stream` is called; assert fixed answers and options for complaint.
 - `test_fixed_paths_append_ai_message`: after complaint/chitchat/gate-fail, `final_state["messages"][-1]` is an `AIMessage`.
 - `test_checkpointer_keeps_history_across_turns`: invoke twice with different messages; assert the second turn's state messages contain the first assistant `AIMessage` before the second `HumanMessage`.
+- `test_parent_stream_receives_subgraph_custom_frames`: business intent `"物流"`, Agent LLM scripted with a tool chunk then a text chunk; `graph = build_graph(..., checkpointer=InMemorySaver())`; collect `list(graph.stream(inputs, config, stream_mode="custom", subgraphs=True, version="v2"))`; assert the child `tool` frame and final `token` frame are both present. This pins the propagation that Task 10 depends on.
 - `test_sqlite_checkpointer_creates_file`: use `tmp_path` and `sqlite_checkpointer`; assert file exists and `setup()` did not raise.
 
 - [ ] **Step 2: Run the tests to verify they fail**
