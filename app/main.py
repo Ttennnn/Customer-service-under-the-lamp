@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.api.ch05 import CH05_PAGE
 from app.api.ch05 import api_router as ch05_api_router
 from app.api.ch05 import close_ch05_graph
 from app.api.ch05 import page_router as ch05_page_router
@@ -129,11 +130,11 @@ def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
 
 
 # The root URL is the chat entry point. Chapter 5 owns the chat experience
-# (including the complaint buttons), so send visitors to the native page at
-# ``/ch05`` instead of the legacy React widget.
+# (including the complaint buttons), so serve the native page directly at
+# ``/`` as well as ``/ch05`` instead of the legacy React widget.
 @app.get("/", include_in_schema=False)
-def root_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/ch05", status_code=307)
+def root_chat_page() -> FileResponse:
+    return FileResponse(CH05_PAGE, media_type="text/html")
 
 
 # The legacy Vite/React widget is still mounted for any static assets when a

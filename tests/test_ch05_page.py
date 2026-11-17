@@ -46,9 +46,13 @@ def test_ch05_page_route_serves_html():
     assert "lamp-cs-ch05-session-id" in response.text
 
 
-def test_root_redirects_to_ch05_page():
+def test_root_serves_ch05_page_directly():
     with TestClient(app) as client:
-        response = client.get("/", follow_redirects=False)
+        response = client.get("/")
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/ch05"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "转人工" in response.text
+    assert "建工单" in response.text
+    assert "lamp-cs-ch05-session-id" in response.text
+    assert "相互独立的两步操作" not in response.text
