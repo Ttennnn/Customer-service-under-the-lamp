@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from sqlalchemy.orm import Session
 
@@ -30,6 +32,9 @@ from app.tools.ticket import TICKET_NO_PATTERN, create_ticket
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter(prefix="/ch05")
+page_router = APIRouter()
+
+CH05_PAGE = Path(__file__).resolve().parents[1] / "static" / "ch05.html"
 
 ERROR_TEXT = "客服服务暂时不可用,请稍后重试"
 TICKET_CREATE_FAILED = "工单创建失败,请稍后重试"
@@ -100,6 +105,12 @@ def close_ch05_graph(app) -> None:
     finally:
         app.state.ch05_checkpoint_handle = None
         app.state.ch05_graph = None
+
+
+@page_router.get("/ch05", response_class=FileResponse)
+def ch05_page() -> FileResponse:
+    """Serve the self-contained native chat page."""
+    return FileResponse(CH05_PAGE, media_type="text/html")
 
 
 @api_router.post("/chat", response_class=EventSourceResponse)
