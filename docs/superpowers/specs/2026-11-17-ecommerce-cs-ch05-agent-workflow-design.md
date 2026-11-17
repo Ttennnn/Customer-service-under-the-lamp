@@ -163,6 +163,7 @@ class CustomerServiceState(TypedDict, total=False):
     confidence: float | None       # Top-1 重排分
     gate_passed: bool
     gate_reason: str               # ok | empty | below_threshold | rerank_failed | infra_error
+    rerank_failed: bool
     answer: str
     suggested_actions: list[dict]  # [{"action","label","ticket_type"?}]
     step_count: int
@@ -408,11 +409,13 @@ AGENT_TOOLS = BUSINESS_TOOLS + CONTROL_TOOLS
 #### 流式消费方式
 
 ```python
-for ns, frame in graph.stream(
+for item in graph.stream(
     inputs, config, stream_mode="custom", subgraphs=True, version="v2"
 ):
-    # ns 可能是 ()（父图）或子图命名空间；两种 scope 的 custom 帧都转发。
-    yield frame
+    # langgraph 1.2.20：subgraphs=True 时 custom 帧是
+    # {"type": "custom", "ns": ..., "data": <节点发出的 dict>}，不是 (ns, frame) 元组。
+    if item.get("type") == "custom":
+        yield item["data"]
 final_state = graph.get_state(config).values
 ```
 

@@ -1089,8 +1089,8 @@ def stream_chat_agent(
 ) -> Iterator[str]
 ```
 - Yields raw SSE payload strings exactly like `app.services.chat.stream_chat`: plain tokens for text, JSON strings for `tool`/`sources`/`options`/`error`.
-- Inputs reset every transient state field; `messages` gets one new `HumanMessage`; `conversation_id` set; `token_budget`/`max_steps` from settings.
-- Consumes `graph.stream(inputs, config, stream_mode="custom", subgraphs=True, version="v2")`; filters custom frames to `token`/`tool`/`sources`; ignores unknown frames with a log.
+- Inputs reset every transient state field explicitly: `user_message`, `resolved_message`, `intent=""`, `route=""`, `evidence=[]`, `sources=[]`, `confidence=None`, `gate_passed=False`, `gate_reason=""`, `rerank_failed=False`, `answer=""`, `suggested_actions=[]`, `step_count=0`, `token_estimate=0`, `exhausted=False`, `conversation_id=<cid>`, `token_budget`/`max_steps` from settings. `messages` gets one new `HumanMessage`. Reset `rerank_failed` is required so a later turn cannot inherit a stale `True`.
+- Consumes `graph.stream(inputs, config, stream_mode="custom", subgraphs=True, version="v2")`; on langgraph 1.2.20 each item is a dict `{"type":"custom","ns":...,"data":<node frame>}`, so read `item["data"]`. Filters the node frames to `token`/`tool`/`sources`; ignores unknown frames with a log.
 - After the stream: `graph.get_state(config).values`; emit `options` if `suggested_actions`; persist assistant `answer`; write low-confidence row only for `gate_reason in {"empty","below_threshold"}`.
 - On graph exception: log, yield an `{"error": ...}` frame; do not re-raise.
 
@@ -1110,7 +1110,8 @@ class FakeGraph:
         self.config = config
         assert stream_mode == "custom" and subgraphs is True
         for frame in self.frames:
-            yield ((), frame)
+            # Real langgraph 1.2.20 shape for custom + subgraphs=True.
+            yield {"type": "custom", "ns": (), "data": frame}
 
     def get_state(self, config):
         from types import SimpleNamespace
@@ -1118,7 +1119,7 @@ class FakeGraph:
 ```
 Tests:
 - `test_service_forwards_tokens_tools_sources_and_options`: frames `[{"type":"tool",...},{"type":"sources",...},{"type":"token","text":"答"}]`, final `suggested_actions=[{"action":"transfer","label":"转人工"}]`; assert events include the JSON frames in order and an options frame last.
-- `test_service_resets_transient_state`: assert `graph.inputs` has `step_count=0`, `evidence=[]`, `gate_passed=False`, `conversation_id` set, and `messages` contains one `HumanMessage`.
+- `test_service_resets_transient_state`: assert `graph.inputs` has `step_count=0`, `evidence=[]`, `gate_passed=False`, `gate_reason=""`, `rerank_failed=False`, `conversation_id` set, and `messages` contains one `HumanMessage`.
 - `test_service_persists_assistant_answer`: after run, `Message` rows are `user`, `assistant` with the answer.
 - `test_service_records_low_confidence_for_gate_gap`: final `route="knowledge"`, `gate_passed=False`, `gate_reason="below_threshold"`; assert a `LowConfidenceQuestion` row with `source="confidence_gate"`.
 - `test_service_does_not_pool_infra_or_rerank_failure`: parameterize `gate_reason` `infra_error`/`rerank_failed`; assert no row.
