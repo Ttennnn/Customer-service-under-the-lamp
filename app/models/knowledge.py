@@ -92,6 +92,9 @@ class LowConfidenceQuestion(Base):
             "retrieval_low_conf",
             "self_check",
             "user_feedback",
+            # ch05 confidence gate: genuine knowledge gaps only; infra and
+            # rerank failures never enter the pool.
+            "confidence_gate",
             name="low_confidence_source",
         ),
         index=True,
