@@ -1355,7 +1355,7 @@ Expected: SSE with `[DONE]`; no regression in the old endpoint.
 - [ ] **Step 2: Acceptance 1 — policy question forces retrieval**
 
 Use `/ch05` with “你们的退货政策是什么？”. Verify:
-- server log contains `ch05 retrieval_forced` and `ch05 confidence_gate`;
+- server log contains `ch05 retrieval_forced` and a `ch05 turn_log` line with `gate_passed=true` / `gate_reason="ok"`;
 - an SSE `sources` frame is present;
 - the answer cites `[n]` and matches evidence.
 Record the log lines and response in the acceptance report.
