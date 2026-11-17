@@ -69,6 +69,14 @@ def test_prompt_forbids_reusing_history_citations():
         assert "本轮没有 [n] 时,回答中不得出现任何 [n]" in p
 
 
+def test_agent_prompt_requires_tracking_no_from_query_order():
+    from app.prompts.customer_service import render_agent_system_prompt
+
+    p = render_agent_system_prompt()
+    assert "tracking_no 只能来自 query_order 的返回" in p
+    assert "不要用订单号或猜测值代替" in p
+
+
 def test_answer_prompt_reuses_blocks_without_tool_list():
     p = render_answer_system_prompt()
     assert "[n]" in p and "不得编造" in p
