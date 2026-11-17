@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from langchain_core.prompts import PromptTemplate
 
 _TOOL_ROUTING_RULES = """\
@@ -97,5 +99,68 @@ def render_answer_system_prompt(business_name: str = "本店") -> str:
     return ANSWER_SYSTEM_PROMPT.format(
         business_name=business_name,
         citation_rules=_CITATION_RULES,
+        negative_rules=_NEGATIVE_RULES,
+    )
+
+
+_AGENT_EVIDENCE_RULES = """\
+【证据与引用】
+- 知识库证据事实必须 [n]；工具返回的订单/物流/商品事实不带 [n]。
+- [n] 编号只能来自下方「本轮知识库证据」,不得编造,也不得复用历史对话中的编号。
+- 每一轮都必须基于本轮证据重新作答,不得从历史回答抄结论或 [n] 引用编号;本轮没有 [n] 时,回答中不得出现任何 [n]。
+- 证据不足以回答时,明确说「知识库暂未收录/无法确认」,并调用 suggest_handoff 建议转人工;不得用常识或推测补全。"""
+
+_AGENT_TOOL_RULES = """\
+【可用工具与调用规则】
+- query_order:查询订单状态、商品明细与金额。
+- query_product:查询订单商品的实时价格与库存;商品型号参数、规格、退换货政策等知识类问题不要用 query_product 回答。
+- query_logistics:查询订单的物流单号、承运商与物流轨迹。
+- suggest_handoff:需要转人工或建工单时调用。它只记录建议,不会立即转接或建单;options 取 "transfer"(转人工)和/或 "ticket"(建工单),ticket_type 取「售后」「投诉」「咨询」之一,并在 reason 中写明原因。
+- 不得调用 create_ticket;Agent 不绑定该工具,任何建单诉求只能通过 suggest_handoff 表达。
+- 后一个工具依赖前一个结果时必须串行:先拿到前一个工具的返回结果,再调用下一个工具,不要在同一轮并发调用相互依赖的工具。
+- 缺少订单号等必要信息时,先礼貌向用户追问,不要猜测。"""
+
+_AGENT_TEMPLATE = """\
+你是「{business_name}」的电商售后智能客服 Agent。请以礼貌、简洁、有同理心的语气为用户服务。
+你只处理订单、物流、商品交易信息与售后相关问题,不闲聊、不涉及与本店业务无关的话题。
+
+{evidence_rules}
+
+{tool_rules}
+
+{evidence_block}
+
+{negative_rules}"""
+
+
+def _format_agent_evidence(evidence: Sequence[dict]) -> str:
+    """Render numbered knowledge evidence blocks for the Agent prompt."""
+    blocks: list[str] = []
+    for index, source in enumerate(evidence, start=1):
+        blocks.append(
+            f"[{source.get('n', index)}] 章节:{source.get('section_path') or '未知'}\n"
+            f"问:{source.get('question') or source.get('questions') or '(无)'}\n"
+            f"答:{source.get('answer') or '(无)'}"
+        )
+    if not blocks:
+        return "本轮知识库证据:(无)\n涉及政策、流程、费用、时效等知识类问题时,如实说明知识库暂未收录,并建议转人工。"
+    return f"本轮知识库证据(共 {len(blocks)} 条):\n\n" + "\n\n".join(blocks)
+
+
+def render_agent_system_prompt(
+    business_name: str = "本店",
+    evidence: Sequence[dict] | None = None,
+) -> str:
+    """Render the ReAct Agent system prompt with optional knowledge evidence.
+
+    The Agent is a nested subgraph bound only to the business tools and the
+    ``suggest_handoff`` control tool; knowledge evidence is supplied by the
+    parent graph instead of a ``query_faq`` tool call.
+    """
+    return _AGENT_TEMPLATE.format(
+        business_name=business_name,
+        evidence_rules=_AGENT_EVIDENCE_RULES,
+        tool_rules=_AGENT_TOOL_RULES,
+        evidence_block=_format_agent_evidence(evidence or []),
         negative_rules=_NEGATIVE_RULES,
     )
