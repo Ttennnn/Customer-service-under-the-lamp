@@ -110,6 +110,7 @@
 | 置信度闸 | Top-1 重排分 ≥ `CONFIDENCE_MIN_SCORE` | 本章最简版；正式版留给可观测章节 |
 | 意图识别兜底 | 解析失败/异常 → 「售后」→ Agent | 不误判成闲聊或投诉，交给 Agent 继续处理 |
 | Agent 工具范围 | 仅 `query_order` / `query_product` / `query_logistics` + 控制工具 `suggest_handoff` | 禁止自动建工单；知识类已预检索，禁止 Agent 再调 `query_faq` 绕过闸门 |
+| 物流工具契约（D7） | `query_order` 返回 `tracking_no`；`query_logistics(tracking_no)` 只接受该单号 | 形成真实数据依赖：两个工具都吃 `order_id` 时模型可能并行一步调俩，改后必须先查订单拿到单号 |
 | 会话记忆 | checkpointer 里的 State 为准；同时写 MySQL 做审计/工单关联 | 满足 State 贯穿，又不丢现有审计能力 |
 
 ## 6. 总体架构
@@ -323,6 +324,23 @@ class AgentState(TypedDict, total=False):
 - 更新 `token_estimate`。
 - `create_ticket` **不在** `tools_for_route` 中，因此 Agent 永远无法自动建工单。
 
+#### 6.5.0 物流工具链式契约（D7）
+
+```python
+@tool
+def query_order(order_id: str) -> str:
+    """...返回 {"order_id","items","amount","status","tracking_no"}"""
+
+@tool
+def query_logistics(tracking_no: str) -> str:
+    """...返回 {"tracking_no","carrier","current_node","traces"}"""
+```
+
+- `query_order` 每次返回都带 `tracking_no`（`SF` + 10 位数字）。
+- `query_logistics` 只接受 `tracking_no`，不再接受 `order_id`；参数 schema 必填，旧 `{"order_id": ...}` 调用会得到工具参数校验错误。
+- 不做额外的单号格式闸：mock 没有可核验的签发表，schema + docstring 已足以强制「先查订单」；模型若猜测单号，属于 Prompt 服从性问题，由验收日志观察。
+- 该变更修改的是 ch02 现有工具，不新增业务工具；旧 `/chat` 的模型也会被迫先调 `query_order`。
+
 #### 6.5.1 `suggest_handoff` 契约
 
 ```python
@@ -528,7 +546,7 @@ final_state = graph.get_state(config).values
 2. **物流问题 Agent 自调工具**：问「订单 1001 的物流到哪了」→ 日志/帧出现 `query_logistics`，回答按工具结果作答。
 3. **投诉按钮**：说「我要投诉」→ 前端出现「转人工」「建工单」两个独立按钮；点转人工只出现「已转接人工客服」+ 客服小猫问候，不写库；点建工单才写 `tickets`，且 `conversations.status` 仍为「进行中」；都不点继续聊天，系统不做任何动作。
 4. **闲聊固定话术**：说「你好」→ 固定话术，日志无 LLM/检索调用。
-5. **复杂问题多步 ReAct**：问「先帮我确认订单 1001 的状态，如果已经发货，再查它的物流到哪了」→ 日志/工具帧显示至少两次 Agent 步进（`query_order` → `query_logistics`）；若模型并行调用，调整 Prompt 的串行规则并复测，直到验收通过。
+5. **复杂问题多步 ReAct**：问「先帮我确认订单 1001 的状态，如果已经发货，再查它的物流到哪了」→ 日志/工具帧显示至少两次 Agent 步进（`query_order` → `query_logistics`）；`query_logistics` 的 `tracking_no` 必须等于前一步 `query_order` 返回的单号，证明不是并行调用。若模型猜测单号，收紧 Prompt 后复测。
 
 ### 9.4 质量门
 
@@ -555,7 +573,7 @@ final_state = graph.get_state(config).values
 ## 11. 风险与开放项
 
 1. **置信度阈值未校准**：默认 0.3 只是起点；实施时用少量正/负样例实测重排分后定值，并把校准结果写进 dev-notes。若无法调用真实 reranker，保留配置项并在验收时用构造数据验证闸门逻辑。
-2. **多步串行依赖模型的服从性**：DeepSeek 可能并行调用 `query_order` 和 `query_logistics`。Prompt 明确串行规则，验收时以日志步数为准；若稳定性不足，可把复杂验收问题改成更明确的「先……如果……再……」，或在工具描述里加前置条件，但不新增业务工具。
+2. **多步串行依赖模型的服从性**：D7 已把 `query_logistics` 入参改为 `tracking_no`，单号只能从 `query_order` 返回中获得，理论上无法并行；但模型仍可能猜测或伪造单号。Prompt 明确串行规则与「单号须取自 query_order 返回」，验收时核对两工具的帧内容与步数；若稳定性不足，再收紧工具 docstring，但不新增业务工具。旧 `/chat` 的历史消息中可能残留 `{"order_id": ...}` 的旧工具调用参数，属于只读历史回放，不回放执行。
 3. **SQLite checkpointer 并发**：单文件单写者，适合本地/单机；WAL + busy_timeout 缓解。生产应换 Postgres，本章不做。
 4. **流式 token 与工具轮**：工具调用轮若模型先输出文本，会实时显示；不尝试撤回。若验收要求「工具轮不显示前置文本」，可改为缓冲到该轮结束再决定是否展示，但会牺牲流式感。
 5. **意图分类成本**：每轮一次额外 LLM 调用；可接受。闲聊本来不花模型调用，但意图分类本身会花一次——需求中的「闲聊不花模型调用」指闲聊回复不调模型；分类是必要的路由成本，设计文档明确这一点。
