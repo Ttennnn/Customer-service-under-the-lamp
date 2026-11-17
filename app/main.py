@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -9,6 +11,8 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.api.ch05 import api_router as ch05_api_router
+from app.api.ch05 import close_ch05_graph
 from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
 from app.api.rag_eval import api_router as rag_eval_api_router
@@ -23,7 +27,24 @@ from app.tools.registry import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Close a lazily-built ch05 graph on shutdown; never build one here."""
+    try:
+        yield
+    finally:
+        close_ch05_graph(app)
+
+
+app = FastAPI(lifespan=lifespan)
+
+# Populated on the first /ch05/chat request by ``get_ch05_graph_dep``.  State
+# is initialised here so the lifespan and dependency share one lock without
+# constructing any LLM or opening the SQLite checkpoint at import time.
+app.state.ch05_graph = None
+app.state.ch05_checkpoint_handle = None
+app.state.ch05_graph_lock = threading.Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +63,7 @@ app.include_router(kb_page_router)
 app.include_router(kb_api_router)
 app.include_router(rag_eval_page_router)
 app.include_router(rag_eval_api_router)
+app.include_router(ch05_api_router)
 
 
 def get_llm_dep(settings: Settings = Depends(get_settings)):
