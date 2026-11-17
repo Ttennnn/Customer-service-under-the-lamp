@@ -543,7 +543,7 @@ returns `{"total": int, "correct": int, "accuracy": float, "per_class": dict[str
 import json
 from pathlib import Path
 
-from app.agent.intent import INTENT_ROUTES
+from app.agent.routing import INTENT_ROUTES
 
 CASES = Path(__file__).parent / "eval" / "ch05_intent_cases.json"
 
