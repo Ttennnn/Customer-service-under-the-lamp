@@ -1173,7 +1173,7 @@ def get_ch05_graph_dep(request: Request): ...
 - Task 11 implements only the API routes. Task 12 adds `page_router` + `GET /ch05` when the HTML file exists.
 - `POST /ch05/chat` uses `ChatRequest`, `EventSourceResponse`, `stream_chat_agent`, and appends `data: [DONE]`.
 - `POST /ch05/tickets` calls `execute_tool(create_ticket, args, timeout_s=5, retries=0)`, validates `TICKET_NO_PATTERN`, returns `{"ticket_no": ..., "message": "工单已创建"}` or 502.
-- `app/main.py` uses a lifespan that only closes an existing lazy graph on exit; it does not build the graph at startup. `get_ch05_graph_dep` lazily builds the graph on the first `/ch05` request with `sqlite_checkpointer(settings.langgraph_checkpoint_db)` + `build_graph(...)`, caches it on `app.state.ch05_graph` under a lock, and returns it. This keeps existing tests that use `with TestClient(app)` from constructing real LLMs or touching `.data/`.
+- `app/main.py` uses a lifespan that only closes an existing lazy graph on exit; it does not build the graph at startup. `get_ch05_graph_dep` lazily builds the graph on the first `/ch05` request with `open_sqlite_checkpointer(settings.langgraph_checkpoint_db)` + `build_graph(...)`, caches it on `app.state.ch05_graph` under a lock, and returns it. This keeps existing tests that use `with TestClient(app)` from constructing real LLMs or touching `.data/`.
 - `get_ch05_graph_dep` returns the cached graph; if construction raises, propagate a 503.
 
 - [ ] **Step 1: Write the failing API tests**
