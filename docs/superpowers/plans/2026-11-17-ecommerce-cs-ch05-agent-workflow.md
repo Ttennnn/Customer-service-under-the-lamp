@@ -1155,6 +1155,7 @@ Append `## 阶段：Task 10 完成（执行日期）`.
 - Create: `app/api/ch05.py`
 - Modify: `app/main.py`
 - Modify: `app/schemas.py`
+- Create: `sql/ch05_low_confidence_source.sql`
 - Create: `tests/test_ch05_api.py`
 - Modify: `tests/agent_fakes.py`
 - Modify: `dev-notes/ch05.md`
@@ -1221,6 +1222,14 @@ Expected: FAIL with 404/ImportError.
 - `app/api/ch05.py`: API router only (no page route yet), SSE route with the same error-frame pattern as `/chat`, and ticket route. For the ticket route, resolve conversation with `get_or_create_conversation(session, req.session_id)`, set `current_conversation_id`, call `execute_tool`, validate `TICKET_NO_PATTERN`, return 502 on failure.
 - `app/main.py`: add a lifespan that only closes `app.state.ch05_checkpoint_handle` if it exists; keep existing routers; include the ch05 API router. `get_ch05_graph_dep(request, settings=Depends(get_settings))` lazily calls `open_sqlite_checkpointer`, builds under `app.state.ch05_graph_lock`, stores `app.state.ch05_graph` + `app.state.ch05_checkpoint_handle`, and returns the graph. Add a `close_ch05_graph(app)` helper that calls `handle.close()`.
 - Ensure `app/main.py` import does not require an API key at import time; graph construction happens on the first `/ch05` request.
+- Create `sql/ch05_low_confidence_source.sql` for existing MySQL databases:
+  ```sql
+  SET NAMES utf8mb4;
+  ALTER TABLE low_confidence_questions
+    MODIFY source ENUM('retrieval_low_conf','self_check','user_feedback','confidence_gate')
+    NOT NULL COMMENT '入池入口:检索证据低 / 生成自评不足 / 用户反馈未解决 / ch05 置信度闸知识缺口';
+  ```
+  Verify it contains `confidence_gate` and preserves the column COMMENT. New databases already get the value from the updated ch04 DDL; this file is for existing ones.
 
 - [ ] **Step 4: Run the tests and full suite**
 
@@ -1234,7 +1243,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit and record dev-notes**
 
 ```bash
-git add app/api/ch05.py app/main.py app/schemas.py tests/test_ch05_api.py
+git add app/api/ch05.py app/main.py app/schemas.py sql/ch05_low_confidence_source.sql tests/test_ch05_api.py
 git commit -m "feat: add ch05 chat and ticket api"
 ```
 Append `## 阶段：Task 11 完成（执行日期）`.
