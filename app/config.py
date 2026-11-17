@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     qa_mining_batch_size: int = 10
     qa_dedup_threshold: float = 0.92
 
+    agent_max_steps: int = 6
+    agent_token_budget: int = 12000
+    agent_tool_result_max_chars: int = 2000
+    confidence_min_score: float = 0.3
+    langgraph_checkpoint_db: str = ".data/ch05-checkpoints.sqlite"
+
 
 def build_llm(settings: Settings, temperature: float = 0.7) -> ChatOpenAI:
     return ChatOpenAI(
