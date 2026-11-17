@@ -59,6 +59,7 @@ from app.tools.context import CitationCollector
 from app.tools.faq import order_for_prompt
 
 TOP_K = 10
+D_BUCKET = "D_absent"
 _DEFAULT_CASES = (
     Path(__file__).resolve().parents[2] / "tests" / "eval" / "rag_cases.json"
 )
@@ -489,7 +490,7 @@ def _d_accuracy(runs: list[CaseRun], strategy: str) -> tuple[int, int, int, int]
     relevant = [
         run
         for run in runs
-        if run.strategy == strategy and run.bucket == "D_unanswerable"
+        if run.strategy == strategy and run.bucket == D_BUCKET
     ]
     outcomes = [
         run
@@ -629,6 +630,8 @@ def _strategy_summary(runs: list[CaseRun], strategy: str) -> dict:
 def _build_summary(
     *,
     cases: list[dict],
+    loaded_cases: int,
+    excluded_cases: list[dict],
     runs: list[CaseRun],
     strategies: list[RetrievalStrategy],
     settings,
@@ -646,7 +649,23 @@ def _build_summary(
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "commit": commit,
+        "cases_loaded": loaded_cases,
         "cases": len(cases),
+        "excluded": {
+            "count": len(excluded_cases),
+            "cases": [
+                {
+                    "id": str(case.get("id") or ""),
+                    "bucket": str(case.get("bucket") or ""),
+                    "reason": str(
+                        case.get("exclusion_reason")
+                        or case.get("coverage")
+                        or "excluded"
+                    ),
+                }
+                for case in excluded_cases
+            ],
+        },
         "strategies": strategy_names,
         "mode": "retrieval-only" if args.retrieval_only else "full",
         "run": {
@@ -692,6 +711,8 @@ def _build_summary(
 def _render_report(
     *,
     cases: list[dict],
+    loaded_cases: int,
+    excluded_cases: list[dict],
     runs: list[CaseRun],
     strategies: list[RetrievalStrategy],
     settings,
@@ -715,7 +736,8 @@ def _render_report(
         "## 运行参数",
         "",
         f"- cases: {args.cases or _DEFAULT_CASES} "
-        f"({len(cases)} cases evaluated, limit={args.limit})",
+        f"({len(cases)} evaluable, {len(excluded_cases)} excluded, "
+        f"limit={args.limit})",
         f"- strategies: {', '.join(strategy_names)}",
         f"- mode: {mode}",
         f"- generation/judge/rewrite model: {settings.model_name} "
@@ -728,10 +750,29 @@ def _render_report(
         f"- generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"- commit: {commit}",
         "",
-        "## 总体指标",
+        "## 排除用例",
         "",
-        _METRIC_HEADER,
+        f"- excluded: {len(excluded_cases)} / {loaded_cases}",
     ]
+    if excluded_cases:
+        lines.extend(
+            f"- {case.get('id') or '?'} "
+            f"({case.get('exclusion_reason') or case.get('coverage') or 'excluded'})"
+            for case in excluded_cases
+        )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "口径:语料未覆盖或与语料冲突的用例不参与任何指标聚合;",
+            "补语料或修正预期后再将其纳入基准。",
+            "",
+            "## 总体指标",
+            "",
+            _METRIC_HEADER,
+        ]
+    )
     for strategy in strategy_names:
         lines.append(_metric_row(strategy, runs))
     lines.extend(
@@ -915,6 +956,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"eval_rag: no cases found in {path}")
         return 2
 
+    loaded_cases = len(cases)
+    excluded_cases = [case for case in cases if case.get("excluded")]
+    cases = [case for case in cases if not case.get("excluded")]
+    if not cases:
+        print(
+            f"eval_rag: no evaluable cases in {path} "
+            f"({loaded_cases} excluded)"
+        )
+        return 2
+
     try:
         strategies = parse_strategies(args.strategies)
     except ValueError as exc:
@@ -924,8 +975,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     judge_llm = build_llm(settings, temperature=0.0)
     print(
-        f"eval_rag: cases={len(cases)} strategies="
-        f"{','.join(strategy.value for strategy in strategies)} "
+        f"eval_rag: cases={len(cases)} evaluable, "
+        f"excluded={len(excluded_cases)} "
+        f"strategies={','.join(strategy.value for strategy in strategies)} "
         f"mode={'retrieval-only' if args.retrieval_only else 'full'}"
     )
 
@@ -953,6 +1005,8 @@ def main(argv: list[str] | None = None) -> int:
 
     report = _render_report(
         cases=cases,
+        loaded_cases=loaded_cases,
+        excluded_cases=excluded_cases,
         runs=runs,
         strategies=strategies,
         settings=settings,
@@ -965,6 +1019,8 @@ def main(argv: list[str] | None = None) -> int:
     out_path.write_text(report, encoding="utf-8")
     summary = _build_summary(
         cases=cases,
+        loaded_cases=loaded_cases,
+        excluded_cases=excluded_cases,
         runs=runs,
         strategies=strategies,
         settings=settings,

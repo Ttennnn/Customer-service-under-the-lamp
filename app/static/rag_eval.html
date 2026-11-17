@@ -132,6 +132,7 @@
     A_policy: "A · 政策",
     B_model: "B · 型号",
     C_colloquial: "C · 口语",
+    D_absent: "D · 应拒答",
     D_unanswerable: "D · 不可答",
     E_multi: "E · 多跳",
   };
@@ -329,12 +330,14 @@
     const rerank = (fb.rerank || {});
     const rewrite = (fb.rewrite || {});
     const faith = report.faith_cases || {};
+    const excluded = report.excluded || {};
     const run = report.run || {};
     const lines = [
       `模型：${run.model || "n/a"}（温度 0）；嵌入 ${run.embedding_model || "n/a"}；重排 ${run.rerank_model || "n/a"}`,
       `召回 Top-${run.recall_top_k ?? "?"} → 最终 Top-${run.top_k ?? "?"}；RRF k=${run.rrf_k ?? "?"}`,
       `Rerank fallback：${rerank.runs ?? 0} 次${(rerank.case_ids || []).length ? "（" + rerank.case_ids.join(", ") + "）" : ""}；Query rewrite fallback：${rewrite.cases ?? 0} 例`,
       `faith_cases：新增 ${faith.new ?? 0} / 复发 ${faith.recurrence ?? 0} / 写入错误 ${faith.errors ?? 0}`,
+      `排除用例：${excluded.count ?? 0} 例${(excluded.count ?? 0) ? "（语料未覆盖/冲突，详见 Markdown 报告）" : ""}`,
     ];
     for (const line of lines) list.appendChild(el("div", null, line));
     house.appendChild(list);
@@ -346,6 +349,7 @@
       ["生成时间", report.generated_at || "n/a"],
       ["commit", report.commit || "n/a"],
       ["case 数", String(report.cases ?? "n/a")],
+      ["排除用例", String(excluded.count ?? 0)],
       ["模式", report.mode || "n/a"],
     ];
     for (const [k, v] of fields) {

@@ -363,6 +363,17 @@ def test_generation_summary_excludes_rerank_failures():
     assert summary["model_refusals"] == 0
 
 
+def test_d_accuracy_counts_d_absent_bucket():
+    from app.jobs.eval_rag import CaseRun
+
+    runs = [
+        CaseRun("D1", "D_absent", "q1", False, "dense", "refusal"),
+        CaseRun("D2", "D_absent", "q2", False, "dense", "model_refusal"),
+        CaseRun("D3", "D_absent", "q3", False, "dense", "answered"),
+    ]
+    assert eval_rag._d_accuracy(runs, "dense") == (3, 1, 1, 1)
+
+
 def _fake_settings():
     return SimpleNamespace(
         model_name="deepseek-chat",
@@ -576,3 +587,53 @@ def test_main_no_faith_cases_skips_writes(monkeypatch, tmp_path):
     )
     assert code == 0
     assert "skipped (--no-faith-cases)" in out.read_text(encoding="utf-8")
+
+
+def test_main_skips_excluded_cases_and_reports_them(monkeypatch, tmp_path):
+    cases_path = tmp_path / "cases.json"
+    out = tmp_path / "report.md"
+    excluded = make_case("A02", query="q2", paths=[])
+    excluded.update(
+        {
+            "excluded": True,
+            "coverage": "points_missing",
+            "exclusion_reason": "points_missing",
+            "missing_points": ["知识库没有的要点"],
+        }
+    )
+    _write_cases(
+        cases_path,
+        [make_case("A01", query="q1", paths=["S1"]), excluded],
+    )
+
+    calls = []
+
+    def fake_retrieve(query, *, strategy, analysis, **kwargs):
+        calls.append(query)
+        return RetrievalResult(
+            [make_chunk(1, "S1")], RetrievalStrategy(strategy), analysis
+        )
+
+    monkeypatch.setattr(eval_rag, "build_llm", lambda *a, **k: object())
+    monkeypatch.setattr(eval_rag, "get_settings", _fake_settings)
+    monkeypatch.setattr(
+        eval_rag, "analyze", lambda query, llm=None: make_analysis(query)
+    )
+    monkeypatch.setattr(eval_rag, "retrieve_hybrid", fake_retrieve)
+
+    code = eval_rag.main(
+        ["--cases", str(cases_path), "--out", str(out), "--retrieval-only"]
+    )
+    assert code == 0
+    assert calls == ["q1"] * 4
+
+    report = out.read_text(encoding="utf-8")
+    assert "## 排除用例" in report
+    assert "A02" in report
+
+    sidecar = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert sidecar["cases"] == 1
+    assert sidecar["cases_loaded"] == 2
+    assert sidecar["excluded"]["count"] == 1
+    assert sidecar["excluded"]["cases"][0]["id"] == "A02"
+    assert sidecar["excluded"]["cases"][0]["reason"] == "points_missing"
