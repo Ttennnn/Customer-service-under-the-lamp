@@ -18,6 +18,7 @@ from app.api.ch06 import api_router as ch06_api_router
 from app.api.ch06 import close_ch06_graph
 from app.api.ch06 import page_router as ch06_page_router
 from app.api.ch07 import api_router as ch07_api_router
+from app.api.conversations import api_router as conversations_api_router
 from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
 from app.api.rag_eval import api_router as rag_eval_api_router
@@ -71,6 +72,7 @@ app.include_router(rag_eval_api_router)
 app.include_router(ch06_page_router)
 app.include_router(ch06_api_router)
 app.include_router(ch07_api_router)
+app.include_router(conversations_api_router)
 app.include_router(ch05_page_router)
 app.include_router(ch05_api_router)
 
