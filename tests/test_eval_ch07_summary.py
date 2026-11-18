@@ -88,6 +88,7 @@ def test_cases_schema_and_required_scenarios():
     warranty = by_id["product-warranty"]
     assert {"LD-200", "保修", "灯不亮"} <= set(warranty["contains"])
     assert "退款" in warranty["not_contains"]
+    assert "价格" in warranty["not_contains"]
 
     chitchat = by_id["chitchat-only"]
     assert chitchat["contains"] == []
@@ -107,6 +108,23 @@ def test_cases_schema_and_required_scenarios():
     for case in cases:
         assert isinstance(case["history"], list)
         assert "prior_summary" in case
+        expected_cap = 60 if case["id"] == "chitchat-only" else 200
+        assert case.get("max_chars") == expected_cap
         for row in case["history"]:
             assert row["role"] in {"user", "assistant", "system"}
             assert isinstance(row["content"], str) and row["content"].strip()
+
+
+def test_product_warranty_bans_prior_summary_token():
+    cases = {
+        case["id"]: case
+        for case in json.loads(CASES.read_text(encoding="utf-8"))
+    }
+    warranty = cases["product-warranty"]
+    assert "价格" in warranty["prior_summary"]
+    assert "价格" in warranty["not_contains"]
+
+    merged_old_summary = "用户咨询 LD-200 价格，仍在保修期内，灯不亮。"
+    result = evaluate_case(warranty, merged_old_summary)
+    assert result["passed"] is False
+    assert "价格" in result["reason"]

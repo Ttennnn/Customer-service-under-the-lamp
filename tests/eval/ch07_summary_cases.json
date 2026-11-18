@@ -12,7 +12,8 @@
     ],
     "prior_summary": "",
     "contains": ["1001", "13800000000", "退款"],
-    "not_contains": ["你好", "谢谢"]
+    "not_contains": ["你好", "谢谢"],
+    "max_chars": 200
   },
   {
     "id": "product-warranty",
@@ -25,7 +26,8 @@
     ],
     "prior_summary": "用户此前咨询过 LD-200 的价格。",
     "contains": ["LD-200", "保修", "灯不亮"],
-    "not_contains": ["退款"]
+    "not_contains": ["退款", "价格"],
+    "max_chars": 200
   },
   {
     "id": "chitchat-only",
@@ -55,7 +57,8 @@
     ],
     "prior_summary": "",
     "contains": ["1002"],
-    "not_contains": ["1001"]
+    "not_contains": ["1001"],
+    "max_chars": 200
   },
   {
     "id": "no-fabrication",
@@ -69,7 +72,8 @@
     "prior_summary": "用户此前询问过发货时间。",
     "contains": [],
     "not_contains": [],
-    "not_contains_regex": "\\d{4,}"
+    "not_contains_regex": "\\d{4,}",
+    "max_chars": 200
   },
   {
     "id": "refund-rejected",
@@ -82,6 +86,7 @@
     ],
     "prior_summary": "",
     "contains": ["拒绝", "超过七天"],
-    "not_contains": []
+    "not_contains": [],
+    "max_chars": 200
   }
 ]

@@ -6,7 +6,7 @@
 - env: `PYTHONIOENCODING=(unset)`
 - dataset: ch07_summary_cases.json (6 cases, 6 valid)
 - model: deepseek-chat (temperature 0, structured JSON)
-- generated at: 2026-11-18 23:09:58
+- generated at: 2026-11-18 23:15:09
 - pass bar: overall accuracy >= 90%, strict JSON on every case
 
 ## 总体指标
@@ -25,8 +25,8 @@
 | product-warranty | 商品型号 + 保修诉求 + 未解决问题（灯不亮） | 100 | 用户询问已购买的 LD-200 是否仍在保修期内，并反映灯不亮，问能否保修。客服答复保修期为购买后 12 个月，需提供订单信息；灯不亮可能属质量问题，可走保修流程，需先寄回检测。用户尚未提供订单信息。 | PASS | ok |
 | chitchat-only | 纯寒暄会话，摘要应为空（allow_empty）或极短且不出现业务词 | 0 |  | PASS | ok (empty allowed for chitchat) |
 | order-corrected | 用户先报 1001 后更正为 1002，摘要只保留更正后的订单 | 41 | 用户查询订单1002物流，表示尚未收到；客服回复该订单正在运输途中，预计明天送达。 | PASS | ok |
-| no-fabrication | 对话里没有订单号，摘要不得编造 4 位以上数字 | 52 | 用户询问店铺发什么快递及到货时间；客服答复默认发顺丰，偏远地区转邮政，一般2到3天送达，具体以物流为准。 | PASS | ok |
-| refund-rejected | 退款被拒绝 + 拒绝原因（超过七天） | 82 | 用户询问订单1001的退款为何未通过；客服答复退款申请已被拒绝，原因是超过七天无理由退货期限。用户追问还能怎么办，客服建议联系品牌售后检测，若为质量问题可申请保修。 | PASS | ok |
+| no-fabrication | 对话里没有订单号，摘要不得编造 4 位以上数字 | 52 | 用户询问店铺发什么快递及到货时间；客服答复默认发顺丰、偏远地区转邮政，一般2到3天送达，具体以物流为准。 | PASS | ok |
+| refund-rejected | 退款被拒绝 + 拒绝原因（超过七天） | 80 | 用户询问订单1001退款未通过原因；客服答复退款申请已拒绝，原因是超过七天无理由退货期限。用户追问还能怎么办，客服建议联系品牌售后检测，若为质量问题可申请保修。 | PASS | ok |
 
 ## 失败样例
 

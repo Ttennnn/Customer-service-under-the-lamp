@@ -75,10 +75,31 @@ def test_run_summary_skips_empty_range(session):
     assert result.status == "skip" and result.reason == "no_range"
 
 
-def test_run_summary_skips_invalid_output(session):
+def test_run_summary_skips_short_nonempty_output(session):
     conv = _seed(session, layer1_from=4)
-    result = run_summary(conv.id, _settings(), session=session, llm=FakeLLM(""))
+    result = run_summary(conv.id, _settings(), session=session, llm=FakeLLM("短"))
     assert result.status == "skip" and result.reason == "too_short"
+    # A too-short non-empty summary must not consume the range.
+    assert get_conversation(session, conv.id).summary_upto_msg_id is None
+
+
+def test_run_summary_consumes_empty_summary_without_segment(session, caplog):
+    conv = _seed(session, layer1_from=4)
+    with caplog.at_level("INFO", logger="app.services.summary_job"):
+        result = run_summary(conv.id, _settings(), session=session, llm=FakeLLM(""))
+
+    assert result.status == "skip" and result.reason == "empty_consumed"
+    assert result.from_msg_id == 1 and result.upto_msg_id == 4
+    updated = get_conversation(session, conv.id)
+    assert updated.summary_upto_msg_id == 4
+    assert updated.summary is None  # projection untouched
+    segments = (
+        session.query(ConversationSummary)
+        .filter_by(conversation_id=conv.id)
+        .count()
+    )
+    assert segments == 0
+    assert "reason=empty_consumed" in caplog.text
 
 
 def test_schedule_summary_is_non_blocking_and_deduplicated(monkeypatch):

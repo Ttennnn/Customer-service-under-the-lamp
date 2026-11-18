@@ -225,6 +225,10 @@ def run_summary(
 ) -> SummaryResult:
     """Summarize ``(summary_upto, layer1_from]`` into one appended segment.
 
+    An intentionally empty summary (pure chitchat) advances
+    ``summary_upto_msg_id`` to the range end without appending a segment, so
+    the same range is not re-summarized forever.
+
     Opens (and closes) its own DB session when *session* is ``None`` so the
     background worker is independent of the request/thread that triggered it.
     """
@@ -310,9 +314,19 @@ def run_summary(
             )
 
         summary = getattr(response, "summary", None)
-        if not isinstance(summary, str) or not summary.strip():
+        if not isinstance(summary, str):
             return _skip("too_short", started, from_id=from_id, upto_id=upto_id)
         summary = summary.strip()
+        if not summary:
+            # Rule 7: a segment that is pure greetings has no facts to keep.
+            # Advance the coverage anchor so the same range is not re-summarized
+            # every turn, but do not append an empty segment or touch the
+            # projection.
+            conversation.summary_upto_msg_id = upto_id
+            session.commit()
+            return _skip(
+                "empty_consumed", started, from_id=from_id, upto_id=upto_id
+            )
         if len(summary) < SUMMARY_MIN_CHARS:
             return _skip("too_short", started, from_id=from_id, upto_id=upto_id)
         if len(summary) > effective_cap:
