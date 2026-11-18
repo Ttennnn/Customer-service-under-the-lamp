@@ -11,11 +11,11 @@
 
 ## 总体指标
 
-| total | correct | accuracy | JSON 可解析率 | overall pass | each class pass | errors | 结论 |
+| total | correct | accuracy | 有效输出率 | overall pass | each class pass | errors | 结论 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 62 | 61 | 0.984 | 1.000 | PASS | PASS | 0 | PASS |
 
-准确率只统计有效模型输出;`intent="其他"` 是合法预测,不当作兜底。分类器抛异常的样例从 total/correct/per_class/confusion 中排除,在「异常样例」单列,并直接判 FAIL。
+有效输出率 = 有效模型预测数 / 总样例数(不是 JSON 解析率)。准确率只统计有效模型输出;`intent="其他"` 是合法预测,不当作兜底。分类器抛异常的样例从 total/correct/per_class/confusion 中排除,在「异常样例」单列,并直接判 FAIL。
 
 ## 每类准确率
 

@@ -17,6 +17,7 @@ from app.agent.graph import (
     sqlite_checkpointer,
 )
 from app.agent.intent import IntentResult
+from app.config import Settings
 from tests.agent_fakes import (
     ScriptedLLM,
     ScriptedStructuredLLM,
@@ -240,6 +241,21 @@ def test_record_log_has_ch06_fields(caplog):
     assert "order_id" in payload
     assert payload["expanded_queries"] == []
     assert payload["refund_form"] is False
+
+
+def test_build_graph_warns_cost_mode_falls_back_to_accuracy(caplog):
+    caplog.set_level(logging.WARNING)
+    settings = Settings(
+        _env_file=None, openai_api_key="test", intent_mode="cost"
+    )
+
+    _build(ExplodingLLM(), "物流", settings=settings)
+
+    assert any(
+        "intent_mode='cost'" in record.getMessage()
+        and "using accuracy mode" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_checkpointer_keeps_history_across_turns():

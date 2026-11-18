@@ -168,8 +168,20 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
     order_ids = {order["order_id"] for order in orders}
     query = state.get("resolved_query") or ""
 
-    order_id = extract_order_id(query)
-    source = "message"
+    # The slot may already be filled (resume backfill or a same-turn write).
+    # Accept it only when it names an order in this session's catalogue;
+    # otherwise fall through to extracting this turn's resolved query.
+    order_id = state.get("order_id") or None
+    source = "state"
+    if order_id is not None and order_id not in order_ids:
+        logger.info(
+            "ch06 fetch_order state order_id=%r not in catalog", order_id
+        )
+        order_id = None
+    if order_id is None:
+        order_id = extract_order_id(query)
+        source = "message"
+
     messages: list[Any] = []
     if order_id not in order_ids:
         logger.info(
@@ -178,7 +190,7 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
         selected = interrupt(
             {"kind": "select_order", "slot": "order_id", "orders": orders}
         )
-        source = "resume"
+        source = "picker"
         if not isinstance(selected, str) or selected not in order_ids:
             logger.warning("ch06 fetch_order invalid resume %r", selected)
             _emit(ORDER_INVALID_TEXT)
@@ -215,7 +227,7 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
         }
         # A valid picker selection already filled the slot; keep it (and its
         # SystemMessage above) even though the lookup failed.
-        if source == "resume":
+        if source == "picker":
             failure["order_id"] = order_id
         return failure
 
@@ -231,6 +243,12 @@ def build_graph(
 ):
     """Build and compile the parent workflow graph."""
     settings = settings or get_settings()
+    if settings.intent_mode == "cost":
+        # §9.2: only the configuration seed exists; runtime always classifies
+        # with the accuracy model, so make the ignored setting visible.
+        logger.warning(
+            "ch06 intent_mode='cost' is not implemented; using accuracy mode"
+        )
 
     agent_subgraph = build_agent_subgraph(
         llm,
@@ -270,7 +288,9 @@ def build_graph(
             result = retrieve_hybrid(query, analysis=analysis)
         except Exception:  # noqa: BLE001 - 基础设施故障走保守兜底
             logger.exception(
-                "ch06 retrieval_forced intent=%s failed", intent
+                "ch06 retrieval_forced intent=%s resolved_query=%r failed",
+                intent,
+                query,
             )
             return {
                 "evidence": [],
@@ -283,8 +303,10 @@ def build_graph(
 
         top_score = max((chunk.score for chunk in result.chunks), default=None)
         logger.info(
-            "ch06 retrieval_forced intent=%s hits=%d top_score=%s rerank_failed=%s",
+            "ch06 retrieval_forced intent=%s resolved_query=%r hits=%d "
+            "top_score=%s rerank_failed=%s",
             intent,
+            query,
             len(result.chunks),
             top_score,
             result.rerank_failed,

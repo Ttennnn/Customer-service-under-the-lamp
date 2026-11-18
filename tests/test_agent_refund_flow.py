@@ -15,6 +15,7 @@ from app.agent.graph import (
     RERANK_FAILED_TEXT,
     build_graph,
     extract_order_id,
+    fetch_order_node,
 )
 from app.agent.intent import IntentResult
 from app.config import Settings
@@ -164,6 +165,13 @@ def test_fetch_order_rejects_unknown_id_and_interrupts(monkeypatch):
 def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
     calls = []
     _order_tool(monkeypatch, calls)
+    # Keep the test hermetic: the resumed graph continues into retrieve_policy,
+    # so a low score proves the deterministic fetch_order path without letting
+    # a live Milvus/reranker decide whether ExplodingLLM is reached.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.02)]),
+    )
     graph = _build()
 
     snap = _run_to_interrupt(graph)
@@ -175,6 +183,8 @@ def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
 
     assert values["order_id"] == "1001"
     assert values["order_data"]["order_id"] == "1001"
+    assert values["gate_reason"] == "below_threshold"
+    assert values["gate_passed"] is False
     assert calls == [("query_order", {"order_id": "1001"})]
     markers = [
         message
@@ -207,14 +217,60 @@ def test_fetch_order_invalid_resume_falls_back(monkeypatch):
 def test_fetch_order_valid_id_from_message_calls_query_once(monkeypatch):
     calls = []
     _order_tool(monkeypatch, calls)
+    # Same hermeticity rule as the resume test above: never let a live
+    # retrieval stack gate the Agent and decide this test's outcome.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.02)]),
+    )
     graph = _build(resolved="订单 1001 能退吗")
 
     values = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
 
     assert values["order_id"] == "1001"
     assert values["order_data"]["order_id"] == "1001"
+    assert values["gate_reason"] == "below_threshold"
     assert calls == [("query_order", {"order_id": "1001"})]
     assert not graph.get_state(CONFIG).interrupts
+
+
+def test_fetch_order_prefers_valid_state_order_id(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    calls = []
+    _order_tool(monkeypatch, calls)
+
+    result = fetch_order_node(
+        {
+            "session_id": "test-session",
+            "resolved_query": "能退吗",
+            "order_id": "1001",
+        }
+    )
+
+    assert result["order_id"] == "1001"
+    assert result["order_data"]["order_id"] == "1001"
+    assert calls == [("query_order", {"order_id": "1001"})]
+    assert any(
+        "ch06 fetch_order order_id=1001 source=state" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_fetch_order_rejects_state_id_outside_catalog_then_extracts(monkeypatch):
+    calls = []
+    _order_tool(monkeypatch, calls)
+
+    result = fetch_order_node(
+        {
+            "session_id": "test-session",
+            "resolved_query": "订单 1002 能退吗",
+            "order_id": "1004",
+        }
+    )
+
+    assert result["order_id"] == "1002"
+    assert result["order_data"]["order_id"] == "1002"
+    assert calls == [("query_order", {"order_id": "1002"})]
 
 
 def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):

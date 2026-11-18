@@ -209,7 +209,9 @@ def render_report(
     overall_pass = metrics["accuracy"] >= PASS_OVERALL
     class_pass = all(verdicts.get(label) is True for label in _LABEL_ORDER)
     passed = overall_pass and class_pass and not errors
-    json_rate = metrics["total"] / len(results) if results else 0.0
+    # Share of cases that produced a valid model prediction. This is not a
+    # JSON-parse rate: an exception is recorded as ``error`` and excluded.
+    valid_rate = metrics["total"] / len(results) if results else 0.0
     encoding = os.environ.get("PYTHONIOENCODING") or "(unset)"
 
     lines = [
@@ -228,15 +230,16 @@ def render_report(
         "",
         "## 总体指标",
         "",
-        "| total | correct | accuracy | JSON 可解析率 | overall pass | "
+        "| total | correct | accuracy | 有效输出率 | overall pass | "
         "each class pass | errors | 结论 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
         f"| {metrics['total']} | {metrics['correct']} | "
-        f"{metrics['accuracy']:.3f} | {json_rate:.3f} | "
+        f"{metrics['accuracy']:.3f} | {valid_rate:.3f} | "
         f"{'PASS' if overall_pass else 'FAIL'} | "
         f"{'PASS' if class_pass else 'FAIL'} | "
         f"{len(errors)} | {'PASS' if passed else 'FAIL'} |",
         "",
+        "有效输出率 = 有效模型预测数 / 总样例数(不是 JSON 解析率)。"
         "准确率只统计有效模型输出;`intent=\"其他\"` 是合法预测,不当作兜底。"
         "分类器抛异常的样例从 total/correct/per_class/confusion 中排除,"
         "在「异常样例」单列,并直接判 FAIL。",

@@ -131,6 +131,69 @@ def test_resume_without_pending_409(client, session):
     assert session.query(Message).count() == 0
 
 
+def test_chat_with_pending_interrupt_reemits_frame_without_stream(client, session):
+    graph = FakeGraph(
+        frames=[{"type": "token", "text": "不应出现"}],
+        final={},
+        snapshots=[_pending_snapshot()],
+    )
+    app.dependency_overrides[get_ch06_graph_dep] = lambda: graph
+
+    with client.stream(
+        "POST", "/ch06/chat", json={"session_id": "s1", "message": "你好"}
+    ) as r:
+        body = "".join(r.iter_text())
+
+    assert r.status_code == 200
+    assert '"type":"interrupt"' in body
+    assert "select_order" in body
+    assert "不应出现" not in body
+    # The new message is dropped and the graph must not run while paused.
+    assert graph.stream_calls == []
+    assert session.query(Message).count() == 0
+
+
+def test_resume_pending_check_failure_503(client, session):
+    class RaisingStateGraph:
+        def get_state(self, config):
+            raise RuntimeError("checkpoint unavailable")
+
+        def stream(self, *args, **kwargs):
+            raise AssertionError("stream must not start")
+
+    app.dependency_overrides[get_ch06_graph_dep] = lambda: RaisingStateGraph()
+
+    r = client.post(
+        "/ch06/chat/resume", json={"session_id": "s", "order_id": "1001"}
+    )
+
+    assert r.status_code == 503
+    assert r.json()["detail"] == ch06_api.ERROR_TEXT
+    assert session.query(Message).count() == 0
+
+
+def test_resume_stream_error_yields_error_and_done(client, session):
+    class RaisingStreamGraph:
+        def get_state(self, config):
+            return _pending_snapshot()
+
+        def stream(self, *args, **kwargs):
+            raise RuntimeError("graph exploded")
+
+    app.dependency_overrides[get_ch06_graph_dep] = lambda: RaisingStreamGraph()
+
+    with client.stream(
+        "POST",
+        "/ch06/chat/resume",
+        json={"session_id": "s1", "order_id": "1001"},
+    ) as r:
+        body = "".join(r.iter_text())
+
+    assert r.status_code == 200
+    assert '"error"' in body
+    assert "data: [DONE]" in body
+
+
 def test_resume_with_pending_streams_and_writes_audit(client, session):
     graph = FakeGraph(
         frames=[{"type": "token", "text": "这一单可以退"}],

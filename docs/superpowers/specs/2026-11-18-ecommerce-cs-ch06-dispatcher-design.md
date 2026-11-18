@@ -288,7 +288,7 @@ class IntentResult(BaseModel):
 - 取订单：`execute_tool(query_order, {"order_id": order_id}, timeout_s=..., retries=0)`，`json.loads` 结果写入 `order_data`。
 - 失败：工具异常/JSON 解析失败 → `answer=ORDER_FAILED_TEXT`、`gate_reason="order_fetch_failed"`，发 token 帧并追加 `AIMessage`，条件边转 `record_log`，不进 `retrieve_policy`。
 - 成功：写 `order_id`、`order_data`，条件边继续 `retrieve_policy`。
-- 日志：`ch06 fetch_order order_id=... source=message|resume|picker`。
+- 日志：`ch06 fetch_order order_id=... source=message|state|picker`（`state` 表示槽位已由本轮 state 提供且通过目录校验，`picker` 表示 resume 后的选择器回填）。
 
 订单 mock（`app/tools/business.py`）：
 
@@ -487,7 +487,7 @@ class CustomerServiceState(TypedDict, total=False):
 ```
 
 - `AgentState` 增加 `order_data`（prompt 用）与既有 `route`；其余共享键不变。
-- 每轮 `_reset_inputs` 显式重置：`resolved_query=""`、`intent_confidence=0.0`、`order_id=""`、`order_data={}`、`expanded_queries=[]`、`evidence/sources/answer/suggested_actions/...`。`session_id` 每轮写入。
+- 每轮 `_reset_inputs` 显式重置：`resolved_query=""`、`intent_confidence=None`、`order_id=""`、`order_data=None`、`expanded_queries=[]`、`evidence/sources/answer/suggested_actions/...`。`session_id` 每轮写入。`order_edge` 以 `order_data is None` 判断取单失败，因此 `order_data` 必须重置为 `None` 而不是 `{}`（`intent_confidence` 同样使用 `None` 哨兵）。
 - `messages` 只追加新的 `HumanMessage`；checkpointer 保留历史。
 
 ### 9.2 配置
@@ -648,7 +648,7 @@ ch06_checkpoint_db: str = ".data/ch06-checkpoints.sqlite"
 ### 13.3 Prompt/数据类验证（替代 TDD 的部分）
 
 - `tests/eval/ch06_coref_cases.json`：多轮指代、订单/商品引用、已完整透传、无历史；每条带 `history`、`message`、`expect.contains` / `expect.not_contains` / `passthrough`。脚本 `app/jobs/eval_coref.py` 用真实 LLM 跑，输出通过率与错例。
-- `tests/eval/ch06_intent_cases.json`：八类各 6 条 + 边界/其他/多轮漂移；held-out（不得复用 prompt few-shot 原文）；脚本 `app/jobs/eval_intent.py` 输出总体/每类准确率、混淆矩阵、JSON 可解析率、fallback 列表。
+- `tests/eval/ch06_intent_cases.json`：八类各 6 条 + 边界/其他/多轮漂移；held-out（不得复用 prompt few-shot 原文）；脚本 `app/jobs/eval_intent.py` 输出总体/每类准确率、混淆矩阵、有效输出率、fallback 列表。
 - `tests/eval/ch06_expand_cases.json`：退款/售后核心场景；脚本 `app/jobs/eval_expand.py` 检查严格 3 条、JSON 可解析、关键实体保留。
 - 通过标准：coref 关键实体/去指代 ≥90%，透传用例 100%（或至少 90%，以评估报告为准）；intent 总体 ≥90%、每类 ≥80%、JSON 解析率 100%（fallback 视为失败）；expand 3 条率 ≥90%、JSON 解析率 100%。
 - 报告写入 `docs/superpowers/reports/2026-11-18-ch06-*.md`，并把结论写进 dev-notes。
