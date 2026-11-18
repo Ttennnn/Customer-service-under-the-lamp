@@ -1,12 +1,13 @@
 """Agent ReAct 子图(设计文档 §6.5)。
 
-子图只在父图路由到 ``knowledge`` / ``business`` 时运行,负责:
+子图在父图路由到 ``knowledge`` / ``business`` / ``refund_flow`` 时运行,负责:
 
-- ``agent``:组装带证据的 system prompt,流式调用绑定工具的模型,累加
-  ``AIMessageChunk`` 并把完整回复写回 ``messages``;
+- ``agent``:按 ``route`` 组装 system prompt 与工具子集(``refund_flow``
+  用售后 prompt + 退款控制工具,其余用通用 prompt + 业务工具),流式调用
+  绑定工具的模型,累加 ``AIMessageChunk`` 并把完整回复写回 ``messages``;
 - ``tools``:执行业务工具并经 ``current_conversation_id`` 传播会话上下文;
-  ``suggest_handoff`` 是控制工具,只把建议合并进 ``suggested_actions``,
-  绝不调用 ``execute_tool``;
+  ``suggest_handoff`` 与 ``submit_refund`` 是控制工具,只把建议合并进
+  ``suggested_actions``,绝不调用 ``execute_tool``;
 - ``finalize``:步数/token 预算耗尽或答案为空时,发出固定兜底话术、
   追加 ``AIMessage``,并在没有选项时补一个「转人工」。
 
@@ -32,12 +33,16 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent.state import AgentState
 from app.agent.tools import (
-    AGENT_TOOLS,
     AGENT_TOOLS_BY_NAME,
     BUSINESS_TOOL_NAMES,
     suggested_actions_from_handoff,
+    suggested_actions_from_refund,
+    tools_for_route,
 )
-from app.prompts.customer_service import render_agent_system_prompt
+from app.prompts.customer_service import (
+    render_after_sales_agent_system_prompt,
+    render_agent_system_prompt,
+)
 from app.services.context import build_agent_messages, estimate_tokens
 from app.tools.context import current_conversation_id
 from app.tools.executor import execute_tool
@@ -49,9 +54,13 @@ FALLBACK_ANSWER = (
 )
 TRANSFER_ACTION: dict[str, str] = {"action": "transfer", "label": "转人工"}
 
-# ``suggest_handoff`` 不在业务工具注册表里,单独给一个流式状态标签。
-_CONTROL_TOOL_LABELS = {"suggest_handoff": "转人工建议"}
+# 控制工具不在业务工具注册表里,单独给一个流式状态标签。
+_CONTROL_TOOL_LABELS = {
+    "suggest_handoff": "转人工建议",
+    "submit_refund": "准备退款表单",
+}
 _INVALID_HANDOFF_OPTIONS = "参数无效: options 只能是 transfer/ticket。"
+_INVALID_REFUND_ORDER = "订单号与当前订单不一致,无法准备退款表单。"
 _VALID_HANDOFF_OPTIONS = frozenset({"transfer", "ticket"})
 _VALID_TICKET_TYPES = frozenset({"售后", "投诉", "咨询"})
 
@@ -116,6 +125,25 @@ def _handoff_result(args: dict) -> str:
         return "已记录转人工/建工单建议。"
 
 
+def _refund_result(args: dict, order_data: dict) -> tuple[str, dict | None]:
+    """Validate a ``submit_refund`` call; return ``(ack, action or None)``.
+
+    Only the order currently carried by the parent graph may produce a
+    refund form. Any other order number is rejected without writing State.
+    """
+    order_id = args.get("order_id")
+    current = order_data.get("order_id") if isinstance(order_data, dict) else None
+    if not order_id or current is None or str(order_id) != str(current):
+        return _INVALID_REFUND_ORDER, None
+    try:
+        result = AGENT_TOOLS_BY_NAME["submit_refund"].invoke(
+            {"order_id": str(order_id)}
+        )
+    except Exception:  # noqa: BLE001 - 控制工具只回确认,不向外抛
+        result = "已准备退款表单。"
+    return result, suggested_actions_from_refund(str(order_id))[0]
+
+
 def build_agent_subgraph(
     llm,
     *,
@@ -125,8 +153,16 @@ def build_agent_subgraph(
     max_context_tokens: int = 4096,
     tools: Sequence[BaseTool] | None = None,
 ):
-    """Return a compiled Agent subgraph (no checkpointer; parent propagates it)."""
-    bound_tools: list[BaseTool] = list(tools) if tools is not None else list(AGENT_TOOLS)
+    """Return a compiled Agent subgraph (no checkpointer; parent propagates it).
+
+    When ``tools`` is omitted, each route binds its own subset: ``refund_flow``
+    gets the refund control tool plus handoff, other routes get the business
+    tools plus handoff. An explicit ``tools`` list overrides route selection
+    (used by tests and callers with a fixed tool set).
+    """
+    explicit_tools: list[BaseTool] | None = (
+        list(tools) if tools is not None else None
+    )
 
     def agent_node(state: AgentState) -> dict[str, Any]:
         step_count = state.get("step_count", 0) + 1
@@ -134,9 +170,22 @@ def build_agent_subgraph(
         if step_count > max_steps or token_estimate >= token_budget:
             return {"step_count": step_count, "exhausted": True}
 
-        system = SystemMessage(
-            content=render_agent_system_prompt(evidence=state.get("evidence"))
-        )
+        route = state.get("route") or "business"
+        if explicit_tools is not None:
+            bound_tools = explicit_tools
+        else:
+            bound_tools = tools_for_route(route)
+        if route == "refund_flow":
+            system_content = render_after_sales_agent_system_prompt(
+                order_data=state.get("order_data"),
+                evidence=state.get("evidence"),
+                intent=state.get("intent") or "",
+            )
+        else:
+            system_content = render_agent_system_prompt(
+                evidence=state.get("evidence")
+            )
+        system = SystemMessage(content=system_content)
         prompt = build_agent_messages(
             system,
             state.get("messages", []),
@@ -193,6 +242,14 @@ def build_agent_subgraph(
                     suggested_actions = _merge_actions(
                         suggested_actions,
                         suggested_actions_from_handoff(options, ticket_type),
+                    )
+            elif name == "submit_refund":
+                result, refund_action = _refund_result(
+                    args, state.get("order_data") or {}
+                )
+                if refund_action is not None:
+                    suggested_actions = _merge_actions(
+                        suggested_actions, [refund_action]
                     )
             elif name in BUSINESS_TOOL_NAMES:
                 tool = AGENT_TOOLS_BY_NAME[name]

@@ -1,0 +1,122 @@
+[
+  {
+    "id": "E1",
+    "note": "已签收后想退货",
+    "query": "订单 1001 的无线蓝牙耳机已经签收了，现在还能退货吗？",
+    "order_data": {
+      "order_id": "1001",
+      "items": [{"name": "无线蓝牙耳机", "qty": 1, "price": 299.0}],
+      "amount": 299.0,
+      "status": "已签收",
+      "tracking_no": "SF1234567890",
+      "created_at": "2026-11-11",
+      "signed_at": "2026-11-15"
+    },
+    "must_include": ["1001", "蓝牙耳机"]
+  },
+  {
+    "id": "E2",
+    "note": "质量问题想退货",
+    "query": "订单 1001 的无线蓝牙耳机右耳没有声音，是质量问题，我想退货",
+    "order_data": {
+      "order_id": "1001",
+      "items": [{"name": "无线蓝牙耳机", "qty": 1, "price": 299.0}],
+      "amount": 299.0,
+      "status": "已签收",
+      "tracking_no": "SF1234567890",
+      "created_at": "2026-11-11",
+      "signed_at": "2026-11-15"
+    },
+    "must_include": ["1001", "蓝牙耳机"]
+  },
+  {
+    "id": "E3",
+    "note": "运输中想取消订单",
+    "query": "订单 1002 的智能手环还在运输中，我现在想取消订单",
+    "order_data": {
+      "order_id": "1002",
+      "items": [{"name": "智能手环", "qty": 1, "price": 199.0}],
+      "amount": 199.0,
+      "status": "运输中",
+      "tracking_no": "SF2345678901",
+      "created_at": "2026-11-16",
+      "signed_at": null
+    },
+    "must_include": ["1002", "智能手环"]
+  },
+  {
+    "id": "E4",
+    "note": "售后维修：保修期内充电仓故障",
+    "query": "订单 1001 的无线蓝牙耳机充电仓坏了，还在保修期内，能维修吗？",
+    "order_data": {
+      "order_id": "1001",
+      "items": [{"name": "无线蓝牙耳机", "qty": 1, "price": 299.0}],
+      "amount": 299.0,
+      "status": "已签收",
+      "tracking_no": "SF1234567890",
+      "created_at": "2026-11-11",
+      "signed_at": "2026-11-15"
+    },
+    "must_include": ["1001", "蓝牙耳机"]
+  },
+  {
+    "id": "E5",
+    "note": "待发货订单想退款",
+    "query": "订单 1003 买的两个移动电源还没发货，可以直接退款吗",
+    "order_data": {
+      "order_id": "1003",
+      "items": [{"name": "移动电源", "qty": 2, "price": 89.0}],
+      "amount": 178.0,
+      "status": "待发货",
+      "tracking_no": "SF3456789012",
+      "created_at": "2026-11-17",
+      "signed_at": null
+    },
+    "must_include": ["1003", "移动电源"]
+  },
+  {
+    "id": "E6",
+    "note": "签收超过七天还能否无理由退货",
+    "query": "订单 1001 的无线蓝牙耳机签收已经超过七天了，还能无理由退货吗",
+    "order_data": {
+      "order_id": "1001",
+      "items": [{"name": "无线蓝牙耳机", "qty": 1, "price": 299.0}],
+      "amount": 299.0,
+      "status": "已签收",
+      "tracking_no": "SF1234567890",
+      "created_at": "2026-10-28",
+      "signed_at": "2026-11-01"
+    },
+    "must_include": ["1001", "蓝牙耳机"]
+  },
+  {
+    "id": "E7",
+    "note": "保留订单金额实体",
+    "query": "订单 1001 的无线蓝牙耳机花了 299 元，现在不想要了能退款吗",
+    "order_data": {
+      "order_id": "1001",
+      "items": [{"name": "无线蓝牙耳机", "qty": 1, "price": 299.0}],
+      "amount": 299.0,
+      "status": "已签收",
+      "tracking_no": "SF1234567890",
+      "created_at": "2026-11-11",
+      "signed_at": "2026-11-15"
+    },
+    "must_include": ["1001", "299"]
+  },
+  {
+    "id": "E8",
+    "note": "售后换货及所需材料",
+    "query": "订单 1003 的移动电源充不进电，能换货吗，需要准备什么材料",
+    "order_data": {
+      "order_id": "1003",
+      "items": [{"name": "移动电源", "qty": 2, "price": 89.0}],
+      "amount": 178.0,
+      "status": "待发货",
+      "tracking_no": "SF3456789012",
+      "created_at": "2026-11-17",
+      "signed_at": null
+    },
+    "must_include": ["1003", "移动电源"]
+  }
+]

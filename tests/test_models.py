@@ -21,8 +21,12 @@ def test_message_fk_to_conversation():
 def test_ticket_enums_and_pk():
     c = _cols(Ticket)
     assert c["ticket_no"].primary_key
-    assert c["ticket_type"].type.enums == ["售后", "投诉", "咨询"]
+    assert c["ticket_type"].type.enums == ["售后", "投诉", "咨询", "退款"]
     assert c["status"].type.enums == ["待处理", "已处理"]
+
+def test_ticket_enum_includes_refund():
+    from app.models import Ticket
+    assert Ticket.__table__.c.ticket_type.type.enums == ["售后", "投诉", "咨询", "退款"]
 
 def test_faq_fields():
     c = _cols(Faq)

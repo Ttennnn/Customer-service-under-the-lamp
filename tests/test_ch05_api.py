@@ -1,22 +1,18 @@
-"""Ch05 API tests (Task 11, design §6.7-§6.8)."""
+"""Ch05 compatibility tests: redirects plus the retained ticket endpoint.
 
-import threading
-from types import SimpleNamespace
+The ch05 workflow API moved to ``/ch06`` in Task 16. ``/ch05`` and
+``/ch05/chat`` are 307 compatibility redirects; ``/ch05/tickets`` is kept
+because the chat page still creates complaint/after-sale tickets through it.
+"""
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.api import ch05 as ch05_api
-from app.api.ch05 import get_ch05_graph_dep
 from app.config import Settings, get_settings
 from app.main import app
 from app.models import Conversation, Ticket
 from app.services.history import get_or_create_conversation
 from app.tools.ticket import TICKET_NO_PATTERN
-from tests.agent_fakes import FakeGraph
-
-TRANSFER_ACTION = {"action": "transfer", "label": "转人工"}
 
 
 @pytest.fixture
@@ -27,57 +23,42 @@ def client(session):
     app.dependency_overrides.clear()
 
 
-def test_ch05_chat_streams_frames_and_done(client):
-    graph = FakeGraph(
-        frames=[{"type": "token", "text": "您好"}],
-        final={"answer": "您好", "suggested_actions": [TRANSFER_ACTION]},
+def test_ch05_page_serves_latest_ch06_page(client):
+    r = client.get("/ch05", follow_redirects=False)
+
+    assert r.status_code == 200
+    assert "lamp-cs-ch06-session-id" in r.text
+
+
+def test_ch05_page_redirect_lands_on_ch06(client):
+    r = client.get("/ch05")
+
+    assert r.status_code == 200
+    assert "lamp-cs-ch06-session-id" in r.text
+
+
+def test_ch05_chat_redirects_to_ch06(client):
+    r = client.post(
+        "/ch05/chat",
+        json={"session_id": "s", "message": "x"},
+        follow_redirects=False,
     )
-    app.dependency_overrides[get_ch05_graph_dep] = lambda: graph
 
-    with client.stream(
-        "POST", "/ch05/chat", json={"session_id": "s1", "message": "你好"}
-    ) as r:
-        body = "".join(r.iter_text())
-
-    assert r.status_code == 200
-    assert "data: 您好" in body
-    assert "options" in body
-    assert "data: [DONE]" in body
+    assert r.status_code == 307
+    assert r.headers["location"] == "/ch06/chat"
 
 
-def test_ch05_chat_blank_message_422(client):
-    app.dependency_overrides[get_ch05_graph_dep] = lambda: FakeGraph([], {})
-    r = client.post("/ch05/chat", json={"session_id": "s1", "message": "  "})
-    assert r.status_code == 422
+def test_ch05_chat_redirect_does_not_validate_body(client):
+    # The compatibility layer must redirect legacy clients even if their body
+    # does not match the new request schema (e.g. an old client sending extra
+    # fields); it never reads the payload itself.
+    r = client.post(
+        "/ch05/chat",
+        json={"unexpected": True},
+        follow_redirects=False,
+    )
 
-
-def test_ch05_chat_graph_error_yields_error_and_done(client):
-    class RaisingGraph:
-        def stream(self, *args, **kwargs):
-            raise RuntimeError("graph exploded")
-
-        def get_state(self, config):
-            raise AssertionError("get_state must not run after a graph error")
-
-    app.dependency_overrides[get_ch05_graph_dep] = lambda: RaisingGraph()
-
-    with client.stream(
-        "POST", "/ch05/chat", json={"session_id": "s1", "message": "你好"}
-    ) as r:
-        body = "".join(r.iter_text())
-
-    assert r.status_code == 200
-    assert '"error"' in body
-    assert "data: [DONE]" in body
-
-
-def test_ch05_chat_graph_build_failure_503(client):
-    def failing_dep():
-        raise HTTPException(status_code=503, detail="客服服务暂时不可用,请稍后重试")
-
-    app.dependency_overrides[get_ch05_graph_dep] = failing_dep
-    r = client.post("/ch05/chat", json={"session_id": "s1", "message": "你好"})
-    assert r.status_code == 503
+    assert r.status_code == 307
 
 
 def test_ch05_ticket_writes_ticket_without_transfer(client, session):
@@ -118,6 +99,17 @@ def test_ch05_ticket_defaults_to_consultation(client, session):
     assert session.query(Ticket).one().ticket_type == "咨询"
 
 
+def test_ch05_ticket_accepts_refund_type(client, session):
+    r = client.post(
+        "/ch05/tickets",
+        json={"session_id": "s1", "description": "退款", "ticket_type": "退款"},
+    )
+
+    assert r.status_code == 200
+    session.expire_all()
+    assert session.query(Ticket).one().ticket_type == "退款"
+
+
 def test_ch05_ticket_invalid_type_422(client):
     r = client.post(
         "/ch05/tickets",
@@ -143,89 +135,3 @@ def test_ch05_ticket_failure_502(client, session, monkeypatch):
     assert session.query(Ticket).count() == 0
     # 工单写入非幂等:必须禁用自动重试,超时宁可 502 让用户手动确认重试。
     assert calls == [{"timeout_s": 5, "retries": 0}]
-
-
-def _fake_request_state():
-    state = SimpleNamespace(
-        ch05_graph=None,
-        ch05_checkpoint_handle=None,
-        ch05_graph_lock=threading.Lock(),
-    )
-    return SimpleNamespace(app=SimpleNamespace(state=state))
-
-
-def test_ch05_lazy_graph_builds_once_and_closes(monkeypatch):
-    built = []
-    closed = []
-
-    class Handle:
-        saver = object()
-
-        def close(self):
-            closed.append(True)
-
-    monkeypatch.setattr(
-        ch05_api, "open_sqlite_checkpointer", lambda path: Handle()
-    )
-    monkeypatch.setattr(
-        ch05_api, "build_llm", lambda settings, temperature=0.7: object()
-    )
-
-    def fake_build_graph(llm, intent_llm, *, checkpointer=None, settings=None):
-        built.append(checkpointer)
-        return object()
-
-    monkeypatch.setattr(ch05_api, "build_graph", fake_build_graph)
-    request = _fake_request_state()
-    settings = Settings(_env_file=None, openai_api_key="test")
-
-    first = ch05_api.get_ch05_graph_dep(request, settings)
-    second = ch05_api.get_ch05_graph_dep(request, settings)
-
-    assert first is second
-    assert len(built) == 1
-    assert request.app.state.ch05_checkpoint_handle is not None
-
-    ch05_api.close_ch05_graph(request.app)
-    assert closed == [True]
-    assert request.app.state.ch05_graph is None
-    assert request.app.state.ch05_checkpoint_handle is None
-
-
-def test_ch05_lazy_graph_failure_raises_503_and_closes_handle(monkeypatch):
-    closed = []
-
-    class Handle:
-        saver = object()
-
-        def close(self):
-            closed.append(True)
-
-    monkeypatch.setattr(
-        ch05_api, "open_sqlite_checkpointer", lambda path: Handle()
-    )
-    monkeypatch.setattr(
-        ch05_api, "build_llm", lambda settings, temperature=0.7: object()
-    )
-
-    def failing_build_graph(*args, **kwargs):
-        raise RuntimeError("no model")
-
-    monkeypatch.setattr(ch05_api, "build_graph", failing_build_graph)
-    request = _fake_request_state()
-
-    with pytest.raises(HTTPException) as excinfo:
-        ch05_api.get_ch05_graph_dep(
-            request, Settings(_env_file=None, openai_api_key="test")
-        )
-
-    assert excinfo.value.status_code == 503
-    assert closed == [True]
-    assert request.app.state.ch05_graph is None
-
-
-def test_ch05_app_does_not_build_graph_at_startup(client):
-    # ``client`` has already entered ``with TestClient(app)``, i.e. lifespan
-    # startup ran; neither the graph nor the checkpointer may exist yet.
-    assert app.state.ch05_graph is None
-    assert app.state.ch05_checkpoint_handle is None

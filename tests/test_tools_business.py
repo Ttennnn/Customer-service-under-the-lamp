@@ -3,7 +3,46 @@ import re
 
 import pytest
 
-from app.tools.business import query_order, query_product, query_logistics
+from app.tools.business import query_order, query_product, query_logistics, list_user_orders
+
+
+def test_list_user_orders_returns_three_demo_orders():
+    orders = list_user_orders("s1")
+    assert [o["order_id"] for o in orders] == ["1001", "1002", "1003"]
+    assert orders[0]["status"] == "已签收"
+    assert orders[0]["signed_at"]
+
+
+def test_query_order_matches_demo_order():
+    payload = json.loads(query_order.invoke({"order_id": "1001"}))
+    demo = list_user_orders("s1")[0]
+    assert payload["order_id"] == "1001"
+    assert payload["status"] == demo["status"]
+    assert payload["signed_at"] == demo["signed_at"]
+
+
+def test_query_order_unknown_id_keeps_contract():
+    payload = json.loads(query_order.invoke({"order_id": "9999"}))
+    assert payload["order_id"] == "9999"
+    for key in ("items", "amount", "status", "tracking_no", "created_at", "signed_at"):
+        assert key in payload
+
+
+def test_query_order_is_stable_for_same_unknown_id():
+    first = query_order.invoke({"order_id": "5678"})
+    second = query_order.invoke({"order_id": "5678"})
+    assert first == second
+
+
+def test_query_order_status_is_one_of_known_values():
+    payload = json.loads(query_order.invoke({"order_id": "5678"}))
+    assert payload["status"] in {"待付款", "待发货", "运输中", "已签收"}
+
+
+def test_list_user_orders_returns_copies():
+    first = list_user_orders("s1")
+    first[0]["status"] = "mutated"
+    assert list_user_orders("s1")[0]["status"] != "mutated"
 
 
 def test_query_order_returns_tracking_no():

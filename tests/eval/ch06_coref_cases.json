@@ -1,0 +1,133 @@
+[
+  {
+    "id": "C01",
+    "note": "多轮订单指代：它能退吗",
+    "history": [
+      {"role": "user", "content": "我在你们店买了副蓝牙耳机，订单号 1001，昨天已经签收了"},
+      {"role": "assistant", "content": "好的，订单 1001 已签收。请问还有什么可以帮您？"}
+    ],
+    "message": "它能退吗",
+    "contains": ["1001"],
+    "not_contains": ["它"]
+  },
+  {
+    "id": "C02",
+    "note": "商品指代：这个还有别的颜色吗",
+    "history": [
+      {"role": "user", "content": "我想看看你们家的头戴式耳机"},
+      {"role": "assistant", "content": "推荐您关注 XM5 头戴式耳机，佩戴舒适、降噪效果不错"}
+    ],
+    "message": "这个还有别的颜色吗",
+    "contains": ["XM5"],
+    "not_contains": ["这个"]
+  },
+  {
+    "id": "C03",
+    "note": "已完整问句必须原样透传",
+    "history": [
+      {"role": "user", "content": "订单 1002 怎么还没到"},
+      {"role": "assistant", "content": "订单 1002 目前在运输途中，预计明天送达"}
+    ],
+    "message": "订单 1001 什么时候发货",
+    "passthrough": true
+  },
+  {
+    "id": "C04",
+    "note": "无历史口语归一：邮费→运费",
+    "history": [],
+    "message": "邮费怎么算",
+    "contains": ["运费"]
+  },
+  {
+    "id": "C05",
+    "note": "订单选择器系统标记后的指代",
+    "history": [
+      {"role": "user", "content": "我要申请退款"},
+      {"role": "system", "content": "[订单选择器] 用户选择了订单 1001"}
+    ],
+    "message": "这个能退吗",
+    "contains": ["1001"],
+    "not_contains": ["这个", "它"]
+  },
+  {
+    "id": "C06",
+    "note": "口语指代：那单",
+    "history": [
+      {"role": "user", "content": "上周买的空气炸锅是订单 1002，到现在还没发货"},
+      {"role": "assistant", "content": "我查到订单 1002 当前状态是待发货"}
+    ],
+    "message": "那单能取消吗",
+    "contains": ["1002"],
+    "not_contains": ["那单"]
+  },
+  {
+    "id": "C07",
+    "note": "型号指代：那个型号",
+    "history": [
+      {"role": "user", "content": "我在看 X200 这款扫地机器人"},
+      {"role": "assistant", "content": "X200 现在有现货，续航表现也不错"}
+    ],
+    "message": "刚才说的那个型号有现货吗",
+    "contains": ["X200"],
+    "not_contains": ["那个型号"]
+  },
+  {
+    "id": "C08",
+    "note": "口语归一：退钱→退款",
+    "history": [
+      {"role": "user", "content": "订单 1003 我已经申请退款了"},
+      {"role": "assistant", "content": "退款申请已提交，正在审核中"}
+    ],
+    "message": "退钱要多久到账",
+    "contains": ["退款"]
+  },
+  {
+    "id": "C09",
+    "note": "无历史完整问句透传",
+    "history": [],
+    "message": "XM5 有几种配色",
+    "passthrough": true
+  },
+  {
+    "id": "C10",
+    "note": "口语归一：换个新的→换货",
+    "history": [
+      {"role": "user", "content": "耳机右耳没有声音了"},
+      {"role": "assistant", "content": "如果确认是质量问题，可以为您申请换货"}
+    ],
+    "message": "换个新的要怎么办",
+    "contains": ["换货"]
+  },
+  {
+    "id": "C11",
+    "note": "指代目标是客服上一轮说出的订单",
+    "history": [
+      {"role": "user", "content": "我的东西什么时候发"},
+      {"role": "assistant", "content": "您的订单 1003 尚未发货，预计明天发出"}
+    ],
+    "message": "帮我催一下它",
+    "contains": ["1003"],
+    "not_contains": ["它"]
+  },
+  {
+    "id": "C12",
+    "note": "有无关历史也不得改写完整问句",
+    "history": [
+      {"role": "user", "content": "你好"},
+      {"role": "assistant", "content": "您好，请问有什么可以帮您？"}
+    ],
+    "message": "订单 1002 现在到哪里了",
+    "passthrough": true
+  },
+  {
+    "id": "C13",
+    "note": "两单上下文中的序数指代：第一个→1001",
+    "history": [
+      {"role": "user", "content": "我最近买了两单，1001 和 1002"},
+      {"role": "assistant", "content": "好的，订单 1001 已签收，订单 1002 还在运输中"}
+    ],
+    "message": "第一个能退吗",
+    "contains": ["1001"],
+    "not_contains": ["第一个"]
+  }
+]

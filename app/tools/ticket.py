@@ -24,7 +24,9 @@ TICKET_NO_PATTERN = re.compile(r"^T\d{11}$")
 
 
 @tool
-def create_ticket(description: str, ticket_type: Literal["售后", "投诉", "咨询"]) -> str:
+def create_ticket(
+    description: str, ticket_type: Literal["售后", "投诉", "咨询", "退款"]
+) -> str:
     """创建工单。
 
     为当前会话创建一张工单:工单号按「T + 当日日期(YYYYMMDD) + 三位递增
@@ -33,7 +35,7 @@ def create_ticket(description: str, ticket_type: Literal["售后", "投诉", "�
 
     Args:
         description: 工单描述(问题详情)
-        ticket_type: 工单类型,取值「售后」「投诉」「咨询」之一
+        ticket_type: 工单类型,取值「售后」「投诉」「咨询」「退款」之一
     """
     cid = current_conversation_id.get()
     if cid is None:

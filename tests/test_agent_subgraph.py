@@ -99,6 +99,73 @@ def test_suggest_handoff_records_options_without_side_effect(monkeypatch):
     assert any(isinstance(m, ToolMessage) for m in result["messages"])
 
 
+def test_submit_refund_is_intercepted_without_execute_tool(monkeypatch):
+    import app.agent.subgraph as sg
+
+    monkeypatch.setattr(
+        sg,
+        "execute_tool",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not execute")),
+    )
+    llm = ScriptedLLM([
+        tool_chunk("submit_refund", '{"order_id": "1001"}'),
+        text_chunk("可以退,请填写退款原因。"),
+    ])
+    graph = build_agent_subgraph(llm)
+    result = graph.invoke({
+        "messages": [HumanMessage(content="能退吗")],
+        "route": "refund_flow",
+        "order_data": {"order_id": "1001", "status": "已签收"},
+        "suggested_actions": [],
+        "token_estimate": 0,
+        "conversation_id": 1,
+    })
+    assert result["suggested_actions"] == [
+        {"action": "refund_form", "label": "提交退款工单", "order_id": "1001"}
+    ]
+
+
+def test_submit_refund_with_mismatched_order_emits_no_action(monkeypatch):
+    import app.agent.subgraph as sg
+
+    monkeypatch.setattr(
+        sg,
+        "execute_tool",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not execute")),
+    )
+    llm = ScriptedLLM([
+        tool_chunk("submit_refund", '{"order_id": "1002"}'),
+        text_chunk("当前订单暂不支持退款。"),
+    ])
+    result = build_agent_subgraph(llm).invoke(
+        _initial_state(
+            route="refund_flow",
+            order_data={"order_id": "1001", "status": "已签收"},
+        )
+    )
+
+    assert result["suggested_actions"] == []
+    assert any(
+        isinstance(m, ToolMessage) and "不一致" in m.content
+        for m in result["messages"]
+    )
+
+
+def test_refund_route_binds_after_sales_tools_and_prompt():
+    llm = ScriptedLLM([text_chunk("可以退")])
+    graph = build_agent_subgraph(llm)
+    graph.invoke({
+        "messages": [HumanMessage(content="能退吗")],
+        "route": "refund_flow",
+        "order_data": {"order_id": "1001", "status": "已签收"},
+        "evidence": [],
+        "suggested_actions": [],
+        "token_estimate": 0,
+        "conversation_id": 1,
+    })
+    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff"]
+
+
 def test_max_steps_runs_finalize(monkeypatch):
     monkeypatch.setattr(
         "app.agent.subgraph.execute_tool",

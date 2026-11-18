@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>客服工作台 · ch05</title>
+<title>客服小猫 · ch06</title>
 <style>
   :root {
     --bg: #171310;
@@ -147,6 +147,89 @@
   .option-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .option-btn:disabled { opacity: .45; cursor: default; }
 
+  /* Order picker (interrupt kind=select_order) */
+  .picker-msg .body { max-width: min(88%, 660px); width: 100%; }
+  .picker-bubble { width: 100%; padding: 14px; }
+  .picker-title { margin-bottom: 10px; color: var(--dim); font-size: 12.5px; }
+  .order-list { display: grid; gap: 8px; }
+  .order-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .1s;
+  }
+  .order-card:hover:not(:disabled) { border-color: var(--accent); background: rgba(240,183,106,.07); }
+  .order-card:active:not(:disabled) { transform: translateY(1px); }
+  .order-card:disabled { opacity: .45; cursor: default; }
+  .order-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .order-no { font-weight: 600; font-size: 14px; letter-spacing: .02em; }
+  .order-status {
+    flex: 0 0 auto;
+    padding: 1px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .order-items { margin-top: 5px; font-size: 13px; }
+  .order-sub { margin-top: 4px; color: var(--dim); font-size: 11.5px; line-height: 1.6; }
+  .order-sub strong { color: var(--accent); font-weight: 600; }
+
+  /* Refund form (options action=refund_form) */
+  .refund-form {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    padding: 13px 14px;
+    border: 1px solid rgba(240,183,106,.35);
+    border-radius: 12px;
+    background: rgba(240,183,106,.05);
+  }
+  .refund-form h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+  .refund-form label { display: grid; gap: 5px; color: var(--dim); font-size: 12px; }
+  .refund-form input,
+  .refund-form select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+  }
+  .refund-form input[readonly] { color: var(--dim); }
+  .refund-form select:focus, .refund-form input:focus { outline: none; border-color: var(--accent); }
+  .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .refund-form button {
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #1a1512;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .refund-form button.secondary {
+    border-color: var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .refund-form button:disabled { opacity: .5; cursor: default; }
+  .form-result { font-size: 12.5px; line-height: 1.6; }
+  .form-result.ok { color: var(--green); }
+  .form-result.error { color: var(--red); }
+
   .composer {
     display: flex;
     gap: 10px;
@@ -170,6 +253,7 @@
     line-height: 1.5;
   }
   textarea:focus { outline: none; border-color: var(--accent); }
+  textarea:disabled { opacity: .55; cursor: not-allowed; }
   .primary {
     border: 1px solid var(--accent);
     background: var(--accent);
@@ -188,6 +272,7 @@
     .wrap { padding: 16px 12px 12px; }
     .messages { max-height: calc(100vh - 220px); padding: 14px 12px; }
     .body { max-width: 84%; }
+    .picker-msg .body { max-width: 92%; }
     .links { display: none; }
   }
 </style>
@@ -196,7 +281,7 @@
 <div class="wrap">
   <header>
     <div>
-      <h1>客服工作台<span class="tag">ch05</span></h1>
+      <h1>客服小猫<span class="tag">ch06</span></h1>
     </div>
     <div class="links">
       <a href="/kb">知识录入页</a>
@@ -209,26 +294,29 @@
       <p class="empty" id="empty-hint">您好，我是客服小猫，请问有什么可以帮您的？</p>
     </div>
     <form id="composer" class="composer" autocomplete="off">
+      <input type="hidden" id="session-key" value="lamp-cs-ch06-session-id">
       <textarea id="input" rows="1" placeholder="输入您的问题…（Enter 发送，Shift+Enter 换行）" aria-label="消息输入框"></textarea>
       <button id="send" class="primary" type="submit">发送</button>
     </form>
   </main>
 
-  <p class="foot">会话 ID 保存在当前浏览器标签页的 sessionStorage 中；本页只用于本地开发调试。</p>
+  <p class="foot">会话 ID 保存在当前浏览器标签页的 sessionStorage 中；退款单只会在您确认后提交。</p>
 </div>
 
 <script>
 (function () {
   "use strict";
 
-  var SESSION_KEY = "lamp-cs-ch05-session-id";
+  var SESSION_KEY = "lamp-cs-ch06-session-id";
   var TRANSFER_LABEL = "转人工";
   var TICKET_LABEL = "建工单";
+  var REFUND_LABEL = "提交退款工单";
   var TRANSFERRED_TEXT = "已转接人工客服";
   var HUMAN_GREETING = "您好，我是客服小猫，请问有什么可以帮您的？";
-  // Spec §7.2: no data for 90 seconds means the stream is dead. Agent turns
-  // can involve several tools, so this is a no-progress timeout, not a total
-  // request timeout: every reader chunk resets it.
+  var REFUND_REASONS = ["七天无理由", "质量问题", "发错货", "不想要了", "其他"];
+  // Spec §7.2: 90 seconds without a single byte from the server means the
+  // stream is dead. Agent turns may involve several tools, so every reader
+  // chunk resets this no-progress watchdog.
   var NO_DATA_TIMEOUT_MS = 90000;
   var TIMEOUT_TEXT = "请求超时，请稍后重试。";
 
@@ -240,7 +328,8 @@
 
   var sessionId = getSessionId();
   var lastUserMessage = "";
-  var streaming = false;
+  var streaming = false;      // a request/stream is in flight
+  var pickerPending = false;  // waiting for the user to pick an order
 
   function getSessionId() {
     try {
@@ -250,7 +339,6 @@
       sessionStorage.setItem(SESSION_KEY, generated);
       return generated;
     } catch (err) {
-      // sessionStorage can be unavailable (privacy mode); keep the page usable.
       return newSessionId();
     }
   }
@@ -259,7 +347,7 @@
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
     }
-    return "ch05-" + Date.now().toString(36) + "-" + Math.random().toString(16).slice(2);
+    return "ch06-" + Date.now().toString(36) + "-" + Math.random().toString(16).slice(2);
   }
 
   function el(tag, className, text) {
@@ -276,6 +364,12 @@
   function hideEmptyHint() {
     if (emptyHint && emptyHint.parentNode) emptyHint.parentNode.removeChild(emptyHint);
     emptyHint = null;
+  }
+
+  function syncComposer() {
+    var locked = streaming || pickerPending;
+    input.disabled = locked;
+    sendButton.disabled = locked;
   }
 
   function appendMessage(role, text) {
@@ -314,7 +408,8 @@
       meta: null,
       options: null,
       answer: "",
-      errored: false
+      errored: false,
+      interrupted: false
     };
   }
 
@@ -367,15 +462,167 @@
       ctx.typing = null;
     }
     ctx.bubble.classList.remove("streaming");
+    if (ctx.interrupted) {
+      // The turn stopped to ask for an order: an empty bubble is noise.
+      if (!ctx.answer && ctx.row.parentNode) {
+        ctx.row.parentNode.removeChild(ctx.row);
+      }
+      return;
+    }
     if (!ctx.answer && !ctx.errored && !ctx.bubble.textContent) {
       ctx.bubble.textContent = "（客服暂无回复）";
       ctx.bubble.classList.add("error");
     }
   }
 
+  /* ---------- order picker (interrupt kind=select_order) ---------- */
+
+  function orderItemsText(order) {
+    var items = order && order.items;
+    if (!Array.isArray(items) || items.length === 0) return "商品信息暂缺";
+    return items.map(function (item) {
+      var name = item && item.name ? String(item.name) : "商品";
+      var qty = item && item.qty ? item.qty : 1;
+      return name + " ×" + qty;
+    }).join("；");
+  }
+
+  function moneyText(amount) {
+    var value = Number(amount);
+    if (!isFinite(value)) return "金额暂缺";
+    return "¥" + value.toFixed(2);
+  }
+
+  function signedText(order) {
+    return order && order.signed_at ? String(order.signed_at) : "未签收";
+  }
+
+  function appendOrderPicker(payload) {
+    var orders = Array.isArray(payload.orders) ? payload.orders : [];
+    hideEmptyHint();
+    var row = el("div", "msg assistant picker-msg");
+    var avatar = el("span", "avatar", "小猫");
+    var body = el("div", "body");
+    var bubble = el("div", "bubble picker-bubble");
+    bubble.append(el("div", "picker-title", "找到多个订单，请选择要处理的一单："));
+
+    var list = el("div", "order-list");
+    var cards = [];
+
+    orders.forEach(function (order) {
+      var record = (order && typeof order === "object") ? order : { order_id: String(order) };
+      var orderId = record.order_id ? String(record.order_id) : "";
+      var card = el("button", "order-card");
+      card.type = "button";
+
+      var top = el("div", "order-card-top");
+      top.append(el("span", "order-no", "订单号 " + orderId));
+      top.append(el("span", "order-status", record.status ? String(record.status) : "状态未知"));
+      card.append(top);
+      card.append(el("div", "order-items", orderItemsText(record)));
+
+      var sub = el("div", "order-sub");
+      var amount = el("strong", null, moneyText(record.amount));
+      sub.append(document.createTextNode("金额 "));
+      sub.append(amount);
+      sub.append(document.createTextNode(" · 签收时间 " + signedText(record)));
+      card.append(sub);
+
+      card.addEventListener("click", function () {
+        selectOrder(orderId, cards);
+      });
+      cards.push(card);
+      list.append(card);
+    });
+
+    bubble.append(list);
+    body.append(bubble);
+    row.append(avatar, body);
+    messages.append(row);
+    scrollToBottom();
+    return cards;
+  }
+
+  function handleInterrupt(ctx, payload) {
+    if (payload.kind !== "select_order") return;
+    ctx.interrupted = true;
+    if (ctx.typing) {
+      if (ctx.typing.parentNode) ctx.typing.parentNode.removeChild(ctx.typing);
+      ctx.typing = null;
+    }
+    pickerPending = true;
+    syncComposer();
+    appendOrderPicker(payload);
+  }
+
+  function selectOrder(orderId, cards) {
+    if (streaming) return;
+    cards.forEach(function (card) { card.disabled = true; });
+    appendSystemMessage("已选择订单 " + orderId);
+
+    var ctx = startAssistantMessage();
+    streaming = true;
+    syncComposer();
+
+    var controller = new AbortController();
+    var timedOut = false;
+    var watchdog = startWatchdog(controller, function () {
+      timedOut = true;
+      showError(ctx, TIMEOUT_TEXT);
+    });
+
+    fetch("/ch06/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, order_id: orderId }),
+      signal: controller.signal
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          return readErrorDetail(response).then(function (detail) {
+            showError(ctx, detail);
+          });
+        }
+        return readSSE(response, function (payload) {
+          watchdog.touch();
+          handlePayload(ctx, payload);
+        }, watchdog.touch);
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          if (!timedOut) showError(ctx, TIMEOUT_TEXT);
+          return;
+        }
+        showError(ctx, "请求失败：" + (err && err.message ? err.message : String(err)));
+      })
+      .finally(function () {
+        watchdog.clear();
+        finishAssistantMessage(ctx);
+        streaming = false;
+        if (ctx.interrupted) {
+          // Resumed turn paused on another picker: keep the composer locked.
+          pickerPending = true;
+        } else {
+          pickerPending = false;
+          if (ctx.errored) {
+            // The resume failed: let the user retry the same order cards.
+            cards.forEach(function (card) { card.disabled = false; });
+          }
+        }
+        syncComposer();
+        if (!streaming && !pickerPending) input.focus();
+      });
+  }
+
+  /* ---------- options: transfer / ticket / refund form ---------- */
+
   function renderOptions(ctx, options) {
     var valid = options.filter(function (option) {
-      return option && (option.action === "transfer" || option.action === "ticket");
+      return option && (
+        option.action === "transfer" ||
+        option.action === "ticket" ||
+        option.action === "refund_form"
+      );
     });
     if (valid.length === 0) return;
     if (ctx.options && ctx.options.parentNode) {
@@ -383,8 +630,11 @@
     }
     var box = el("div", "options");
     valid.forEach(function (option) {
-      var isTransfer = option.action === "transfer";
-      var button = el("button", "option-btn", isTransfer ? TRANSFER_LABEL : TICKET_LABEL);
+      var label = option.label || (
+        option.action === "transfer" ? TRANSFER_LABEL :
+        option.action === "ticket" ? TICKET_LABEL : REFUND_LABEL
+      );
+      var button = el("button", "option-btn", label);
       button.type = "button";
       button.addEventListener("click", function () {
         handleOptionClick(option, button);
@@ -408,6 +658,10 @@
       if (!confirm("确认创建工单吗？")) return;
       button.disabled = true;
       createTicket(option, button);
+      return;
+    }
+    if (option.action === "refund_form") {
+      openRefundForm(option, button);
     }
   }
 
@@ -448,11 +702,133 @@
       })
       .catch(function (err) {
         appendSystemMessage("工单创建失败：" + (err && err.message ? err.message : String(err)), true);
-        // No ticket was created: let the user retry this same button.
         button.textContent = originalLabel;
         button.disabled = false;
       });
   }
+
+  function openRefundForm(option, trigger) {
+    if (trigger.formNode) return;
+    var orderId = option.order_id ? String(option.order_id) : "";
+    var originalLabel = trigger.textContent;
+    trigger.disabled = true;
+    trigger.textContent = "填写退款信息…";
+
+    var form = el("div", "refund-form");
+    form.append(el("h3", null, "退款工单"));
+    form.append(el("div", "meta-line", "退款原因由您选择，提交后生成退款工单。"));
+
+    var orderLabel = el("label", null, "订单号");
+    var orderInput = el("input");
+    orderInput.type = "text";
+    orderInput.value = orderId;
+    orderInput.readOnly = true;
+    orderLabel.append(orderInput);
+    form.append(orderLabel);
+
+    var reasonLabel = el("label", null, "退款原因");
+    var reasonSelect = el("select");
+    REFUND_REASONS.forEach(function (reason) {
+      var opt = el("option", null, reason);
+      opt.value = reason;
+      reasonSelect.append(opt);
+    });
+    reasonLabel.append(reasonSelect);
+    form.append(reasonLabel);
+
+    var result = el("div", "form-result");
+    var actions = el("div", "form-actions");
+    var submit = el("button", null, "提交退款工单");
+    submit.type = "button";
+    var cancel = el("button", "secondary", "取消");
+    cancel.type = "button";
+    actions.append(submit, cancel);
+    form.append(actions, result);
+
+    trigger.formNode = form;
+    var formHost = (trigger.closest && trigger.closest(".body")) || trigger.parentNode;
+    formHost.append(form);
+    scrollToBottom();
+    // The chat log is its own scroll container; bring the whole form into
+    // view instead of only scrolling to the bottom (the form is taller than
+    // the remaining visible space after a long policy answer).
+    if (typeof form.scrollIntoView === "function") {
+      // behavior:auto overrides the container's smooth scrolling so the form
+      // is fully visible the moment it opens, not mid-animation.
+      form.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+
+    cancel.addEventListener("click", function () {
+      if (form.parentNode) form.parentNode.removeChild(form);
+      trigger.formNode = null;
+      trigger.disabled = false;
+      trigger.textContent = originalLabel;
+    });
+
+    submit.addEventListener("click", function () {
+      var reason = reasonSelect.value;
+      if (REFUND_REASONS.indexOf(reason) < 0) {
+        result.className = "form-result error";
+        result.textContent = "请选择有效的退款原因。";
+        return;
+      }
+      submit.disabled = true;
+      cancel.disabled = true;
+      reasonSelect.disabled = true;
+      submit.textContent = "提交中…";
+      result.className = "form-result";
+      result.textContent = "";
+
+      fetch("/ch06/refunds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          order_id: orderId,
+          reason: reason
+        })
+      })
+        .then(function (response) {
+          return response.text().then(function (raw) {
+            var data = null;
+            if (raw) {
+              try { data = JSON.parse(raw); } catch (err) { data = null; }
+            }
+            if (!response.ok) {
+              var detail = data && typeof data.detail === "string"
+                ? data.detail
+                : "HTTP " + response.status;
+              throw new Error(detail);
+            }
+            return data || {};
+          });
+        })
+        .then(function (data) {
+          var ticketNo = data && data.ticket_no ? String(data.ticket_no) : "";
+          if (!ticketNo) throw new Error("退款单号缺失");
+          result.className = "form-result ok";
+          result.textContent = "退款单已创建，退款单号：" + ticketNo;
+          submit.textContent = "已提交";
+          submit.disabled = true;
+          cancel.disabled = true;
+          reasonSelect.disabled = true;
+          trigger.textContent = "已提交退款工单";
+          trigger.disabled = true;
+        })
+        .catch(function (err) {
+          result.className = "form-result error";
+          result.textContent = "退款单创建失败：" +
+            (err && err.message ? err.message : String(err)) + "，请重试。";
+          // Keep the form open and editable so the same request can retry.
+          submit.textContent = "提交退款工单";
+          submit.disabled = false;
+          cancel.disabled = false;
+          reasonSelect.disabled = false;
+        });
+    });
+  }
+
+  /* ---------- SSE parsing (same contract as ch05) ---------- */
 
   function parseEventBlock(block) {
     var lines = block.split("\n");
@@ -507,6 +883,11 @@
         renderOptions(ctx, frame.options);
         return;
       }
+      if (frame.type === "interrupt") {
+        handleInterrupt(ctx, frame);
+        ctx.done = true;
+        return;
+      }
       if (typeof frame.error === "string") {
         showError(ctx, frame.error);
         ctx.done = true;
@@ -556,8 +937,7 @@
           buffer = drainEvents(buffer.replace(/\r\n/g, "\n") + "\n\n", onPayload);
           return;
         }
-        // Any bytes from the server count as progress and reset the watchdog,
-        // so a slow-but-alive stream is never cut off mid-answer.
+        // Any bytes from the server count as progress and reset the watchdog.
         if (onActivity) onActivity();
         buffer += decoder.decode(result.value, { stream: true });
         buffer = buffer.replace(/\r\n/g, "\n");
@@ -579,8 +959,10 @@
     });
   }
 
+  /* ---------- send a new turn ---------- */
+
   function sendMessage() {
-    if (streaming) return;
+    if (streaming || pickerPending) return;
     var text = input.value.trim();
     if (!text) return;
 
@@ -589,7 +971,7 @@
     appendMessage("user", text);
     var ctx = startAssistantMessage();
     streaming = true;
-    sendButton.disabled = true;
+    syncComposer();
 
     var controller = new AbortController();
     var timedOut = false;
@@ -598,7 +980,7 @@
       showError(ctx, TIMEOUT_TEXT);
     });
 
-    fetch("/ch05/chat", {
+    fetch("/ch06/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, message: text }),
@@ -617,8 +999,6 @@
       })
       .catch(function (err) {
         if (err && err.name === "AbortError") {
-          // The watchdog already showed a retryable timeout message. An abort
-          // from another source still gets one so the user can retry.
           if (!timedOut) showError(ctx, TIMEOUT_TEXT);
           return;
         }
@@ -628,8 +1008,9 @@
         watchdog.clear();
         finishAssistantMessage(ctx);
         streaming = false;
-        sendButton.disabled = false;
-        input.focus();
+        if (ctx.interrupted) pickerPending = true;
+        syncComposer();
+        if (!pickerPending) input.focus();
       });
   }
 

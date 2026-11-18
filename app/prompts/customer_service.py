@@ -120,6 +120,92 @@ _AGENT_TOOL_RULES = """\
 - 后一个工具依赖前一个结果时必须串行:先拿到前一个工具的返回结果,再调用下一个工具,不要在同一轮并发调用相互依赖的工具。
 - 缺少订单号等必要信息时,先礼貌向用户追问,不要猜测。"""
 
+_AFTER_SALES_TOOL_RULES = """\
+【售后工具与分支规则】
+- submit_refund:仅当用户诉求是退款/退货时调用,用于准备「提交退款工单」表单;它只生成按钮,不会提交退款。调用时 order_id 必须等于「当前订单」中的订单号。
+- 保修、维修、补发、换货等非退款诉求:不调用 submit_refund,也不要生成退款表单;按知识库说明政策,需要人工介入时调用 suggest_handoff,ticket_type 取「售后」。
+- suggest_handoff:需要转人工或建工单时调用,只记录建议。options 取 "transfer" 和/或 "ticket";ticket_type 取「售后」「投诉」「咨询」之一;退款诉求由 submit_refund 承载,不要把退款写进 ticket_type。
+- 禁止自动提交退款:不得声称已退款或已提交,只能引导用户填写并提交退款表单。
+- 退款/退货原因一律不在对话中追问:用户已表达退款或退货诉求后,不要询问退款原因,不要问「商品有问题还是不想要了」「质量问题还是七天无理由」等任何原因分类问题,也不要用近义改写再次追问。退款原因由退款表单的固定类目收集,直接展示退款表单,不得用提问替代表单。
+- 缺少订单号时,先请用户从订单列表选择或提供订单号,不要猜测。
+- 后一个工具依赖前一个结果时必须串行:先拿到前一个工具的返回结果,再调用下一个工具,不要在同一轮并发调用相互依赖的工具。"""
+
+_AFTER_SALES_AGENT_TEMPLATE = """\
+你是「{business_name}」的电商售后智能客服 Agent,负责判断这一单的售后资格并说明处理路径。
+请以礼貌、简洁、有同理心的语气服务用户,只处理与本单售后相关的问题。
+
+{intent_note}【当前订单】
+{order_block}
+
+【售后判定范围】
+- 退款/退货:依据知识库判断是否符合退款或退货政策,说明条件、时效与所需材料。
+- 保修、维修、补发、换货:依据知识库说明处理路径与所需材料,这类诉求不得生成退款表单。
+
+{evidence_rules}
+
+{tool_rules}
+
+{evidence_block}
+
+{negative_rules}"""
+
+_AFTER_SALES_ORDER_MISSING = (
+    "本轮未提供订单数据。缺少订单号时,先请用户从订单列表选择或提供订单号,不要猜测。"
+)
+
+
+def _format_after_sales_order(order_data: dict | None) -> str:
+    """Render the current order block for the after-sales prompt."""
+    if not order_data:
+        return _AFTER_SALES_ORDER_MISSING
+    lines = [f"订单号:{order_data.get('order_id') or '(未知)'}"]
+    if order_data.get("status"):
+        lines.append(f"订单状态:{order_data['status']}")
+    if order_data.get("amount") is not None:
+        lines.append(f"订单金额:{order_data['amount']}")
+    if order_data.get("created_at"):
+        lines.append(f"下单时间:{order_data['created_at']}")
+    lines.append(
+        f"签收时间:{order_data['signed_at']}"
+        if order_data.get("signed_at")
+        else "签收时间:未签收"
+    )
+    items = order_data.get("items")
+    if isinstance(items, Sequence) and items:
+        names = [
+            str(item.get("name"))
+            for item in items
+            if isinstance(item, dict) and item.get("name")
+        ]
+        if names:
+            lines.append("商品:" + "、".join(names))
+    return "\n".join(lines)
+
+
+def render_after_sales_agent_system_prompt(
+    business_name: str = "本店",
+    order_data: dict | None = None,
+    evidence: Sequence[dict] | None = None,
+    intent: str = "",
+) -> str:
+    """Render the refund/after-sales Agent prompt for the ``refund_flow`` route.
+
+    The prompt carries the current order, knowledge evidence and the branch
+    rules that keep refund/return on ``submit_refund`` while warranty,
+    repair and reship go through policy explanation and ``suggest_handoff``.
+    """
+    intent_note = f"【识别意图】{intent}\n\n" if intent else ""
+    return _AFTER_SALES_AGENT_TEMPLATE.format(
+        business_name=business_name,
+        intent_note=intent_note,
+        order_block=_format_after_sales_order(order_data),
+        evidence_rules=_AGENT_EVIDENCE_RULES,
+        tool_rules=_AFTER_SALES_TOOL_RULES,
+        evidence_block=_format_agent_evidence(evidence or []),
+        negative_rules=_NEGATIVE_RULES,
+    )
+
+
 _AGENT_TEMPLATE = """\
 你是「{business_name}」的电商售后智能客服 Agent。请以礼貌、简洁、有同理心的语气为用户服务。
 你只处理订单、物流、商品交易信息与售后相关问题,不闲聊、不涉及与本店业务无关的话题。

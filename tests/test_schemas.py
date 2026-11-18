@@ -30,6 +30,12 @@ def test_chat_request_strips_values():
     assert req.message == "hello"
 
 
+def test_ticket_request_accepts_refund():
+    from app.schemas import TicketRequest
+    req = TicketRequest(session_id="s", description="x", ticket_type="退款")
+    assert req.ticket_type == "退款"
+
+
 def test_extract_request_rejects_blank_text():
     with pytest.raises(ValidationError):
         ExtractRequest(text=" \t ")

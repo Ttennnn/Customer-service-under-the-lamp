@@ -15,7 +15,7 @@ class Ticket(Base):
     )
     description: Mapped[str] = mapped_column(Text)
     ticket_type: Mapped[str] = mapped_column(
-        Enum("售后", "投诉", "咨询", name="ticket_type")
+        Enum("售后", "投诉", "咨询", "退款", name="ticket_type")
     )
     status: Mapped[str] = mapped_column(
         Enum("待处理", "已处理", name="ticket_status"), default="待处理"
