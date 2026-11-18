@@ -1,20 +1,31 @@
-"""Refund sub-flow tests: fetch_order slot + interrupt/resume (Task 12)."""
+"""Refund sub-flow tests: fetch_order (Task 12) + retrieve_policy (Task 13)."""
 
 import json
+import logging
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from app.agent.graph import (
+    INFRA_TEXT,
+    KNOWLEDGE_GAP_TEXT,
     ORDER_FAILED_TEXT,
     ORDER_INVALID_TEXT,
+    RERANK_FAILED_TEXT,
     build_graph,
     extract_order_id,
 )
 from app.agent.intent import IntentResult
+from app.config import Settings
+from app.rag.retrieval import RetrievedChunk
 from app.tools.business import DEMO_ORDERS
-from tests.agent_fakes import ScriptedLLM, ScriptedStructuredLLM
+from tests.agent_fakes import (
+    ScriptedLLM,
+    ScriptedStructuredLLM,
+    make_chunk,
+    make_retrieval_result,
+)
 
 CONFIG = {"configurable": {"thread_id": "test-refund-thread"}}
 
@@ -49,12 +60,15 @@ def _state(message="能退吗", resolved=None, **overrides):
     return state
 
 
-def _build(intent="退款退货", resolved=None):
+def _build(intent="退款退货", resolved=None, queries=None, **kwargs):
     intent_llm = ScriptedStructuredLLM(
         resolved or "能退吗",
         IntentResult(intent=intent, confidence=0.9),
+        queries=queries,
     )
-    return build_graph(ExplodingLLM(), intent_llm, checkpointer=InMemorySaver())
+    return build_graph(
+        ExplodingLLM(), intent_llm, checkpointer=InMemorySaver(), **kwargs
+    )
 
 
 def _run_to_interrupt(graph, message="能退吗", resolved=None):
@@ -77,6 +91,18 @@ def _order_tool(monkeypatch, calls, payload=None):
         return json.dumps(data, ensure_ascii=False)
 
     monkeypatch.setattr("app.agent.graph.execute_tool", fake_execute_tool)
+
+
+def _chunk(chunk_id, score):
+    return RetrievedChunk(
+        chunk_id=chunk_id,
+        score=score,
+        questions=f"问题{chunk_id}",
+        answer=f"答案{chunk_id}",
+        section_path="售后/退款政策",
+        category="售后",
+        content_type="policy",
+    )
 
 
 def test_extract_order_id_patterns():
@@ -221,3 +247,136 @@ def test_fetch_order_tool_failure_falls_back(monkeypatch):
     assert isinstance(values["messages"][-1], AIMessage)
     assert values["messages"][-1].content == ORDER_FAILED_TEXT
     assert calls == [("query_order", {"order_id": "1001"})]
+
+
+def test_retrieve_policy_runs_three_queries_and_merges(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    retrieval_calls = []
+
+    def fake_retrieve(query, **kwargs):
+        retrieval_calls.append((query, kwargs.get("analysis")))
+        return make_retrieval_result([make_chunk(0.9)])
+
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert [call[0] for call in retrieval_calls] == ["q1", "q2", "q3"]
+    # A prebuilt analysis skips retrieve_hybrid's second LLM rewrite.
+    assert all(call[1] is not None for call in retrieval_calls)
+    for query, analysis in retrieval_calls:
+        assert analysis.original == query
+        assert analysis.rewritten == query
+        assert analysis.rewritten_by == "llm"
+    assert result["expanded_queries"] == ["q1", "q2", "q3"]
+    assert result["gate_passed"] is True
+    assert result["gate_reason"] == "ok"
+    assert result["confidence"] == 0.9
+    # Task 13 keeps the refund pass edge on record_log; ExplodingLLM would
+    # raise if main_agent were reached.
+    assert any(
+        "ch06 retrieve_policy order_id=1001" in record.getMessage()
+        and "queries=['q1', 'q2', 'q3']" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_retrieve_policy_dedupes_and_keeps_max_score(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    by_query = {
+        "q1": [_chunk(1, 0.4), _chunk(2, 0.3)],
+        "q2": [_chunk(1, 0.8), _chunk(3, 0.7)],
+        "q3": [],
+    }
+
+    def fake_retrieve(query, **kwargs):
+        return make_retrieval_result(by_query[query])
+
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    settings = Settings(_env_file=None, openai_api_key="x", rerank_top_n=2)
+    graph = _build(
+        resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"], settings=settings
+    )
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    scores = {source["chunk_id"]: source["score"] for source in result["sources"]}
+    # chunk 1 appeared twice; the higher 0.8 wins.  Descending sort keeps
+    # 0.8/0.7 and drops 0.3 at rerank_top_n=2.
+    assert scores == {1: 0.8, 3: 0.7}
+    assert len(result["sources"]) == 2
+    assert result["confidence"] == 0.8
+
+
+def test_retrieve_policy_infra_error(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    retrieval_calls = []
+
+    def fake_retrieve(query, **kwargs):
+        retrieval_calls.append(query)
+        if query == "q2":
+            raise RuntimeError("milvus down")
+        return make_retrieval_result([make_chunk(0.9)])
+
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert retrieval_calls == ["q1", "q2"]
+    assert result["expanded_queries"] == ["q1", "q2", "q3"]
+    assert result["gate_reason"] == "infra_error"
+    assert result["gate_passed"] is False
+    assert result["answer"] == INFRA_TEXT
+    assert result["evidence"] == []
+    assert result["step_count"] == 0
+
+
+def test_retrieve_policy_rerank_failure(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    retrieval_calls = []
+
+    def fake_retrieve(query, **kwargs):
+        retrieval_calls.append(query)
+        if query == "q2":
+            return make_retrieval_result([_chunk(1, 0.9)], rerank_failed=True)
+        return make_retrieval_result([_chunk(1, 0.9)])
+
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert retrieval_calls == ["q1", "q2"]
+    assert result["expanded_queries"] == ["q1", "q2", "q3"]
+    assert result["gate_reason"] == "rerank_failed"
+    assert result["gate_passed"] is False
+    assert result["rerank_failed"] is True
+    assert result["confidence"] is None
+    assert result["evidence"] == []
+    assert result["answer"] == RERANK_FAILED_TEXT
+    assert result["step_count"] == 0
+
+
+def test_retrieve_policy_low_score_fails_gate(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+
+    def fake_retrieve(query, **kwargs):
+        return make_retrieval_result([_chunk(1, 0.02)])
+
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert result["gate_passed"] is False
+    assert result["gate_reason"] == "below_threshold"
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
+    assert result["step_count"] == 0

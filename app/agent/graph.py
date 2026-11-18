@@ -10,8 +10,9 @@
 - 业务类与闸通过的知识/退款类进入 ``main_agent``(ch05 ReAct 子图);
 - 统一结构化日志。
 
-退款子流程的 ``fetch_order`` 已实现订单槽位与 interrupt/resume;
-``retrieve_policy`` 仍是占位节点,由 Task 13 实现。只有 ``refund_flow``
+退款子流程的 ``fetch_order`` 已实现订单槽位与 interrupt/resume,
+``retrieve_policy`` 已实现多 query 扩写、检索与合并;闸通过后暂时仍落
+``record_log``,由 Task 14 接到 ``main_agent``。只有 ``refund_flow``
 路由会走到它们。
 
 图不在 import 时构建:``build_graph`` 由 API 首次请求时懒加载调用。
@@ -43,8 +44,12 @@ from app.agent.routing import route_for_intent
 from app.agent.state import CustomerServiceState
 from app.agent.subgraph import build_agent_subgraph
 from app.config import Settings, get_settings
-from app.rag.query_understanding import QueryAnalysis, expand_synonyms
-from app.rag.retrieval import retrieve_hybrid
+from app.rag.query_understanding import (
+    QueryAnalysis,
+    expand_queries,
+    expand_synonyms,
+)
+from app.rag.retrieval import RetrievedChunk, retrieve_hybrid
 from app.tools.business import list_user_orders, query_order
 from app.tools.context import CitationCollector
 from app.tools.executor import execute_tool
@@ -364,9 +369,101 @@ def build_graph(
         }
 
     def retrieve_policy_node(state: CustomerServiceState) -> dict[str, Any]:
-        raise NotImplementedError(
-            "ch06 retrieve_policy is a placeholder; Task 13 replaces this node"
+        """Expand the refund query, merge hits from all queries, then gate.
+
+        Each expanded query is retrieved with a prebuilt analysis so
+        ``retrieve_hybrid`` does not rewrite it a second time.  Both failure
+        modes short-circuit the whole round: an exception means the
+        knowledge base is unusable, and any rerank fallback means the scores
+        are RRF ranks that must not be compared with the rerank threshold.
+        """
+        query = state.get("resolved_query") or state.get("user_message", "")
+        order_data = state.get("order_data") or {}
+        order_id = state.get("order_id")
+        queries = expand_queries(intent_llm, query, order_data)
+
+        merged: dict[int, RetrievedChunk] = {}
+        for expanded in queries:
+            analysis = QueryAnalysis(
+                original=expanded,
+                rewritten=expanded,
+                keywords=expand_synonyms(expanded),
+                rewritten_by="llm",
+            )
+            try:
+                result = retrieve_hybrid(expanded, analysis=analysis)
+            except Exception:  # noqa: BLE001 - 任一 query 基础设施故障整趟兜底
+                logger.exception(
+                    "ch06 retrieve_policy order_id=%s query=%r failed",
+                    order_id,
+                    expanded,
+                )
+                return {
+                    "expanded_queries": queries,
+                    "evidence": [],
+                    "sources": [],
+                    "confidence": None,
+                    "gate_passed": False,
+                    "gate_reason": "infra_error",
+                }
+            if result.rerank_failed:
+                logger.warning(
+                    "ch06 retrieve_policy order_id=%s query=%r rerank_failed",
+                    order_id,
+                    expanded,
+                )
+                return {
+                    "expanded_queries": queries,
+                    "evidence": [],
+                    "sources": [],
+                    "confidence": None,
+                    "gate_passed": False,
+                    "gate_reason": "rerank_failed",
+                    "rerank_failed": True,
+                }
+            for chunk in result.chunks:
+                current = merged.get(chunk.chunk_id)
+                if current is None or chunk.score > current.score:
+                    merged[chunk.chunk_id] = chunk
+
+        merged_chunks = sorted(
+            merged.values(), key=lambda chunk: chunk.score, reverse=True
+        )[: settings.rerank_top_n]
+        ordered = order_for_prompt(merged_chunks)
+        collector = CitationCollector()
+        collector.add(ordered)
+        sources = collector.payload()
+        evidence = [
+            {
+                "n": source["n"],
+                "section_path": source["section_path"],
+                "question": source["question"],
+                "answer": source["answer"],
+                "score": source["score"],
+            }
+            for source in sources
+        ]
+        verdict = assess_confidence(
+            merged_chunks,
+            settings.confidence_min_score,
+            rerank_failed=False,
         )
+        logger.info(
+            "ch06 retrieve_policy order_id=%s queries=%s hits=%d top_score=%s",
+            order_id,
+            queries,
+            len(merged_chunks),
+            verdict.top_score,
+        )
+        return {
+            "expanded_queries": queries,
+            "evidence": evidence,
+            "sources": sources,
+            "confidence": verdict.top_score,
+            "gate_passed": verdict.passed,
+            "gate_reason": verdict.reason,
+            "rerank_failed": False,
+        }
 
     def record_log_node(
         state: CustomerServiceState, config: RunnableConfig
@@ -403,8 +500,21 @@ def build_graph(
     def route_edge(state: CustomerServiceState) -> str:
         return state["route"]
 
+    def order_edge(state: CustomerServiceState) -> str:
+        # ``fetch_order`` only writes ``order_data`` on success; every failure
+        # path sets ``gate_reason`` and skips policy retrieval.
+        if state.get("order_data") is None:
+            return "record_log"
+        return "retrieve_policy"
+
     def gate_edge(state: CustomerServiceState) -> str:
-        return "main_agent" if state.get("gate_passed") else "record_log"
+        if not state.get("gate_passed"):
+            return "record_log"
+        # Task 14 connects the refund/after-sales agent; until then a passing
+        # refund gate stays on record_log.
+        if state.get("route") == "refund_flow":
+            return "record_log"
+        return "main_agent"
 
     graph = StateGraph(CustomerServiceState)
     graph.add_node("resolve_reference", resolve_reference)
@@ -434,9 +544,13 @@ def build_graph(
         },
     )
     graph.add_edge("retrieve_knowledge", "confidence_gate")
-    # Task 12: success and failure both log; Task 13 routes success through
-    # retrieve_policy and only failure straight to record_log.
-    graph.add_edge("fetch_order", "record_log")
+    # Only a successful order lookup reaches policy retrieval; every failure
+    # path logs straight away.
+    graph.add_conditional_edges(
+        "fetch_order",
+        order_edge,
+        {"retrieve_policy": "retrieve_policy", "record_log": "record_log"},
+    )
     graph.add_edge("retrieve_policy", "confidence_gate")
     graph.add_conditional_edges(
         "confidence_gate",
