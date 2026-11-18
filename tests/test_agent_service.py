@@ -1,11 +1,18 @@
-"""Ch05 chat service tests (Task 10, design §6.6-§6.7)."""
+"""Chat service tests: ch05 streaming baseline plus ch06 interrupt/resume."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
-from app.agent.service import stream_chat_agent
+from app.agent.service import (
+    NoPendingInterrupt,
+    has_pending_interrupt,
+    resume_chat_agent,
+    stream_chat_agent,
+)
 from app.config import Settings
 from app.models import LowConfidenceQuestion, Message
 from app.services.history import get_or_create_conversation
@@ -28,10 +35,24 @@ SOURCES_FRAME = {
     ],
 }
 TRANSFER_ACTION = {"action": "transfer", "label": "转人工"}
+ORDER_INTERRUPT = {
+    "kind": "select_order",
+    "slot": "order_id",
+    "orders": [{"order_id": "1001", "title": "无线蓝牙耳机 ×1"}],
+}
 
 
 def _settings():
     return Settings(_env_file=None, openai_api_key="test")
+
+
+def _snapshot(values=None, interrupts=()):
+    return SimpleNamespace(values=values or {}, interrupts=interrupts)
+
+
+def _pending_snapshot(payload=None):
+    payload = ORDER_INTERRUPT if payload is None else payload
+    return _snapshot(interrupts=(SimpleNamespace(value=payload),))
 
 
 def _run(session, frames=(), final=None, message="你好", user_id="u1"):
@@ -71,8 +92,7 @@ def test_service_resets_transient_state(session):
         message="退款政策是什么?",
     )
 
-    inputs = graph.inputs
-    assert inputs is not None
+    inputs = graph.inputs[-1]
     assert inputs["step_count"] == 0
     assert inputs["token_estimate"] == 0
     assert inputs["evidence"] == []
@@ -80,13 +100,20 @@ def test_service_resets_transient_state(session):
     assert inputs["gate_passed"] is False
     assert inputs["gate_reason"] == ""
     assert inputs["rerank_failed"] is False
+    assert inputs["resolved_query"] == ""
+    assert inputs["intent_confidence"] is None
+    assert inputs["session_id"] == "u1"
+    assert inputs["order_id"] == ""
+    assert inputs["order_data"] is None
+    assert inputs["expanded_queries"] == []
     assert inputs["answer"] == ""
     assert inputs["suggested_actions"] == []
     assert inputs["exhausted"] is False
     assert inputs["conversation_id"] is not None
     assert inputs["token_budget"] == _settings().agent_token_budget
     assert inputs["max_steps"] == _settings().agent_max_steps
-    assert inputs["user_message"] == inputs["resolved_message"] == "退款政策是什么?"
+    assert inputs["user_message"] == "退款政策是什么?"
+    assert inputs["resolved_query"] == ""
 
     assert graph.config == {"configurable": {"thread_id": "user:u1"}}
     assert len(inputs["messages"]) == 1
@@ -153,19 +180,103 @@ def test_service_ignores_unknown_frames(session, caplog):
     assert any("unknown" in record.message.lower() for record in caplog.records)
 
 
+def test_stream_chat_reemits_pending_interrupt_without_new_turn(session):
+    graph = FakeGraph(
+        frames=[], final={}, snapshots=[_pending_snapshot()]
+    )
+    events = list(
+        stream_chat_agent(graph, session, "s1", "我要退款", settings=_settings())
+    )
+
+    assert events == [_dumps({"type": "interrupt", **ORDER_INTERRUPT})]
+    assert graph.stream_calls == []
+    assert session.query(Message).count() == 0
+
+
+def test_stream_chat_emits_interrupt_and_skips_answer(session):
+    graph = FakeGraph(
+        frames=[{"type": "token", "text": "部分"}],
+        final={"answer": "不应写入"},
+        snapshots=[_snapshot(), _pending_snapshot()],
+    )
+    events = list(
+        stream_chat_agent(graph, session, "s1", "我要退款", settings=_settings())
+    )
+
+    assert events == [
+        "部分",
+        _dumps({"type": "interrupt", **ORDER_INTERRUPT}),
+    ]
+    assert len(graph.stream_calls) == 1
+    rows = session.query(Message).order_by(Message.id.asc()).all()
+    assert [(row.role, row.content) for row in rows] == [("user", "我要退款")]
+
+
+def test_resume_chat_uses_command_and_writes_answer(session):
+    final = {
+        "answer": "可以退,已为您准备退款表单。",
+        "suggested_actions": [TRANSFER_ACTION],
+        "user_message": "我要退款",
+    }
+    graph = FakeGraph(
+        frames=[{"type": "token", "text": "可以退。"}],
+        final=final,
+        snapshots=[_pending_snapshot(), _snapshot(values=final)],
+    )
+    events = list(
+        resume_chat_agent(graph, session, "s1", "1001", settings=_settings())
+    )
+
+    assert isinstance(graph.inputs[-1], Command)
+    assert graph.inputs[-1].resume == "1001"
+    assert events == [
+        "可以退。",
+        _dumps({"type": "options", "options": [TRANSFER_ACTION]}),
+    ]
+    rows = session.query(Message).order_by(Message.id.asc()).all()
+    assert [(row.role, row.content) for row in rows] == [
+        ("user", "[订单选择] 订单 1001"),
+        ("assistant", "可以退,已为您准备退款表单。"),
+    ]
+
+
+def test_resume_chat_raises_without_pending(session):
+    graph = FakeGraph(frames=[], final={}, snapshots=[_snapshot()])
+
+    with pytest.raises(NoPendingInterrupt):
+        list(resume_chat_agent(graph, session, "s1", "1001", settings=_settings()))
+
+    assert graph.stream_calls == []
+
+
+def test_has_pending_interrupt_reads_thread_snapshot(session):
+    graph = FakeGraph(frames=[], final={}, snapshots=[_pending_snapshot()])
+    assert has_pending_interrupt(graph, "s1") is True
+    assert graph.config == {"configurable": {"thread_id": "user:s1"}}
+
+    assert has_pending_interrupt(FakeGraph(frames=[], final={}), "s1") is False
+
+
 def test_service_graph_error_yields_error_frame(session):
     class RaisingGraph:
+        def __init__(self):
+            self.state_calls = 0
+
         def stream(self, *args, **kwargs):
             raise RuntimeError("graph exploded")
 
         def get_state(self, config):
-            raise AssertionError("get_state must not run after a graph error")
+            # Only the pre-turn pending check may run; the stream error must
+            # short-circuit before the post-stream snapshot.
+            self.state_calls += 1
+            return _snapshot()
 
+    graph = RaisingGraph()
     events = list(
-        stream_chat_agent(
-            RaisingGraph(), session, "u1", "你好", settings=_settings()
-        )
+        stream_chat_agent(graph, session, "u1", "你好", settings=_settings())
     )
+
+    assert graph.state_calls == 1
 
     assert len(events) == 1
     assert json.loads(events[0]) == {"error": "客服服务暂时不可用,请稍后重试"}
