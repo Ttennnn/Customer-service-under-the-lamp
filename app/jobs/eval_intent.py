@@ -1,9 +1,14 @@
-"""第 5 章意图分类评估:42 条标注样例 + 真实 LLM 验证。
+"""第 6 章意图分类评估:62 条标注样例 + 真实 LLM 验证。
 
-数据集见 ``tests/eval/ch05_intent_cases.json``,每条为
-``{"id": str, "text": str, "intent": Intent}``。样例均为 held-out 文本,
-不得复用 ``INTENT_SYSTEM_PROMPT`` 的 few-shot 示例(见
+数据集见 ``tests/eval/ch06_intent_cases.json``,每条为
+``{"id": str, "text": str, "intent": Intent, "history": list | 无}``;``history``
+为可选的多轮上下文,交给 ``classify_intent`` 与当前消息一起判断。样例均为
+held-out 文本,不得复用 ``INTENT_SYSTEM_PROMPT`` 的 few-shot 示例(见
 ``tests/test_intent_cases.py``)。
+
+``intent="其他"`` 是合法预测(真实「其他」),不会被当成兜底;只有
+``classify_intent(..., raise_on_error=True)`` 抛出的异常才记为 ``error``,
+不计入准确率并在报告单列。
 
 :func:`compute_metrics` 是纯函数;导入本模块不会构建 LLM,也不会访问网络。
 只有 :func:`main` 读取 settings、构建真实模型并调用分类器。
@@ -21,9 +26,9 @@ from app.agent.intent import classify_intent
 from app.config import build_llm, get_settings
 
 _ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_CASES = _ROOT / "tests" / "eval" / "ch05_intent_cases.json"
+_DEFAULT_CASES = _ROOT / "tests" / "eval" / "ch06_intent_cases.json"
 _REPORT_PATH = (
-    _ROOT / "docs" / "superpowers" / "reports" / "2026-11-17-ch05-intent-eval.md"
+    _ROOT / "docs" / "superpowers" / "reports" / "2026-11-18-ch06-intent-eval.md"
 )
 
 PASS_OVERALL = 0.90
@@ -35,7 +40,7 @@ PROMPT_NOTE = (
 )
 
 #: 报告展示顺序,与 ``app.agent.state.Intent`` 一致。
-_LABEL_ORDER = ["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊"]
+_LABEL_ORDER = ["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"]
 
 
 def compute_metrics(expected: list[str], predicted: list[str]) -> dict:
@@ -84,67 +89,79 @@ def load_cases(path: Path = _DEFAULT_CASES) -> list[dict]:
     return rows
 
 
-def _classify_with_retry(llm, message: str):
-    """Classify *message*, retrying once if the classifier fell back.
-
-    ``classify_intent`` swallows exceptions and returns ``售后`` with a
-    ``fallback:`` reason. A network blip is not a model prediction, so retry
-    once; if it still fails, surface the error to the caller instead of
-    silently scoring a fabricated label.
-    """
-    result = classify_intent(llm, message)
-    if result.reason.startswith("fallback:"):
-        result = classify_intent(llm, message)
-    return result
-
-
 def run_cases(rows: list[dict], llm) -> list[dict]:
     """Run the real classifier over *rows* and return one result per case.
 
     Each result holds ``id``, ``text``, ``expected``, ``predicted``,
-    ``reason``, ``fallback`` and ``correct``. ``fallback`` marks a case whose
-    prediction is an exception fallback (not a real model output); these are
-    excluded from metrics by :func:`summarize`.
+    ``confidence``, ``error`` and ``correct``. ``classify_intent`` is called
+    with ``raise_on_error=True``: an exception is recorded in ``error`` (the
+    case is excluded from metrics by :func:`summarize`) instead of being
+    silently turned into a fabricated ``其他`` prediction.
     """
     results: list[dict] = []
     for number, row in enumerate(rows, 1):
-        result = _classify_with_retry(llm, row["text"])
-        fallback = result.reason.startswith("fallback:")
-        correct = not fallback and result.intent == row["intent"]
+        try:
+            prediction = classify_intent(
+                llm,
+                row["text"],
+                row.get("history", []),
+                raise_on_error=True,
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results.append(
+                {
+                    "id": row["id"],
+                    "text": row["text"],
+                    "expected": row["intent"],
+                    "predicted": None,
+                    "confidence": None,
+                    "error": error,
+                    "correct": False,
+                }
+            )
+            print(
+                f"[{number}/{len(rows)}] {row['id']} expect={row['intent']} "
+                f"ERROR {error}"
+            )
+            continue
+
+        correct = prediction.intent == row["intent"]
         results.append(
             {
                 "id": row["id"],
                 "text": row["text"],
                 "expected": row["intent"],
-                "predicted": result.intent,
-                "reason": result.reason,
-                "fallback": fallback,
+                "predicted": prediction.intent,
+                "confidence": prediction.confidence,
+                "error": "",
                 "correct": correct,
             }
         )
-        mark = "INVALID(fallback)" if fallback else ("OK" if correct else "WRONG")
+        mark = "OK" if correct else "WRONG"
         print(
             f"[{number}/{len(rows)}] {row['id']} expect={row['intent']} "
-            f"pred={result.intent} {mark}"
+            f"pred={prediction.intent} conf={prediction.confidence:.2f} {mark}"
         )
     return results
 
 
 def summarize(results: list[dict]) -> tuple[dict, list[dict], list[dict]]:
-    """Return ``(metrics, wrong, excluded)``.
+    """Return ``(metrics, wrong, errors)``.
 
-    Metrics cover only valid model predictions; exception fallbacks are
-    returned separately as *excluded* so the report can list them and force a
-    FAIL instead of crediting a fabricated ``售后`` label.
+    Metrics cover only valid model predictions; exceptions raised by
+    ``classify_intent(..., raise_on_error=True)`` are returned separately as
+    *errors* so the report can list them and force a FAIL instead of crediting a
+    fabricated label.
     """
-    valid = [result for result in results if not result["fallback"]]
+    valid = [result for result in results if not result["error"]]
     metrics = compute_metrics(
         [result["expected"] for result in valid],
         [result["predicted"] for result in valid],
     )
     wrong = [result for result in valid if not result["correct"]]
-    excluded = [result for result in results if result["fallback"]]
-    return metrics, wrong, excluded
+    errors = [result for result in results if result["error"]]
+    return metrics, wrong, errors
 
 
 def _per_class_pass(per_class: dict) -> dict[str, bool | None]:
@@ -169,11 +186,17 @@ def _command_line() -> str:
     return f"{Path(sys.executable).name} -m {module}"
 
 
+def _one_line(text: str, limit: int = 200) -> str:
+    """Collapse whitespace, escape table pipes and truncate for the report."""
+    collapsed = " ".join(str(text or "").split()).replace("|", "\\|")
+    return collapsed if len(collapsed) <= limit else collapsed[:limit] + "..."
+
+
 def render_report(
     results: list[dict],
     metrics: dict,
     wrong: list[dict],
-    excluded: list[dict],
+    errors: list[dict],
     model_name: str,
     cases_path: Path,
     generated_at: datetime | None = None,
@@ -184,12 +207,13 @@ def render_report(
     labels = _ordered_labels(metrics)
     verdicts = _per_class_pass(metrics["per_class"])
     overall_pass = metrics["accuracy"] >= PASS_OVERALL
-    class_pass = all(value for value in verdicts.values() if value is not None)
-    passed = overall_pass and class_pass and not excluded
+    class_pass = all(verdicts.get(label) is True for label in _LABEL_ORDER)
+    passed = overall_pass and class_pass and not errors
+    json_rate = metrics["total"] / len(results) if results else 0.0
     encoding = os.environ.get("PYTHONIOENCODING") or "(unset)"
 
     lines = [
-        "# ch05 意图分类评估报告",
+        "# ch06 意图分类评估报告",
         "",
         "## 运行参数",
         "",
@@ -200,47 +224,27 @@ def render_report(
         f"- model: {model_name} (temperature 0)",
         f"- generated at: {generated_at:%Y-%m-%d %H:%M:%S}",
         f"- pass bar: overall accuracy >= {PASS_OVERALL:.0%}, "
-        f"each class >= {PASS_PER_CLASS:.0%}",
+        f"each class >= {PASS_PER_CLASS:.0%}, no `error`",
         "",
         "## 总体指标",
         "",
-        "| total | correct | accuracy | overall pass | each class pass | 结论 |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| total | correct | accuracy | JSON 可解析率 | overall pass | "
+        "each class pass | errors | 结论 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
         f"| {metrics['total']} | {metrics['correct']} | "
-        f"{metrics['accuracy']:.3f} | "
+        f"{metrics['accuracy']:.3f} | {json_rate:.3f} | "
         f"{'PASS' if overall_pass else 'FAIL'} | "
         f"{'PASS' if class_pass else 'FAIL'} | "
-        f"{'PASS' if passed else 'FAIL'} |",
+        f"{len(errors)} | {'PASS' if passed else 'FAIL'} |",
         "",
-        "指标只统计有效模型预测;分类器兜底样例从 total/correct/per_class/"
-        "confusion 中排除,并直接判 FAIL。",
+        "准确率只统计有效模型输出;`intent=\"其他\"` 是合法预测,不当作兜底。"
+        "分类器抛异常的样例从 total/correct/per_class/confusion 中排除,"
+        "在「异常样例」单列,并直接判 FAIL。",
         "",
     ]
 
-    lines += ["## 排除样例(分类器兜底)", ""]
-    if excluded:
-        lines += [
-            "以下样例重试后仍触发分类器兜底,预测值不是模型输出,已从指标中排除:",
-            "",
-            "| id | text | expected | predicted(fallback) | reason |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-        for case in excluded:
-            reason = " ".join(str(case.get("reason") or "").split())
-            lines.append(
-                f"| {case['id']} | {case['text']} | {case['expected']} | "
-                f"{case['predicted']} | {reason} |"
-            )
-    else:
-        lines.append("无。")
-    lines.append("")
-
-    lines += [
-        "## 每类准确率",
-        "",
-        "| intent | total | correct | accuracy | pass |",
-        "| --- | --- | --- | --- | --- |",
-    ]
+    lines += ["## 每类准确率", "", "| intent | total | correct | accuracy | pass |",
+              "| --- | --- | --- | --- | --- |"]
     for label in labels:
         counts = metrics["per_class"][label]
         accuracy = counts["correct"] / counts["total"] if counts["total"] else 0.0
@@ -266,34 +270,56 @@ def render_report(
 
     lines += [
         "",
+        "## 异常样例(JSON/网络失败)",
+        "",
+    ]
+    if errors:
+        lines += [
+            "以下样例调用 `classify_intent(..., raise_on_error=True)` 抛出异常,"
+            "不是模型输出,已从指标中排除并直接判 FAIL:",
+            "",
+            "| id | text | expected | error |",
+            "| --- | --- | --- | --- |",
+        ]
+        for case in errors:
+            lines.append(
+                f"| {case['id']} | {_one_line(case['text'])} | "
+                f"{case['expected']} | {_one_line(case['error'])} |"
+            )
+    else:
+        lines.append("无。")
+
+    lines += [
+        "",
         "## 完整逐条预测",
         "",
-        "| id | text | expected | predicted | correct |",
-        "| --- | --- | --- | --- | --- |",
+        "| id | text | expected | predicted | confidence | correct |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for case in results:
-        if case["fallback"]:
-            predicted = f"{case['predicted']} (fallback)"
-            correct = "INVALID"
+        if case["error"]:
+            predicted = "-"
+            confidence = "-"
+            correct = "ERROR"
         else:
             predicted = case["predicted"]
+            confidence = f"{case['confidence']:.2f}"
             correct = "PASS" if case["correct"] else "FAIL"
         lines.append(
-            f"| {case['id']} | {case['text']} | {case['expected']} | "
-            f"{predicted} | {correct} |"
+            f"| {case['id']} | {_one_line(case['text'])} | {case['expected']} | "
+            f"{predicted} | {confidence} | {correct} |"
         )
 
     lines += ["", "## 错误样例", ""]
     if wrong:
         lines += [
-            "| id | text | expected | predicted | reason |",
+            "| id | text | expected | predicted | confidence |",
             "| --- | --- | --- | --- | --- |",
         ]
         for case in wrong:
-            reason = " ".join(str(case.get("reason") or "").split())
             lines.append(
-                f"| {case['id']} | {case['text']} | {case['expected']} | "
-                f"{case['predicted']} | {reason} |"
+                f"| {case['id']} | {_one_line(case['text'])} | {case['expected']} | "
+                f"{case['predicted']} | {case['confidence']:.2f} |"
             )
     else:
         lines.append("无。")
@@ -312,41 +338,45 @@ def main() -> int:
     """Run the live intent evaluation and write the markdown report."""
     rows = load_cases(_DEFAULT_CASES)
     settings = get_settings()
-    llm = build_llm(settings, temperature=0.0)
-    print(
-        f"eval_intent: cases={len(rows)} model={settings.model_name} "
-        "temperature=0"
+    model_name = settings.intent_model or settings.model_name
+    llm = build_llm(
+        settings,
+        temperature=0.0,
+        model=settings.intent_model or None,
     )
+    print(f"eval_intent: cases={len(rows)} model={model_name} temperature=0")
 
     results = run_cases(rows, llm)
-    excluded = [result for result in results if result["fallback"]]
-    if excluded and len(excluded) == len(results):
-        print("\neval_intent: all cases fell back to 售后; API/network failure.")
-        print(f"first error: {excluded[0]['reason']}")
+    errors = [result for result in results if result["error"]]
+    if errors and len(errors) == len(results):
+        print("\neval_intent: all cases raised; API/network or JSON failure.")
+        print(f"first error: {errors[0]['error']}")
         return 2
 
-    metrics, wrong, excluded = summarize(results)
+    metrics, wrong, errors = summarize(results)
     report = render_report(
         results,
         metrics,
         wrong,
-        excluded,
-        settings.model_name,
+        errors,
+        model_name,
         _DEFAULT_CASES,
     )
     _REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     _REPORT_PATH.write_text(report, encoding="utf-8")
 
     verdicts = _per_class_pass(metrics["per_class"])
-    class_pass = all(value for value in verdicts.values() if value is not None)
-    passed = metrics["accuracy"] >= PASS_OVERALL and class_pass and not excluded
+    class_pass = all(verdicts.get(label) is True for label in _LABEL_ORDER)
+    passed = metrics["accuracy"] >= PASS_OVERALL and class_pass and not errors
 
     print(
         f"\neval_intent: valid={metrics['total']}/{len(results)} "
-        f"correct={metrics['correct']} accuracy={metrics['accuracy']:.3f}"
+        f"correct={metrics['correct']} accuracy={metrics['accuracy']:.3f} "
+        f"errors={len(errors)}"
     )
-    for label, counts in metrics["per_class"].items():
-        if not counts["total"]:
+    for label in _LABEL_ORDER:
+        counts = metrics["per_class"].get(label)
+        if not counts or not counts["total"]:
             continue
         accuracy = counts["correct"] / counts["total"]
         print(f"  {label}: {counts['correct']}/{counts['total']} = {accuracy:.3f}")
@@ -355,12 +385,13 @@ def main() -> int:
         for case in wrong:
             print(
                 f"  {case['id']} expected={case['expected']} "
-                f"predicted={case['predicted']} text={case['text']}"
+                f"predicted={case['predicted']} conf={case['confidence']:.2f} "
+                f"text={case['text']}"
             )
-    if excluded:
-        print("\neval_intent: excluded fallback cases")
-        for case in excluded:
-            print(f"  {case['id']}: {case['reason']}")
+    if errors:
+        print("\neval_intent: error cases")
+        for case in errors:
+            print(f"  {case['id']}: {case['error']}")
     print(f"\neval_intent: report written to {_REPORT_PATH}")
     print(f"eval_intent: {'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
