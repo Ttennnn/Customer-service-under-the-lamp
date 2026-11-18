@@ -10,8 +10,9 @@
 - 业务类与闸通过的知识/退款类进入 ``main_agent``(ch05 ReAct 子图);
 - 统一结构化日志。
 
-退款子流程的 ``fetch_order`` / ``retrieve_policy`` 在本任务仍是占位节点,
-由 Task 12/13 实现;只有 ``refund_flow`` 路由会走到它们。
+退款子流程的 ``fetch_order`` 已实现订单槽位与 interrupt/resume;
+``retrieve_policy`` 仍是占位节点,由 Task 13 实现。只有 ``refund_flow``
+路由会走到它们。
 
 图不在 import 时构建:``build_graph`` 由 API 首次请求时懒加载调用。
 """
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,11 +29,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from app.agent.confidence import assess_confidence
 from app.agent.coref import resolve_query
@@ -42,8 +45,11 @@ from app.agent.subgraph import build_agent_subgraph
 from app.config import Settings, get_settings
 from app.rag.query_understanding import QueryAnalysis, expand_synonyms
 from app.rag.retrieval import retrieve_hybrid
+from app.tools.business import list_user_orders, query_order
 from app.tools.context import CitationCollector
+from app.tools.executor import execute_tool
 from app.tools.faq import order_for_prompt
+from app.tools.registry import tool_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +71,8 @@ OTHER_TEXT = (
     "抱歉，我还没完全理解您的需求。"
     "请具体说明您要咨询的订单、物流、商品或售后问题，我再帮您处理。"
 )
+ORDER_FAILED_TEXT = "抱歉，订单信息查询失败，请稍后重试或联系人工客服。"
+ORDER_INVALID_TEXT = "您选择的订单无效，请重新选择订单或联系人工客服。"
 COMPLAINT_ACTIONS: list[dict[str, str]] = [
     {"action": "transfer", "label": "转人工"},
     {"action": "ticket", "label": "建工单", "ticket_type": "投诉"},
@@ -108,6 +116,93 @@ def sqlite_checkpointer(path: str) -> Iterator[SqliteSaver]:
 def _emit(text: str) -> None:
     """Send a fixed answer as one token frame."""
     get_stream_writer()({"type": "token", "text": text})
+
+
+_ORDER_PREFIX_RE = re.compile(r"订单(?:号)?[：:\s]*([0-9]{4,})")
+_ORDER_SUFFIX_RE = re.compile(r"([0-9]{4,})\s*号订单")
+_BARE_NUMBER_RE = re.compile(r"(?<![0-9])([0-9]{4,})(?![0-9])")
+_DATE_UNITS = ("年", "月", "日")
+
+
+def extract_order_id(text: str) -> str | None:
+    """Extract an order ID from *text*, ignoring amounts and dates.
+
+    Order-adjacent numbers (``订单 1001`` / ``1001号订单``) win; a bare
+    number is accepted only as a last resort and never when it looks like a
+    year or a date component.
+    """
+    for pattern in (_ORDER_PREFIX_RE, _ORDER_SUFFIX_RE):
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    for match in _BARE_NUMBER_RE.finditer(text):
+        candidate = match.group(1)
+        if text[match.end() : match.end() + 1] in _DATE_UNITS:
+            continue
+        if 1900 <= int(candidate) <= 2099:
+            continue
+        return candidate
+    return None
+
+
+def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
+    """Resolve the order slot, then fetch the order exactly once.
+
+    Only read-only work (regex, ``list_user_orders``, logging) happens before
+    ``interrupt()``: LangGraph restarts the node from its beginning on resume,
+    so any side effect there would run twice.
+    """
+    orders = list_user_orders(state.get("session_id", ""))
+    order_ids = {order["order_id"] for order in orders}
+    query = state.get("resolved_query") or ""
+
+    order_id = extract_order_id(query)
+    source = "message"
+    messages: list[Any] = []
+    if order_id not in order_ids:
+        logger.info(
+            "ch06 fetch_order slot missing resolved_query=%r", query
+        )
+        selected = interrupt(
+            {"kind": "select_order", "slot": "order_id", "orders": orders}
+        )
+        source = "resume"
+        if not isinstance(selected, str) or selected not in order_ids:
+            logger.warning("ch06 fetch_order invalid resume %r", selected)
+            _emit(ORDER_INVALID_TEXT)
+            return {
+                "answer": ORDER_INVALID_TEXT,
+                "messages": [AIMessage(content=ORDER_INVALID_TEXT)],
+                "gate_passed": False,
+                "gate_reason": "order_slot_failed",
+            }
+        order_id = selected
+        messages.append(
+            SystemMessage(content=f"[订单选择器] 用户选择了订单 {order_id}")
+        )
+
+    logger.info("ch06 fetch_order order_id=%s source=%s", order_id, source)
+    try:
+        raw = execute_tool(
+            query_order,
+            {"order_id": order_id},
+            timeout_s=tool_timeout("query_order"),
+            retries=0,
+        )
+        order_data = json.loads(raw)
+        if not isinstance(order_data, dict):
+            raise ValueError("order payload is not a JSON object")
+    except Exception:  # noqa: BLE001 - 工具/解析失败走兜底,不进 Agent
+        logger.exception("ch06 fetch_order failed order_id=%s", order_id)
+        _emit(ORDER_FAILED_TEXT)
+        return {
+            "answer": ORDER_FAILED_TEXT,
+            "messages": [AIMessage(content=ORDER_FAILED_TEXT)],
+            "gate_passed": False,
+            "gate_reason": "order_fetch_failed",
+        }
+
+    return {"order_id": order_id, "order_data": order_data, "messages": messages}
 
 
 def build_graph(
@@ -257,11 +352,6 @@ def build_graph(
             "suggested_actions": [],
         }
 
-    def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
-        raise NotImplementedError(
-            "ch06 fetch_order is a placeholder; Task 12 replaces this node"
-        )
-
     def retrieve_policy_node(state: CustomerServiceState) -> dict[str, Any]:
         raise NotImplementedError(
             "ch06 retrieve_policy is a placeholder; Task 13 replaces this node"
@@ -333,7 +423,9 @@ def build_graph(
         },
     )
     graph.add_edge("retrieve_knowledge", "confidence_gate")
-    graph.add_edge("fetch_order", "retrieve_policy")
+    # Task 12: success and failure both log; Task 13 routes success through
+    # retrieve_policy and only failure straight to record_log.
+    graph.add_edge("fetch_order", "record_log")
     graph.add_edge("retrieve_policy", "confidence_gate")
     graph.add_conditional_edges(
         "confidence_gate",
