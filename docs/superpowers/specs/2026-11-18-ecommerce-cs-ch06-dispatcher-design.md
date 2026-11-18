@@ -650,7 +650,7 @@ ch06_checkpoint_db: str = ".data/ch06-checkpoints.sqlite"
 - `tests/eval/ch06_coref_cases.json`：多轮指代、订单/商品引用、已完整透传、无历史；每条带 `history`、`message`、`expect.contains` / `expect.not_contains` / `passthrough`。脚本 `app/jobs/eval_coref.py` 用真实 LLM 跑，输出通过率与错例。
 - `tests/eval/ch06_intent_cases.json`：八类各 6 条 + 边界/其他/多轮漂移；held-out（不得复用 prompt few-shot 原文）；脚本 `app/jobs/eval_intent.py` 输出总体/每类准确率、混淆矩阵、有效输出率、fallback 列表。
 - `tests/eval/ch06_expand_cases.json`：退款/售后核心场景；脚本 `app/jobs/eval_expand.py` 检查严格 3 条、JSON 可解析、关键实体保留。
-- 通过标准：coref 关键实体/去指代 ≥90%，透传用例 100%（或至少 90%，以评估报告为准）；intent 总体 ≥90%、每类 ≥80%、JSON 解析率 100%（fallback 视为失败）；expand 3 条率 ≥90%、JSON 解析率 100%。
+- 通过标准：coref 关键实体/去指代 ≥90%，透传用例 100%（或至少 90%，以评估报告为准）；intent 总体 ≥90%、每类 ≥80%、有效输出率 100%（fallback 视为失败）；expand 3 条率 ≥90%、有效输出率 100%。
 - 报告写入 `docs/superpowers/reports/2026-11-18-ch06-*.md`，并把结论写进 dev-notes。
 
 ### 13.4 端到端验收
