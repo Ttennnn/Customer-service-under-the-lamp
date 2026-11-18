@@ -28,6 +28,17 @@ def test_query_order_unknown_id_keeps_contract():
         assert key in payload
 
 
+def test_query_order_is_stable_for_same_unknown_id():
+    first = query_order.invoke({"order_id": "5678"})
+    second = query_order.invoke({"order_id": "5678"})
+    assert first == second
+
+
+def test_query_order_status_is_one_of_known_values():
+    payload = json.loads(query_order.invoke({"order_id": "5678"}))
+    assert payload["status"] in {"待付款", "待发货", "运输中", "已签收"}
+
+
 def test_list_user_orders_returns_copies():
     first = list_user_orders("s1")
     first[0]["status"] = "mutated"
