@@ -1,7 +1,7 @@
 from typing import Literal
 
 from langchain_openai import ChatOpenAI
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     summary_reserve_tokens: int = 500
     history_target_turns: int = 30
     history_tokens_per_turn: int = 300
-    layer1_ratio: float = 0.7
+    layer1_ratio: float = Field(default=0.7, ge=0, le=1)
     layer1_degrade_low_water_ratio: float = 0.8
     assistant_l2_chars: int = 40
     tool_result_marker_chars: int = 200

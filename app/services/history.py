@@ -4,10 +4,17 @@ Stores conversation messages in the ``messages`` table and rebuilds
 ``langchain_core`` message objects from them for prompt assembly.
 """
 
+import re
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from sqlalchemy import func
 
 from app.models import Conversation, ConversationSummary, Message
+
+#: ``[订单选择] 订单 1001`` rows are UI audit records, not user speech.
+#: Shared by the summary job and the layered-window rebuild so both render the
+#: same system fact instead of attributing the pick to the user.
+ORDER_AUDIT_RE = re.compile(r"^\[订单选择\]\s*订单\s*(\d+)\s*$")
 
 
 class ConversationNotFound(Exception):

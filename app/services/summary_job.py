@@ -13,7 +13,6 @@ compression.  The old projection is passed to the model as background only.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +27,7 @@ from app.config import Settings, build_llm
 from app.db import session as db_session
 from app.models import Message
 from app.services.history import (
+    ORDER_AUDIT_RE,
     append_summary_segment,
     get_conversation,
     list_dialog_messages,
@@ -87,9 +87,6 @@ _executor: ThreadPoolExecutor | None = None
 _inflight: set[int] = set()
 _lock = threading.Lock()
 
-#: ``[订单选择] 订单 1001`` audit rows are rendered as a normal user statement.
-_ORDER_AUDIT_RE = re.compile(r"^\[订单选择\]\s*订单\s*(\d+)\s*$")
-
 
 def _get_executor() -> ThreadPoolExecutor:
     """Return the module executor, creating it lazily.
@@ -138,8 +135,14 @@ def schedule_summary(conversation_id: int, settings: Settings) -> bool:
             )
         except RuntimeError:
             # The executor was shut down concurrently; do not leak the marker.
+            # Submit failure must not break the user's reply, so report it as
+            # "no job scheduled" instead of raising.
             _inflight.discard(conversation_id)
-            raise
+            _logger.warning(
+                "summary submit failed reason=executor_shutdown conv=%d",
+                conversation_id,
+            )
+            return False
 
     # Registered outside ``_lock`` so an already-done/cancelled future cannot
     # invoke the callback (and re-acquire the lock) on this thread.  This also
@@ -192,7 +195,7 @@ def _render_row(row: Message) -> str:
     """
     content = row.content or ""
     if row.role == "user":
-        match = _ORDER_AUDIT_RE.match(content)
+        match = ORDER_AUDIT_RE.match(content)
         if match:
             return f"系统事实：用户选择了订单 {match.group(1)}"
         return f"用户：{content}"

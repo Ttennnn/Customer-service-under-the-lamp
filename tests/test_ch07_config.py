@@ -1,4 +1,6 @@
 import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.services.context_budget import compute_budget, validate_budget
 
@@ -46,6 +48,12 @@ def test_layer1_ratio_is_honored():
               layer1_ratio=0.5)
     b = compute_budget(s)
     assert (b.history, b.layer1, b.layer2) == (5650, 2825, 2825)
+
+
+@pytest.mark.parametrize("value", [1.5, -0.1])
+def test_layer1_ratio_rejects_out_of_range(value):
+    with pytest.raises(ValidationError):
+        _base(layer1_ratio=value)
 
 
 def test_blank_optional_env_values_fall_back():

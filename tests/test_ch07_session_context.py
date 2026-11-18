@@ -49,6 +49,70 @@ def test_prepare_context_degrades_l1_and_persists_anchor(session, caplog, monkey
     assert "层1 降级" in caplog.text
 
 
+def test_prepare_context_keeps_old_anchor_when_persist_fails(
+    session, caplog, monkeypatch
+):
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(
+        "app.services.session_context.schedule_summary",
+        lambda cid, settings: True,
+    )
+    conv, msgs, ids = _seed(session, turns=8, answer="答" * 200)
+    conv.layer1_from_msg_id = ids[2][1]
+    session.commit()
+    old_anchor = conv.layer1_from_msg_id
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr("app.services.session_context.update_layer1_from", fail)
+    plan = prepare_context(
+        session,
+        conv,
+        msgs,
+        len(msgs),
+        _settings(model_context_window=4000, max_output_tokens=200),
+    )
+
+    assert plan.degraded is False
+    assert plan.layer1_from_msg_id == old_anchor
+    assert get_conversation(session, conv.id).layer1_from_msg_id == old_anchor
+    assert "降级持久化失败" in caplog.text
+
+
+def test_prepare_context_survives_summary_trigger_failure(
+    session, caplog, monkeypatch
+):
+    caplog.set_level(logging.WARNING)
+    conv, msgs, ids = _seed(session, turns=6, answer="答" * 400, question="问" + "细" * 500)
+    conv.layer1_from_msg_id = ids[-2][1]
+    session.commit()
+
+    def fail(cid, settings):
+        raise RuntimeError("executor shut down")
+
+    monkeypatch.setattr("app.services.session_context.schedule_summary", fail)
+    plan = prepare_context(session, conv, msgs, len(msgs), _settings())
+
+    assert plan.history_l2  # the plan was still built and returned
+    assert "summary trigger 失败" in caplog.text
+
+
+def test_rebuild_normalizes_order_audit_row_as_system_fact(session):
+    cid = create_conversation(session, "u1").id
+    append_message(session, cid, "user", "订单 1001 想退款")
+    append_message(session, cid, "assistant", "好的")
+    append_message(session, cid, "user", "[订单选择] 订单 1001")
+    session.commit()
+
+    conv = get_conversation(session, cid)
+    plan = prepare_context(session, conv, [], 0, _settings())
+
+    contents = [message.content for message in plan.prompt_history]
+    assert "系统事实：用户选择了订单 1001" in contents
+    assert not any("[订单选择]" in content for content in contents)
+
+
 def test_prepare_context_merges_db_history_before_oldest_state_id(session):
     conv, msgs, ids = _seed(session, turns=3)
     # State 只剩最后一轮，前面两轮要从 MySQL 补回来

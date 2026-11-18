@@ -24,6 +24,7 @@ from app.services.context import (
 )
 from app.services.context_budget import ContextBudget, compute_budget
 from app.services.history import (
+    ORDER_AUDIT_RE,
     list_dialog_messages,
     previous_message_id,
     update_layer1_from,
@@ -88,10 +89,20 @@ def _last_db_id(messages: Sequence[BaseMessage]) -> int | None:
 
 
 def _row_to_message(row: Message) -> BaseMessage:
-    """Convert a persisted user/assistant row to a ``db-{id}`` chat message."""
+    """Convert a persisted user/assistant row to a ``db-{id}`` chat message.
+
+    ``[订单选择] 订单 N`` rows are order-picker audit records, not user
+    speech. Rebuilds render them as a system fact (matching the summary
+    job) so the model does not treat the pick as a user utterance or
+    duplicate the checkpoint's ``【订单选择器】`` message.
+    """
     message_id = f"db-{row.id}"
     if row.role == "user":
-        return HumanMessage(content=row.content or "", id=message_id)
+        content = row.content or ""
+        match = ORDER_AUDIT_RE.match(content)
+        if match:
+            content = f"系统事实：用户选择了订单 {match.group(1)}"
+        return HumanMessage(content=content, id=message_id)
     return AIMessage(content=row.content or "", id=message_id)
 
 
@@ -226,27 +237,43 @@ def prepare_context(
                 budget.layer1,
             )
         else:
-            boundary = previous_message_id(session, conversation.id, target_user)
-            update_layer1_from(session, conversation.id, boundary)
-            old_anchor = layer1_from
-            layer1_from = boundary
-            l2, l1 = split_layers(merged, summary_upto, layer1_from)
-            new_l1_tokens = message_tokens(l1)
-            degraded = True
-            _logger.info(
-                "层1 降级 %s→%s l1_tokens=%d→%d",
-                old_anchor,
-                boundary,
-                l1_tokens,
-                new_l1_tokens,
-            )
-            l1_tokens = new_l1_tokens
-            if l1_tokens > budget.layer1:
-                _logger.warning(
-                    "层1 降级后仍超预算 l1_tokens=%d layer1_budget=%d",
-                    l1_tokens,
-                    budget.layer1,
+            try:
+                boundary = previous_message_id(
+                    session, conversation.id, target_user
                 )
+                update_layer1_from(session, conversation.id, boundary)
+            except Exception:  # noqa: BLE001 - anchor persistence must not break the reply
+                # Discard any dirty anchor value left by the failed write so a
+                # later commit cannot persist it; keep using the old anchor.
+                try:
+                    session.rollback()
+                except Exception:  # noqa: BLE001 - best-effort recovery
+                    _logger.warning("层1 降级失败后回滚失败", exc_info=True)
+                _logger.warning(
+                    "层1 降级持久化失败，继续使用旧锚点 layer1_from=%s",
+                    layer1_from,
+                    exc_info=True,
+                )
+            else:
+                old_anchor = layer1_from
+                layer1_from = boundary
+                l2, l1 = split_layers(merged, summary_upto, layer1_from)
+                new_l1_tokens = message_tokens(l1)
+                degraded = True
+                _logger.info(
+                    "层1 降级 %s→%s l1_tokens=%d→%d",
+                    old_anchor,
+                    boundary,
+                    l1_tokens,
+                    new_l1_tokens,
+                )
+                l1_tokens = new_l1_tokens
+                if l1_tokens > budget.layer1:
+                    _logger.warning(
+                        "层1 降级后仍超预算 l1_tokens=%d layer1_budget=%d",
+                        l1_tokens,
+                        budget.layer1,
+                    )
 
     l2_rendered = render_l2(l2, settings)
     l2_tokens = message_tokens(l2_rendered)
@@ -265,7 +292,14 @@ def prepare_context(
             l2_tokens,
             budget.layer2,
         )
-        schedule_summary(conversation.id, settings)
+        try:
+            schedule_summary(conversation.id, settings)
+        except Exception:  # noqa: BLE001 - summary failure must not affect the reply
+            _logger.warning(
+                "summary trigger 失败，跳过本次摘要 conv=%d",
+                conversation.id,
+                exc_info=True,
+            )
 
     prompt_history = list(l2_rendered) + list(l1)
     log_context(

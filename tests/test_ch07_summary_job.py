@@ -113,6 +113,21 @@ def test_schedule_summary_is_non_blocking_and_deduplicated(monkeypatch):
     release.set(); shutdown_summary_executor()
 
 
+def test_schedule_summary_returns_false_when_submit_fails(monkeypatch):
+    import app.services.summary_job as summary_job
+
+    class BrokenExecutor:
+        def submit(self, *args, **kwargs):
+            raise RuntimeError("cannot schedule new futures after shutdown")
+
+    monkeypatch.setattr(summary_job, "_get_executor", lambda: BrokenExecutor())
+    try:
+        assert schedule_summary(99, _settings()) is False
+        assert 99 not in summary_job._inflight
+    finally:
+        shutdown_summary_executor()
+
+
 def test_shutdown_is_idempotent():
     shutdown_summary_executor()
     shutdown_summary_executor()

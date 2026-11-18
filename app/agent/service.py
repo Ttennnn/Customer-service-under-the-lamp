@@ -97,6 +97,21 @@ def _last_human_index(messages) -> int:
     return 0
 
 
+def _truncate_user_input(message: str, settings: Settings) -> str:
+    """Cap the model-facing user text at ``max_user_input_tokens``.
+
+    The DB audit row always keeps the full original message; only the graph
+    input (and the ``user_message`` state field derived from it) is capped, so
+    a long paste cannot push the prompt past the model window. Returns the
+    message unchanged when it fits.
+    """
+    limit = max(0, settings.max_user_input_tokens)
+    if len(message) <= limit:
+        return message
+    logger.warning("用户输入超限已截断 chars=%d limit=%d", len(message), limit)
+    return message[:limit]
+
+
 def _reset_inputs(
     message: str,
     message_id: int,
@@ -306,7 +321,9 @@ def stream_chat_agent(
         return
 
     # Audit the user turn before the graph starts: a later graph crash must
-    # not erase what the user asked.
+    # not erase what the user asked. The DB row keeps the full text; only the
+    # model-facing copy is truncated to the configured input budget.
+    prompt_message = _truncate_user_input(message, settings)
     user_message = append_message(session, cid, "user", message)
     session.commit()
 
@@ -320,7 +337,7 @@ def stream_chat_agent(
         current_msg_id=user_message.id,
     )
     inputs = _reset_inputs(
-        message, user_message.id, cid, user_id, settings, plan
+        prompt_message, user_message.id, cid, user_id, settings, plan
     )
 
     yield _conversation_frame(cid)
