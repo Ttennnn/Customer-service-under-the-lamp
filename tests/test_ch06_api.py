@@ -330,7 +330,7 @@ def test_ch06_lazy_graph_builds_once_and_closes(monkeypatch):
 
     assert first is second
     assert len(built) == 1
-    assert paths == [settings.ch06_checkpoint_db]
+    assert paths == [settings.ch07_checkpoint_db]
     assert llm_calls == [(0.7, None), (0.0, "intent-x")]
     assert request.app.state.ch06_checkpoint_handle is not None
 

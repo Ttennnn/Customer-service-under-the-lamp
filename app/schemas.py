@@ -25,6 +25,12 @@ class AfterSaleExtraction(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
     message: str = Field(min_length=1, description="用户消息")
+    conversation_id: int | None = Field(
+        default=None, gt=0, description="目标会话 ID,省略时用最近一个进行中的会话"
+    )
+    new_conversation: bool = Field(
+        default=False, description="强制新建会话"
+    )
 
     @field_validator("session_id", "message", mode="before")
     @classmethod
@@ -40,6 +46,9 @@ class TicketRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
     description: str = Field(min_length=1, description="工单描述")
     ticket_type: Literal["售后", "投诉", "咨询", "退款"] = "咨询"
+    conversation_id: int | None = Field(
+        default=None, gt=0, description="工单归属会话 ID,省略时用最近一个进行中的会话"
+    )
 
     @field_validator("session_id", "description", mode="before")
     @classmethod
@@ -77,6 +86,9 @@ REFUND_REASONS: tuple[str, ...] = (
 class ResumeRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
     order_id: str = Field(min_length=1, description="用户选择的订单号")
+    conversation_id: int | None = Field(
+        default=None, gt=0, description="待恢复会话 ID,省略时用最近一个进行中的会话"
+    )
 
     @field_validator("session_id", "order_id", mode="before")
     @classmethod
@@ -92,6 +104,9 @@ class RefundRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
     order_id: str = Field(min_length=1, description="退款订单号")
     reason: Literal[*REFUND_REASONS] = Field(description="退款原因")
+    conversation_id: int | None = Field(
+        default=None, gt=0, description="退款归属会话 ID,省略时用最近一个进行中的会话"
+    )
 
     @field_validator("session_id", "order_id", mode="before")
     @classmethod
