@@ -57,12 +57,20 @@ def test_suggested_actions_from_refund():
 
 
 def test_agent_prompt_has_handoff_and_no_ticket_rules():
-    from app.prompts.customer_service import render_agent_system_prompt
-    prompt = render_agent_system_prompt(
-        evidence=[{"n": 1, "section_path": "退货政策", "question": "能退吗", "answer": "7 天", "score": 0.9}]
+    from app.prompts.customer_service import (
+        render_agent_system_prompt,
+        render_turn_material,
     )
+
+    prompt = render_agent_system_prompt()
     assert "suggest_handoff" in prompt
     assert "不得调用 create_ticket" in prompt
     assert "工具返回" in prompt and "[n]" in prompt
     assert "串行" in prompt
-    assert "[1] 章节:退货政策" in prompt
+    material = render_turn_material(
+        "",
+        [{"n": 1, "section_path": "退货政策", "question": "能退吗", "answer": "7 天", "score": 0.9}],
+        None,
+        "",
+    )
+    assert "[1] 章节:退货政策" in material

@@ -16,6 +16,8 @@
 由父图编译时自动传播。
 """
 
+import logging
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -23,7 +25,6 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     AnyMessage,
-    BaseMessage,
     SystemMessage,
     ToolMessage,
 )
@@ -39,14 +40,23 @@ from app.agent.tools import (
     suggested_actions_from_refund,
     tools_for_route,
 )
+from app.config import Settings, get_settings
 from app.prompts.customer_service import (
     render_after_sales_agent_system_prompt,
     render_agent_system_prompt,
+    render_turn_material,
 )
-from app.services.context import build_agent_messages, estimate_tokens
+from app.services.context import (
+    assemble_agent_prompt,
+    estimate_tokens,
+    log_context,
+    message_tokens,
+)
 from app.tools.context import current_conversation_id
 from app.tools.executor import execute_tool
 from app.tools.registry import TOOL_LABELS, tool_timeout
+
+_logger = logging.getLogger(__name__)
 
 FALLBACK_ANSWER = (
     "抱歉,这个问题需要更多信息才能继续处理。"
@@ -148,26 +158,40 @@ def build_agent_subgraph(
     llm,
     *,
     max_steps: int = 6,
-    token_budget: int = 12000,
-    tool_result_max_chars: int = 2000,
-    max_context_tokens: int = 4096,
+    tool_result_max_tokens: int = 2000,
+    settings: Settings | None = None,
     tools: Sequence[BaseTool] | None = None,
+    # Retired ch05/ch06 limits. They are accepted (and ignored) until the
+    # parent graph migrates to the ch07 context window; the token budget no
+    # longer cuts the Agent off mid-turn.
+    token_budget: int | None = None,
+    tool_result_max_chars: int | None = None,
+    max_context_tokens: int | None = None,
 ):
     """Return a compiled Agent subgraph (no checkpointer; parent propagates it).
+
+    The system prompt is constant per route, so it stays cacheable. The current
+    turn is ``messages[turn_start_index:]``; the summary, evidence, order data
+    and intent become one labeled material message inserted after the current
+    user message. ``prompt_history`` is trimmed only when the assembled prompt
+    exceeds the model window minus the configured safety margin.
 
     When ``tools`` is omitted, each route binds its own subset: ``refund_flow``
     gets the refund control tool plus handoff, other routes get the business
     tools plus handoff. An explicit ``tools`` list overrides route selection
     (used by tests and callers with a fixed tool set).
     """
+    settings = settings or get_settings()
+    if tool_result_max_chars is not None:
+        # Legacy callers still pass the old character cap; one char is one token.
+        tool_result_max_tokens = tool_result_max_chars
     explicit_tools: list[BaseTool] | None = (
         list(tools) if tools is not None else None
     )
 
     def agent_node(state: AgentState) -> dict[str, Any]:
         step_count = state.get("step_count", 0) + 1
-        token_estimate = state.get("token_estimate", 0)
-        if step_count > max_steps or token_estimate >= token_budget:
+        if step_count > max_steps:
             return {"step_count": step_count, "exhausted": True}
 
         route = state.get("route") or "business"
@@ -176,20 +200,35 @@ def build_agent_subgraph(
         else:
             bound_tools = tools_for_route(route)
         if route == "refund_flow":
-            system_content = render_after_sales_agent_system_prompt(
-                order_data=state.get("order_data"),
-                evidence=state.get("evidence"),
-                intent=state.get("intent") or "",
-            )
+            system_content = render_after_sales_agent_system_prompt()
         else:
-            system_content = render_agent_system_prompt(
-                evidence=state.get("evidence")
-            )
+            system_content = render_agent_system_prompt()
         system = SystemMessage(content=system_content)
-        prompt = build_agent_messages(
-            system,
-            state.get("messages", []),
-            max_context_tokens,
+
+        history = list(state.get("prompt_history") or [])
+        turn_start = state.get("turn_start_index", 0) or 0
+        current = list(state.get("messages") or [])[turn_start:]
+        summary = state.get("summary") or ""
+        material = render_turn_material(
+            summary,
+            state.get("evidence"),
+            state.get("order_data"),
+            state.get("intent") or "",
+        )
+        window = settings.model_context_window
+        max_prompt_tokens = window - math.ceil(
+            window * settings.safety_margin_ratio
+        )
+        prompt = assemble_agent_prompt(
+            system, history, current, material, max_prompt_tokens
+        )
+        log_context(
+            _logger,
+            "model_ctx",
+            summary,
+            prompt,
+            len(history),
+            preview_chars=settings.context_log_preview_chars,
         )
 
         writer = get_stream_writer()
@@ -203,12 +242,11 @@ def build_agent_subgraph(
         tool_calls = gathered.tool_calls if gathered is not None else []
         ai_message = AIMessage(content=content, tool_calls=tool_calls)
 
-        prompt_tokens = sum(estimate_tokens(m.content) for m in prompt)
         update: dict[str, Any] = {
             "messages": [ai_message],
             "step_count": step_count,
-            "token_estimate": token_estimate
-            + prompt_tokens
+            "token_estimate": state.get("token_estimate", 0)
+            + message_tokens(prompt)
             + estimate_tokens(content),
             "exhausted": False,
         }
@@ -259,10 +297,11 @@ def build_agent_subgraph(
                     args,
                     timeout_s=tool_timeout(name),
                 )
-                result = str(result)[:tool_result_max_chars]
             else:
                 result = f"未知工具:{name}"
 
+            # One character is one token; keep the raw result out of the window.
+            result = str(result)[:tool_result_max_tokens]
             token_delta += estimate_tokens(result)
             new_messages.append(
                 ToolMessage(content=result, tool_call_id=tool_call.get("id") or "")

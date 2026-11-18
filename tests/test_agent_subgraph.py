@@ -181,17 +181,16 @@ def test_max_steps_runs_finalize(monkeypatch):
     assert {"action": "transfer", "label": "转人工"} in result["suggested_actions"]
 
 
-def test_token_budget_runs_finalize(monkeypatch):
-    monkeypatch.setattr(
-        "app.agent.subgraph.execute_tool",
-        lambda tool, args, timeout_s=5: "ok",
+def test_legacy_token_budget_no_longer_runs_finalize():
+    # ch07 retires AGENT_TOKEN_BUDGET as an Agent stop condition: the context
+    # window and max_steps govern the turn instead.
+    llm = ScriptedLLM([text_chunk("答")])
+    result = build_agent_subgraph(llm).invoke(
+        _initial_state(token_budget=1, token_estimate=999999)
     )
-    llm = ScriptedLLM([tool_chunk("query_order", '{"order_id": "1"}')])
-    result = build_agent_subgraph(llm, token_budget=1).invoke(_initial_state())
 
-    assert result["exhausted"] is True
-    assert result["answer"]
-    assert {"action": "transfer", "label": "转人工"} in result["suggested_actions"]
+    assert result["exhausted"] is False
+    assert result["answer"] == "答"
 
 
 def test_custom_stream_emits_tool_then_tokens(monkeypatch):

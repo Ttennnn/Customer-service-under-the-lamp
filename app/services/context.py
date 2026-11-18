@@ -356,6 +356,26 @@ def lc_trim_l1(messages: Sequence[BaseMessage], max_tokens: int) -> list[BaseMes
     return []
 
 
+_HISTORICAL_SYSTEM_LABEL = "【系统提示】"
+
+
+def _demote_system_message(message: BaseMessage) -> BaseMessage:
+    """Turn a historical ``SystemMessage`` into a tagged ``HumanMessage``.
+
+    Chat templates hoist every system row to the front, which would push the
+    tool definitions behind variable content and invalidate the prefix cache.
+    The Agent prompt therefore keeps exactly one leading system message; any
+    historical system row is preserved as a clearly-labeled human message.
+    """
+    if not isinstance(message, SystemMessage):
+        return message
+    return HumanMessage(
+        content=_HISTORICAL_SYSTEM_LABEL + _string_content(message),
+        id=getattr(message, "id", None),
+        name=getattr(message, "name", None),
+    )
+
+
 def assemble_agent_prompt(
     system: SystemMessage,
     history: Sequence[BaseMessage],
@@ -367,30 +387,40 @@ def assemble_agent_prompt(
 
     The per-turn material (summary, evidence, order data, intent) is inserted as
     a ``HumanMessage`` right after the first user message of the current turn,
-    so it never becomes a system prompt or precedes the user question. When the
-    assembled prompt exceeds *max_prompt_tokens*, only *history* is trimmed with
-    the LangChain backstop; the system message, the current turn and the material
-    are always kept. A warning is logged if the prompt is still over budget.
+    so it never becomes a system prompt or precedes the user question. Historical
+    ``SystemMessage`` rows in *history* or *current* are demoted to tagged
+    ``HumanMessage`` rows, leaving exactly one system message at the front. When
+    the assembled prompt exceeds *max_prompt_tokens*, only *history* is trimmed
+    with the LangChain backstop; the system message, the current turn and the
+    material are always kept. A warning is logged if the prompt is still over
+    budget.
     """
-    current_messages = list(current)
+    current_messages = [_demote_system_message(message) for message in current]
     if material:
         insert_at = next(
             (
                 index + 1
-                for index, message in enumerate(current_messages)
+                for index, message in enumerate(current)
                 if isinstance(message, HumanMessage)
             ),
             len(current_messages),
         )
         current_messages.insert(insert_at, HumanMessage(content=material))
 
-    prompt = [system, *history, *current_messages]
+    sanitized_history = [
+        _demote_system_message(message) for message in history
+    ]
+    prompt = [system, *sanitized_history, *current_messages]
     if message_tokens(prompt) <= max_prompt_tokens:
         return prompt
 
     fixed_tokens = message_tokens([system, *current_messages])
     history_budget = max(0, max_prompt_tokens - fixed_tokens)
-    prompt = [system, *lc_trim_l1(history, history_budget), *current_messages]
+    prompt = [
+        system,
+        *lc_trim_l1(sanitized_history, history_budget),
+        *current_messages,
+    ]
     if message_tokens(prompt) > max_prompt_tokens:
         _logger.warning(
             "prompt over budget: tokens=%d > max_prompt_tokens=%d",

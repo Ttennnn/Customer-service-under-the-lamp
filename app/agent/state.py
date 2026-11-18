@@ -41,6 +41,16 @@ class CustomerServiceState(TypedDict, total=False):
     max_steps: int
     conversation_id: int
     exhausted: bool
+    summary: str
+    summary_upto_msg_id: int
+    layer1_from_msg_id: int
+    prompt_history: list[AnyMessage]
+    history_l2: list[AnyMessage]
+    history_l1: list[AnyMessage]
+    turn_start_index: int
+    l2_tokens: int
+    l1_tokens: int
+    context_budget: dict
 
 
 class AgentState(TypedDict, total=False):
@@ -59,3 +69,13 @@ class AgentState(TypedDict, total=False):
     suggested_actions: list[dict]
     exhausted: bool
     conversation_id: int
+    summary: str
+    summary_upto_msg_id: int
+    layer1_from_msg_id: int
+    prompt_history: list[AnyMessage]
+    history_l2: list[AnyMessage]
+    history_l1: list[AnyMessage]
+    turn_start_index: int
+    l2_tokens: int
+    l1_tokens: int
+    context_budget: dict
