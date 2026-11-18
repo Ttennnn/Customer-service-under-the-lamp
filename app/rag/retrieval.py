@@ -213,7 +213,7 @@ def retrieve_hybrid(
     unless ``settings.query_rewrite_enabled`` is false, in which case the
     deterministic analysis is built directly without the LLM.  Recall defaults
     to ``settings.hybrid_recall_top_k`` and the final cut to
-    ``settings.rerank_top_n``.
+    ``settings.effective_rerank_top_k``.
 
     Scores carry the strategy's own semantics and must not be compared across
     strategies (see the module docstring).  ``rerank_failed=True`` means the
@@ -225,7 +225,7 @@ def retrieve_hybrid(
     if recall_top_k is None:
         recall_top_k = settings.hybrid_recall_top_k
     if top_k is None:
-        top_k = settings.rerank_top_n
+        top_k = settings.effective_rerank_top_k
 
     if analysis is None:
         if settings.query_rewrite_enabled:

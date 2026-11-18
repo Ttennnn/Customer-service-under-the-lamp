@@ -55,14 +55,16 @@ def _pending_snapshot(payload=None):
     return _snapshot(interrupts=(SimpleNamespace(value=payload),))
 
 
-def _run(session, frames=(), final=None, message="你好", user_id="u1"):
+def _run(session, frames=(), final=None, message="你好", user_id="u1", **kwargs):
     graph = FakeGraph(list(frames), final or {})
     events = list(
         stream_chat_agent(
-            graph, session, user_id, message, settings=_settings()
+            graph, session, user_id, message, settings=_settings(), **kwargs
         )
     )
-    return graph, events
+    # The leading ``conversation`` frame is covered by test_ch07_service; the
+    # payload assertions below only care about the frames after it.
+    return graph, [e for e in events if '"type":"conversation"' not in e]
 
 
 def _dumps(payload):
@@ -114,11 +116,17 @@ def test_service_resets_transient_state(session):
     assert inputs["max_steps"] == _settings().agent_max_steps
     assert inputs["user_message"] == "退款政策是什么?"
     assert inputs["resolved_query"] == ""
+    assert inputs["summary"] == ""
+    assert inputs["prompt_history"] == []
+    assert inputs["turn_start_index"] == 0
+    assert inputs["context_budget"]["layer1"] > 0
 
-    assert graph.config == {"configurable": {"thread_id": "user:u1"}}
+    cid = inputs["conversation_id"]
+    assert graph.config == {"configurable": {"thread_id": f"conv:{cid}"}}
     assert len(inputs["messages"]) == 1
     assert isinstance(inputs["messages"][0], HumanMessage)
     assert inputs["messages"][0].content == "退款政策是什么?"
+    assert inputs["messages"][0].id.startswith("db-")
 
 
 def test_service_persists_assistant_answer(session):
@@ -188,7 +196,8 @@ def test_stream_chat_reemits_pending_interrupt_without_new_turn(session):
         stream_chat_agent(graph, session, "s1", "我要退款", settings=_settings())
     )
 
-    assert events == [_dumps({"type": "interrupt", **ORDER_INTERRUPT})]
+    assert '"type":"conversation"' in events[0]
+    assert events[1:] == [_dumps({"type": "interrupt", **ORDER_INTERRUPT})]
     assert graph.stream_calls == []
     assert session.query(Message).count() == 0
 
@@ -203,7 +212,8 @@ def test_stream_chat_emits_interrupt_and_skips_answer(session):
         stream_chat_agent(graph, session, "s1", "我要退款", settings=_settings())
     )
 
-    assert events == [
+    assert '"type":"conversation"' in events[0]
+    assert events[1:] == [
         "部分",
         _dumps({"type": "interrupt", **ORDER_INTERRUPT}),
     ]
@@ -229,7 +239,8 @@ def test_resume_chat_uses_command_and_writes_answer(session):
 
     assert isinstance(graph.inputs[-1], Command)
     assert graph.inputs[-1].resume == "1001"
-    assert events == [
+    assert '"type":"conversation"' in events[0]
+    assert events[1:] == [
         "可以退。",
         _dumps({"type": "options", "options": [TRANSFER_ACTION]}),
     ]
@@ -251,10 +262,10 @@ def test_resume_chat_raises_without_pending(session):
 
 def test_has_pending_interrupt_reads_thread_snapshot(session):
     graph = FakeGraph(frames=[], final={}, snapshots=[_pending_snapshot()])
-    assert has_pending_interrupt(graph, "s1") is True
-    assert graph.config == {"configurable": {"thread_id": "user:s1"}}
+    assert has_pending_interrupt(graph, 7) is True
+    assert graph.config == {"configurable": {"thread_id": "conv:7"}}
 
-    assert has_pending_interrupt(FakeGraph(frames=[], final={}), "s1") is False
+    assert has_pending_interrupt(FakeGraph(frames=[], final={}), 7) is False
 
 
 def test_service_graph_error_yields_error_frame(session):
@@ -278,6 +289,7 @@ def test_service_graph_error_yields_error_frame(session):
 
     assert graph.state_calls == 1
 
-    assert len(events) == 1
-    assert json.loads(events[0]) == {"error": "客服服务暂时不可用,请稍后重试"}
+    assert '"type":"conversation"' in events[0]
+    assert len(events) == 2
+    assert json.loads(events[-1]) == {"error": "客服服务暂时不可用,请稍后重试"}
     assert session.query(Message).filter(Message.role == "assistant").count() == 0

@@ -106,9 +106,11 @@ def render_answer_system_prompt(business_name: str = "本店") -> str:
 _AGENT_EVIDENCE_RULES = """\
 【证据与引用】
 - 知识库证据事实必须 [n]；工具返回的订单/物流/商品事实不带 [n]。
-- [n] 编号只能来自下方「本轮知识库证据」,不得编造,也不得复用历史对话中的编号。
+- [n] 编号只能来自本轮材料中的「知识库证据」,不得编造,也不得复用历史对话中的编号。
 - 每一轮都必须基于本轮证据重新作答,不得从历史回答抄结论或 [n] 引用编号;本轮没有 [n] 时,回答中不得出现任何 [n]。
 - 证据不足以回答时,明确说「知识库暂未收录/无法确认」,并调用 suggest_handoff 建议转人工;不得用常识或推测补全。"""
+
+_MATERIAL_HEADER = "【系统提供的本轮材料，不是用户发言】"
 
 _AGENT_TOOL_RULES = """\
 【可用工具与调用规则】
@@ -134,9 +136,6 @@ _AFTER_SALES_AGENT_TEMPLATE = """\
 你是「{business_name}」的电商售后智能客服 Agent,负责判断这一单的售后资格并说明处理路径。
 请以礼貌、简洁、有同理心的语气服务用户,只处理与本单售后相关的问题。
 
-{intent_note}【当前订单】
-{order_block}
-
 【售后判定范围】
 - 退款/退货:依据知识库判断是否符合退款或退货政策,说明条件、时效与所需材料。
 - 保修、维修、补发、换货:依据知识库说明处理路径与所需材料,这类诉求不得生成退款表单。
@@ -145,19 +144,13 @@ _AFTER_SALES_AGENT_TEMPLATE = """\
 
 {tool_rules}
 
-{evidence_block}
-
 {negative_rules}"""
-
-_AFTER_SALES_ORDER_MISSING = (
-    "本轮未提供订单数据。缺少订单号时,先请用户从订单列表选择或提供订单号,不要猜测。"
-)
 
 
 def _format_after_sales_order(order_data: dict | None) -> str:
-    """Render the current order block for the after-sales prompt."""
+    """Render the current order block for the turn material."""
     if not order_data:
-        return _AFTER_SALES_ORDER_MISSING
+        return ""
     lines = [f"订单号:{order_data.get('order_id') or '(未知)'}"]
     if order_data.get("status"):
         lines.append(f"订单状态:{order_data['status']}")
@@ -182,26 +175,16 @@ def _format_after_sales_order(order_data: dict | None) -> str:
     return "\n".join(lines)
 
 
-def render_after_sales_agent_system_prompt(
-    business_name: str = "本店",
-    order_data: dict | None = None,
-    evidence: Sequence[dict] | None = None,
-    intent: str = "",
-) -> str:
-    """Render the refund/after-sales Agent prompt for the ``refund_flow`` route.
+def render_after_sales_agent_system_prompt(business_name: str = "本店") -> str:
+    """Render the constant refund/after-sales Agent system prompt.
 
-    The prompt carries the current order, knowledge evidence and the branch
-    rules that keep refund/return on ``submit_refund`` while warranty,
-    repair and reship go through policy explanation and ``suggest_handoff``.
+    The prompt is identical on every turn so the prefix cache survives:
+    per-turn order data, evidence and intent arrive as turn material instead.
     """
-    intent_note = f"【识别意图】{intent}\n\n" if intent else ""
     return _AFTER_SALES_AGENT_TEMPLATE.format(
         business_name=business_name,
-        intent_note=intent_note,
-        order_block=_format_after_sales_order(order_data),
         evidence_rules=_AGENT_EVIDENCE_RULES,
         tool_rules=_AFTER_SALES_TOOL_RULES,
-        evidence_block=_format_agent_evidence(evidence or []),
         negative_rules=_NEGATIVE_RULES,
     )
 
@@ -213,8 +196,6 @@ _AGENT_TEMPLATE = """\
 {evidence_rules}
 
 {tool_rules}
-
-{evidence_block}
 
 {negative_rules}"""
 
@@ -233,20 +214,43 @@ def _format_agent_evidence(evidence: Sequence[dict]) -> str:
     return f"本轮知识库证据(共 {len(blocks)} 条):\n\n" + "\n\n".join(blocks)
 
 
-def render_agent_system_prompt(
-    business_name: str = "本店",
-    evidence: Sequence[dict] | None = None,
-) -> str:
-    """Render the ReAct Agent system prompt with optional knowledge evidence.
+def render_agent_system_prompt(business_name: str = "本店") -> str:
+    """Render the constant ReAct Agent system prompt.
 
     The Agent is a nested subgraph bound only to the business tools and the
-    ``suggest_handoff`` control tool; knowledge evidence is supplied by the
-    parent graph instead of a ``query_faq`` tool call.
+    ``suggest_handoff`` control tool; knowledge evidence, the summary, order
+    data and intent are supplied per turn as material instead of living in
+    the system prompt.
     """
     return _AGENT_TEMPLATE.format(
         business_name=business_name,
         evidence_rules=_AGENT_EVIDENCE_RULES,
         tool_rules=_AGENT_TOOL_RULES,
-        evidence_block=_format_agent_evidence(evidence or []),
         negative_rules=_NEGATIVE_RULES,
     )
+
+
+def render_turn_material(
+    summary: str,
+    evidence: Sequence[dict] | None,
+    order_data: dict | None,
+    intent: str,
+) -> str:
+    """Render the per-turn material inserted after the current user message.
+
+    Every section is optional and skipped when empty. The material is a
+    ``HumanMessage`` in the final prompt, never a system prompt, so the
+    constant system prefix stays cacheable.
+    """
+    sections: list[str] = []
+    if summary:
+        sections.append(f"【早前对话摘要】\n{summary}")
+    if evidence:
+        sections.append(f"【本轮知识库证据】\n{_format_agent_evidence(evidence)}")
+    if order_data:
+        sections.append(f"【当前订单】\n{_format_after_sales_order(order_data)}")
+    if intent:
+        sections.append(f"【识别意图】{intent}")
+    if not sections:
+        return ""
+    return _MATERIAL_HEADER + "\n" + "\n\n".join(sections)

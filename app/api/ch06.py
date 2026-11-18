@@ -38,7 +38,12 @@ from app.config import Settings, build_llm, get_settings
 from app.db import session as db_session
 from app.db.session import get_db
 from app.schemas import ChatRequest, RefundRequest, ResumeRequest
-from app.services.history import get_or_create_conversation
+from app.services.history import (
+    ConversationNotFound,
+    get_conversation,
+    get_or_create_conversation,
+    resolve_conversation,
+)
 from app.tools.business import list_user_orders
 from app.tools.context import current_conversation_id
 from app.tools.executor import execute_tool
@@ -53,6 +58,7 @@ CH06_PAGE = Path(__file__).resolve().parents[1] / "static" / "ch06.html"
 
 ERROR_TEXT = "客服服务暂时不可用,请稍后重试"
 NO_PENDING_INTERRUPT = "当前没有待选择的订单"
+CONVERSATION_NOT_FOUND = "会话不存在"
 REFUND_ORDER_INVALID = "订单不存在或不属于当前会话"
 REFUND_CREATE_FAILED = "退款单创建失败,请稍后重试"
 
@@ -61,7 +67,7 @@ def _build_and_cache_graph(app, settings: Settings):
     """Create the checkpointer + graph once and cache them on ``app.state``."""
     handle = None
     try:
-        handle = open_sqlite_checkpointer(settings.ch06_checkpoint_db)
+        handle = open_sqlite_checkpointer(settings.ch07_checkpoint_db)
         llm = build_llm(settings)
         intent_llm = build_llm(
             settings,
@@ -128,19 +134,53 @@ def close_ch06_graph(app) -> None:
         app.state.ch06_graph = None
 
 
+def resolve_request_conversation(
+    session: Session,
+    user_id: str,
+    conversation_id: int | None,
+):
+    """Return the conversation a refund/ticket belongs to.
+
+    An explicit id must exist and belong to ``user_id`` so one user can never
+    attach a row to another user's conversation. Without an id the latest
+    in-progress conversation is used (created if needed).
+    """
+    if conversation_id is None:
+        return get_or_create_conversation(session, user_id)
+    conversation = get_conversation(session, conversation_id, user_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail=CONVERSATION_NOT_FOUND)
+    return conversation
+
+
 def require_pending_interrupt(
     req: ResumeRequest,
     graph=Depends(get_ch06_graph_dep),
+    session: Session = Depends(get_db),
 ):
-    """Answer 409 when the thread is not paused, before any SSE starts.
+    """Answer 409 when the conversation thread is not paused, before SSE.
 
-    This runs as a dependency so a missing interrupt surfaces as a normal
-    HTTP 409 instead of a 200 stream with an error frame.
+    The conversation is resolved first (explicit id or latest in-progress) so
+    the pending check reads the same ``conv:{id}`` thread the generator will
+    resume. This runs as a dependency so a missing interrupt surfaces as a
+    normal HTTP 409 instead of a 200 stream with an error frame.
     """
     try:
-        pending = has_pending_interrupt(graph, req.session_id)
+        conversation = resolve_conversation(
+            session, req.session_id, req.conversation_id, False
+        )
+    except ConversationNotFound:
+        raise HTTPException(
+            status_code=404, detail=CONVERSATION_NOT_FOUND
+        ) from None
+
+    try:
+        pending = has_pending_interrupt(graph, conversation.id)
     except Exception:  # noqa: BLE001 - checkpoint read failure becomes 503
-        logger.exception("ch06 resume pending check failed user_id=%s", req.session_id)
+        logger.exception(
+            "ch06 resume pending check failed conversation_id=%s",
+            conversation.id,
+        )
         raise HTTPException(status_code=503, detail=ERROR_TEXT) from None
 
     if not pending:
@@ -179,6 +219,8 @@ def ch06_chat(
             req.session_id,
             req.message,
             settings=settings,
+            conversation_id=req.conversation_id,
+            new_conversation=req.new_conversation,
         ):
             yield ServerSentEvent(raw_data=payload)
     except Exception:  # noqa: BLE001 - stream already in flight, end cleanly
@@ -209,6 +251,7 @@ def ch06_chat_resume(
             req.session_id,
             req.order_id,
             settings=settings,
+            conversation_id=req.conversation_id,
         ):
             yield ServerSentEvent(raw_data=payload)
     except NoPendingInterrupt:
@@ -245,7 +288,9 @@ def ch06_refund(req: RefundRequest, session: Session = Depends(get_db)):
     if req.order_id not in {order.get("order_id") for order in orders}:
         raise HTTPException(status_code=422, detail=REFUND_ORDER_INVALID)
 
-    conversation = get_or_create_conversation(session, req.session_id)
+    conversation = resolve_request_conversation(
+        session, req.session_id, req.conversation_id
+    )
     token = current_conversation_id.set(conversation.id)
     try:
         result = execute_tool(

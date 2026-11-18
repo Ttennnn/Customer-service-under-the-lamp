@@ -28,15 +28,17 @@ def test_ch06_page_route_serves_html():
     assert "lamp-cs-ch06-session-id" in response.text
 
 
-def test_root_serves_ch06_page_directly():
+def test_root_serves_ch07_page_directly():
+    # The root entry point moved to the ch07 multi-conversation page; /ch06
+    # still serves the previous page.
     with TestClient(app) as client:
         response = client.get("/")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store"
-    assert "lamp-cs-ch06-session-id" in response.text
-    assert "/ch06/chat" in response.text
+    assert "lamp-cs-ch07-user-id" in response.text
+    assert "/ch07/chat" in response.text
 
 
 def test_ch06_page_shell_has_required_contract_strings():

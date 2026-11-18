@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.main import app
 from app.models import Conversation, Ticket
-from app.services.history import get_or_create_conversation
+from app.services.history import create_conversation, get_or_create_conversation
 from app.tools.ticket import TICKET_NO_PATTERN
 
 
@@ -87,6 +87,42 @@ def test_ch05_ticket_writes_ticket_without_transfer(client, session):
 
     stored = session.query(Conversation).filter_by(id=conversation.id).one()
     assert stored.status == "进行中"
+
+
+def test_ch05_ticket_uses_request_conversation_not_latest(client, session):
+    requested = create_conversation(session, "s1")
+    create_conversation(session, "s1")  # newer in-progress conversation
+
+    r = client.post(
+        "/ch05/tickets",
+        json={
+            "session_id": "s1",
+            "description": "售后",
+            "ticket_type": "售后",
+            "conversation_id": requested.id,
+        },
+    )
+
+    assert r.status_code == 200
+    session.expire_all()
+    assert session.query(Ticket).one().conversation_id == requested.id
+
+
+def test_ch05_ticket_rejects_foreign_conversation(client, session):
+    foreign = create_conversation(session, "other")
+
+    r = client.post(
+        "/ch05/tickets",
+        json={
+            "session_id": "s1",
+            "description": "售后",
+            "ticket_type": "售后",
+            "conversation_id": foreign.id,
+        },
+    )
+
+    assert r.status_code == 404
+    assert session.query(Ticket).count() == 0
 
 
 def test_ch05_ticket_defaults_to_consultation(client, session):

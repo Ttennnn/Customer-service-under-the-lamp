@@ -1,7 +1,15 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas import AfterSaleExtraction, AppealType, ChatRequest, ExtractRequest
+from app.schemas import (
+    AfterSaleExtraction,
+    AppealType,
+    ChatRequest,
+    ExtractRequest,
+    RefundRequest,
+    ResumeRequest,
+    TicketRequest,
+)
 
 
 def test_appeal_type_values():
@@ -31,9 +39,41 @@ def test_chat_request_strips_values():
 
 
 def test_ticket_request_accepts_refund():
-    from app.schemas import TicketRequest
     req = TicketRequest(session_id="s", description="x", ticket_type="退款")
     assert req.ticket_type == "退款"
+
+
+def test_chat_request_defaults_and_conversation_fields():
+    req = ChatRequest(session_id="s1", message="hello")
+    assert req.conversation_id is None
+    assert req.new_conversation is False
+
+    req = ChatRequest(
+        session_id="s1", message="hello", conversation_id=3, new_conversation=True
+    )
+    assert req.conversation_id == 3
+    assert req.new_conversation is True
+
+
+@pytest.mark.parametrize(
+    "request_model, payload",
+    [
+        (ChatRequest, {"session_id": "s", "message": "x"}),
+        (ResumeRequest, {"session_id": "s", "order_id": "1001"}),
+        (
+            RefundRequest,
+            {"session_id": "s", "order_id": "1001", "reason": "质量问题"},
+        ),
+        (TicketRequest, {"session_id": "s", "description": "x"}),
+    ],
+)
+def test_conversation_id_must_be_positive(request_model, payload):
+    with pytest.raises(ValidationError):
+        request_model(**payload, conversation_id=0)
+    with pytest.raises(ValidationError):
+        request_model(**payload, conversation_id=-1)
+
+    assert request_model(**payload).conversation_id is None
 
 
 def test_extract_request_rejects_blank_text():

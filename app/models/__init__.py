@@ -1,6 +1,7 @@
 """ORM models package. Importing this populates ``Base.metadata``."""
 
 from app.models.conversation import Conversation
+from app.models.conversation_summary import ConversationSummary
 from app.models.faq import Faq
 from app.models.knowledge import (
     FaithCase,
@@ -13,6 +14,7 @@ from app.models.ticket import Ticket
 
 __all__ = [
     "Conversation",
+    "ConversationSummary",
     "Message",
     "Faq",
     "Ticket",

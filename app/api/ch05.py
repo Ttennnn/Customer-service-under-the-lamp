@@ -15,10 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.ch06 import CH06_PAGE
+from app.api.ch06 import CH06_PAGE, resolve_request_conversation
 from app.db.session import get_db
 from app.schemas import TicketRequest
-from app.services.history import get_or_create_conversation
 from app.tools.context import current_conversation_id
 from app.tools.executor import execute_tool
 from app.tools.ticket import TICKET_NO_PATTERN, create_ticket
@@ -60,7 +59,9 @@ def ch05_ticket(req: TicketRequest, session: Session = Depends(get_db)):
     creating a duplicate ticket.  The conversation status is never changed;
     human transfer is a frontend-only simulation.
     """
-    conversation = get_or_create_conversation(session, req.session_id)
+    conversation = resolve_request_conversation(
+        session, req.session_id, req.conversation_id
+    )
     token = current_conversation_id.set(conversation.id)
     try:
         result = execute_tool(

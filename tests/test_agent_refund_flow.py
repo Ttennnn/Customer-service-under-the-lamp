@@ -162,7 +162,7 @@ def test_fetch_order_rejects_unknown_id_and_interrupts(monkeypatch):
     assert snap.values.get("order_id") is None
 
 
-def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
+def test_fetch_order_resume_fills_slot_and_adds_human_message(monkeypatch):
     calls = []
     _order_tool(monkeypatch, calls)
     # Keep the test hermetic: the resumed graph continues into retrieve_policy,
@@ -189,8 +189,8 @@ def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
     markers = [
         message
         for message in values["messages"]
-        if isinstance(message, SystemMessage)
-        and message.content == "[订单选择器] 用户选择了订单 1001"
+        if isinstance(message, HumanMessage)
+        and message.content == "【订单选择器】用户选择了订单 1001"
     ]
     # The node restarts from the top on resume; the marker must appear once.
     assert len(markers) == 1
@@ -294,8 +294,8 @@ def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):
     markers = [
         message
         for message in values["messages"]
-        if isinstance(message, SystemMessage)
-        and message.content == "[订单选择器] 用户选择了订单 1001"
+        if isinstance(message, HumanMessage)
+        and message.content == "【订单选择器】用户选择了订单 1001"
     ]
     assert len(markers) == 1
     assert isinstance(values["messages"][-1], AIMessage)
@@ -493,9 +493,19 @@ def test_refund_flow_order_then_policy_then_agent(monkeypatch):
     assert result["gate_passed"] is True
     assert result["answer"] == "订单 1001 符合退款条件,请填写退款表单。"
     assert llm.bound_tool_names == ["submit_refund", "suggest_handoff"]
+    # The system prompt stays constant; order and evidence ride in the
+    # per-turn material as a HumanMessage after the user question.
     system_prompt = llm.messages[0].content
-    assert "订单号:1001" in system_prompt
-    assert "[1] 章节:售后/退款政策" in system_prompt
+    assert "订单号:" not in system_prompt
+    assert "[1] 章节:售后/退款政策" not in system_prompt
+    material = next(
+        message.content
+        for message in llm.messages
+        if isinstance(message, HumanMessage)
+        and "【系统提供的本轮材料，不是用户发言】" in message.content
+    )
+    assert "订单号:1001" in material
+    assert "[1] 章节:售后/退款政策" in material
 
 
 def test_refund_gate_failure_skips_agent_and_form(monkeypatch):
@@ -581,5 +591,7 @@ def test_after_sales_repair_does_not_emit_refund_form(monkeypatch):
         "label": "建工单",
         "ticket_type": "售后",
     } in result["suggested_actions"]
-    # The classified intent reaches the after-sales prompt via AgentState.
-    assert "【识别意图】售后" in llm.messages[0].content
+    # The classified intent reaches the Agent as turn material via AgentState.
+    assert any(
+        "【识别意图】售后" in message.content for message in llm.messages
+    )
