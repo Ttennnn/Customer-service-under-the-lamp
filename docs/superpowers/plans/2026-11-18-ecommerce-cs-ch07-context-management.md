@@ -17,7 +17,7 @@
 - 默认 `MODEL_CONTEXT_WINDOW=65536` 下 20 轮稳态历史（20×300=6000）不触发降级/摘要；规划目标 30×300=9000，L1=6300 覆盖这 6000，L2=2700 作缓冲。
 - 预算公式：`history = max(0, min(history_target_turns*history_tokens_per_turn, window - fixed - transient))`；`fixed = 1200 + rerank_top_k*250 + max(500, summary_tokens) + max_output + 10%*window`；`transient = max_user_input + max_agent_steps*tool_result_max`。
 - 中文 token 口径固定 1 字符=1 token；所有预算常数按此校准，改估算必须同时重标常数。
-- 摘要只提炼事实与诉求；不得编造；寒暄不留；prompt 目标 50–200 字，runtime 接受 20–400 字。
+- 摘要只提炼事实与诉求；不得编造；寒暄不留；prompt 目标 50–`effective_cap`，runtime 接受 20..`effective_cap`（`effective_cap=max(50,min(400,SUMMARY_MAX_CHARS))`，默认 200）。
 - 摘要一段一行只追加；旧段永不 UPDATE；`conversations.summary` 只做 `旧投影 + 新段` 追加。
 - system 每个 route 恒定；摘要/证据/订单/意图一律不进 system；订单选择器说明不是 SystemMessage。
 - `[订单选择]` 审计行不进前端历史；摘要任务按「用户选择了订单 N」系统事实行处理。
@@ -606,8 +606,8 @@ git commit -m "feat: prepare layered session context and degrade L1"
   - `run_summary(conversation_id: int, settings: Settings, *, session=None, llm=None) -> SummaryResult`
   - `schedule_summary(conversation_id: int, settings: Settings) -> bool`
   - `shutdown_summary_executor() -> None`
-  - `build_summary_prompt(prior_summary: str, dialogue: str) -> list[BaseMessage]`
-  - `SUMMARY_SYSTEM_PROMPT`, `SUMMARY_MIN_CHARS=20`, `SUMMARY_MAX_CHARS=400`
+  - `build_summary_prompt(prior_summary: str, dialogue: str, max_chars: int = 200) -> list[BaseMessage]`
+  - `SUMMARY_SYSTEM_PROMPT`, `SUMMARY_MIN_CHARS=20`, `SUMMARY_MAX_CHARS=400` (hard ceiling; effective cap = `max(50, min(400, settings.summary_max_chars))`)
 
 - [ ] **Step 1: Write the failing summary-job tests**
 
@@ -685,6 +685,12 @@ def test_run_summary_skips_invalid_output(session):
     assert result.status == "skip" and result.reason == "too_short"
 
 
+def test_run_summary_respects_summary_max_chars(session):
+    conv = _seed(session, layer1_from=4)
+    result = run_summary(conv.id, _settings(summary_max_chars=50), session=session, llm=FakeLLM("好" * 60))
+    assert result.status == "skip" and result.reason == "too_long"
+
+
 def test_schedule_summary_is_non_blocking_and_deduplicated(monkeypatch):
     started, release = threading.Event(), threading.Event()
     def slow(cid, settings):
@@ -711,8 +717,8 @@ Expected: FAIL with `ImportError: app.services.summary_job`.
 - `_get_executor()` lazily creates/recreates a `ThreadPoolExecutor(max_workers=2, thread_name_prefix="ch07-summary")` if it is `None` or was shut down; module-level `_inflight: set[int]`, `_lock: threading.Lock`.
 - `schedule_summary`: under lock, if cid in `_inflight` return False; add; `_get_executor().submit(_run_and_clear, cid, settings)`; return True. `_run_and_clear` calls `run_summary(cid, settings)` without a `session` kwarg (so tests can monkeypatch it), catches/logs all exceptions, and removes cid in `finally`; `run_summary` opens its own session when `session=None`.
 - `run_summary`: open/close a session if none; read conversation; compute range `(summary_upto, layer1_from]`; if empty or `upto <= old upto`, skip; load `list_dialog_messages` filtered to the range, converting `[订单选择]` audit rows to `"用户选择了订单 N"`; `prompt = build_summary_prompt(prior_summary, dialogue)`; call `llm.with_structured_output(SegmentSummary, method="json_mode").invoke(prompt)`; if `llm` is None build with `build_llm(settings, temperature=0.0, model=settings.summary_model or None)`.
-- `build_summary_prompt`: `[SystemMessage(SUMMARY_SYSTEM_PROMPT), HumanMessage(f"【旧摘要，仅作背景，不要合并】\n{prior}\n\n【本段新对话】\n{dialogue}")]`.
-- Validate `20 <= len(summary) <= 400`; else skip with reason.
+- `build_summary_prompt(prior_summary, dialogue, max_chars=200)`: `[SystemMessage(SUMMARY_SYSTEM_PROMPT.format(max_chars=max_chars)), HumanMessage(f"【旧摘要，仅作背景，不要合并】\n{prior}\n\n【本段新对话】\n{dialogue}")]`; the prompt target is `50–{max_chars}`.
+- `effective_cap = max(50, min(400, settings.summary_max_chars))`; validate `20 <= len(summary) <= effective_cap`; else skip with reason.
 - `append_summary_segment(...)`; log start/done with elapsed ms; return `SummaryResult("done", ...)`.
 - `shutdown_summary_executor`: `executor.shutdown(wait=False, cancel_futures=True)`; set `_executor = None` so a later `schedule_summary` can recreate it; make it idempotent.
 - `SUMMARY_SYSTEM_PROMPT` must include the red lines from the spec.
@@ -738,6 +744,7 @@ git commit -m "feat: add asynchronous append-only conversation summaries"
 - Modify: `app/agent/subgraph.py`
 - Modify: `app/agent/state.py`
 - Modify: `app/agent/raw_demo.py`
+- Modify: `app/services/context.py` (filter historical `SystemMessage`s in `assemble_agent_prompt`)
 - Test: `tests/test_ch07_prompt.py`
 - Test: `tests/test_agent_context.py`
 - Update: `tests/test_prompt.py`, `tests/test_agent_subgraph.py`, `tests/test_agent_refund_flow.py`
@@ -869,7 +876,7 @@ Expected: PASS.
 - [ ] **Step 6: Append dev-note and commit**
 
 ```bash
-git add app/prompts/customer_service.py app/agent/subgraph.py app/agent/state.py app/agent/raw_demo.py tests/test_ch07_prompt.py tests/test_agent_context.py tests/test_prompt.py tests/test_agent_subgraph.py tests/test_agent_refund_flow.py dev-notes/ch07.md
+git add app/prompts/customer_service.py app/agent/subgraph.py app/agent/state.py app/agent/raw_demo.py app/services/context.py tests/test_ch07_prompt.py tests/test_agent_context.py tests/test_prompt.py tests/test_agent_subgraph.py tests/test_agent_refund_flow.py dev-notes/ch07.md
 git commit -m "feat: keep the agent system prompt constant and move turn material after the user"
 ```
 

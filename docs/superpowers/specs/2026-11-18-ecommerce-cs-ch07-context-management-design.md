@@ -440,8 +440,9 @@ L1 是锚点之后的历史消息，连同 tool 调用/结果原样保留。切�
    第一条，`upto_msg_id` 取最后一条。
 4. 旧 `conversations.summary` 只作背景传给摘要模型，**不参与合并**；提示词要求只
    输出这一段新消息的事实与诉求。
-5. 严格 JSON `{"summary": "..."}`；解析失败/空/超长 → `summary skip
-   reason=invalid_json|blank|too_long`，不写库。
+5. 严格 JSON `{"summary": "..."}`；解析失败/空/<20/超过
+   `effective_cap=max(50,min(400,SUMMARY_MAX_CHARS))` → `summary skip
+   reason=invalid_json|blank|too_short|too_long`，不写库。
 6. 追加 `conversation_summaries`：`seq = max(seq)+1`；`content` 为新段。
 7. 同一事务更新 `conversations.summary = 旧投影 + "\n\n" + 新段`，
    `summary_upto_msg_id = upto_msg_id`；L1 边界不动。
@@ -455,7 +456,8 @@ L1 是锚点之后的历史消息，连同 tool 调用/结果原样保留。切�
   售后诉求、尚未解决的问题、已确认的处理结论。
 - 对话里没出现的内容一个字不许编；不确定就不写。
 - 寒暄、闲聊、客套、重复确认不留。
-- 长度控制在几十到一两百字（目标 50–200 个汉字）。
+- 长度控制在几十到一两百字：prompt 目标 50–`effective_cap`（默认 200），
+  运行时下限 20、硬上限 400；`effective_cap=max(50,min(400,SUMMARY_MAX_CHARS))`。
 - 只输出 JSON：`{"summary": "<这一段的事实与诉求>"}`，不要解释、不要 Markdown。
 - 旧摘要只作背景；不要把旧摘要的内容重新概括进新段。
 
@@ -769,7 +771,7 @@ UTF-8 `FileHandler` + console，INFO 级别，幂等（重复调用不叠加 han
 | `ASSISTANT_L2_CHARS` | 40 | L2 客服答复保留字数 |
 | `TOOL_RESULT_MARKER_CHARS` | 200 | 大块工具结果阈值 |
 | `SUMMARY_MODEL` | 空 | 摘要模型；空回落 `MODEL_NAME` |
-| `SUMMARY_MAX_CHARS` | 200 | 摘要长度上限 |
+| `SUMMARY_MAX_CHARS` | 200 | 摘要长度上限（prompt 目标与运行时上限，50..400） |
 | `CH07_CHECKPOINT_DB` | `.data/ch07-checkpoints.sqlite` | 共用图的 checkpoint |
 | `CH06_CHECKPOINT_DB` | 旧值 | ch07 起不再读写，仅兼容旧进程/测试 |
 | `MAX_CONTEXT_TOKENS` / `AGENT_TOKEN_BUDGET` | 旧值 | 仅 `/chat`、`raw_demo` 旧链路使用，ch07 退役 |
