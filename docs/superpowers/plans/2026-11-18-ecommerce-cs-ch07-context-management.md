@@ -659,16 +659,18 @@ def test_run_summary_appends_segment_and_advances_upto(session):
 
 def test_run_summary_does_not_rewrite_old_segments(session):
     conv = _seed(session, layer1_from=4)
-    run_summary(conv.id, _settings(), session=session, llm=FakeLLM("旧段"))
+    old = "旧段" + "旧" * 25  # >= 20 chars, passes summary validation
+    new = "新段" + "新" * 25
+    run_summary(conv.id, _settings(), session=session, llm=FakeLLM(old))
     append_message(session, conv.id, "user", "后来问物流")
     append_message(session, conv.id, "assistant", "在路上")
     session.commit()
     conv = get_conversation(session, conv.id)
     conv.layer1_from_msg_id = 6
     session.commit()
-    run_summary(conv.id, _settings(), session=session, llm=FakeLLM("新段"))
+    run_summary(conv.id, _settings(), session=session, llm=FakeLLM(new))
     rows = session.query(ConversationSummary).order_by(ConversationSummary.seq).all()
-    assert [row.content for row in rows] == ["旧段", "新段"]
+    assert [row.content for row in rows] == [old, new]
 
 
 def test_run_summary_skips_empty_range(session):
