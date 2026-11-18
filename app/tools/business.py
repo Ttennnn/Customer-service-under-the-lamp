@@ -7,7 +7,7 @@
 
 所有工具都使用 ``langchain.tools.tool`` 装饰器,通过类型标注与 docstring
 生成参数 schema;函数返回 JSON 字符串(``ensure_ascii=False``,中文原样输出),
-并原样回显入参中的 ``order_id`` / ``product_name``。
+并原样回显入参中的 ``order_id`` / ``product_name`` / ``tracking_no``。
 """
 
 import json
@@ -21,6 +21,7 @@ def query_order(order_id: str) -> str:
     """查询订单信息。
 
     根据订单号查询订单的商品明细、订单金额与订单状态。
+    查询物流时请使用本工具返回的 tracking_no。
 
     Args:
         order_id: 要查询的订单号
@@ -36,8 +37,15 @@ def query_order(order_id: str) -> str:
     ]
     amount = round(sum(item["price"] * item["qty"] for item in items), 2)
     status = random.choice(["待付款", "待发货", "运输中", "已签收"])
+    tracking_no = "SF" + "".join(str(random.randint(0, 9)) for _ in range(10))
     return json.dumps(
-        {"order_id": order_id, "items": items, "amount": amount, "status": status},
+        {
+            "order_id": order_id,
+            "items": items,
+            "amount": amount,
+            "status": status,
+            "tracking_no": tracking_no,
+        },
         ensure_ascii=False,
     )
 
@@ -65,19 +73,19 @@ def query_product(product_name: str) -> str:
 
 
 @tool
-def query_logistics(order_id: str) -> str:
-    """查询订单物流信息。
+def query_logistics(tracking_no: str) -> str:
+    """查询物流信息。
 
-    根据订单号查询物流单号、承运商、当前物流节点与完整物流轨迹。
+    根据物流单号查询物流单号、承运商、当前物流节点与完整物流轨迹。
+    物流单号必须来自 query_order 返回的 tracking_no，不要用订单号或猜测值代替。
 
     Args:
-        order_id: 要查询的订单号
+        tracking_no: 要查询的物流单号
     """
     carriers = ["顺丰速运", "中通快递", "圆通速递", "韵达快递"]
     nodes = ["已揽收", "运输中", "到达转运中心", "派送中", "已签收"]
     descs = ["快件已发出", "快件到达网点", "快件正在派送", "快件已签收"]
 
-    logistics_no = "SF" + "".join(str(random.randint(0, 9)) for _ in range(10))
     carrier = random.choice(carriers)
     current_node = random.choice(nodes)
     traces = [
@@ -86,8 +94,7 @@ def query_logistics(order_id: str) -> str:
     ]
     return json.dumps(
         {
-            "order_id": order_id,
-            "logistics_no": logistics_no,
+            "tracking_no": tracking_no,
             "carrier": carrier,
             "current_node": current_node,
             "traces": traces,

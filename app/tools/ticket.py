@@ -1,13 +1,14 @@
 """工单创建工具。
 
 根据当前会话上下文(``app.tools.context.current_conversation_id``)创建工单:
-生成当日递增的工单号,写入 ``Ticket``(status 默认「待处理」),并把关联
-``Conversation.status`` 置为「已转人工」,返回生成的工单号。
+生成当日递增的工单号,写入 ``Ticket``(status 默认「待处理」),返回生成的
+工单号。只写 tickets 表,不改会话状态;转人工由前端独立模拟。
 
 工具内部自行通过 ``get_session_factory()()`` 开启新会话(工具可能在子线程
 执行,不能复用调用方的会话),提交后关闭;对工单号主键冲突做少量重试。
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -16,8 +17,10 @@ from sqlalchemy.exc import IntegrityError
 from langchain.tools import tool
 
 from app.db import session as db_session
-from app.models import Conversation, Ticket
+from app.models import Ticket
 from app.tools.context import current_conversation_id
+
+TICKET_NO_PATTERN = re.compile(r"^T\d{11}$")
 
 
 @tool
@@ -25,7 +28,8 @@ def create_ticket(description: str, ticket_type: Literal["售后", "投诉", "�
     """创建工单。
 
     为当前会话创建一张工单:工单号按「T + 当日日期(YYYYMMDD) + 三位递增
-    序号」生成;工单状态默认「待处理」,并把关联会话状态置为「已转人工」。
+    序号」生成;工单状态默认「待处理」。只写 tickets 表,不改会话状态;
+    转人工由前端独立模拟。
 
     Args:
         description: 工单描述(问题详情)
@@ -52,9 +56,6 @@ def create_ticket(description: str, ticket_type: Literal["售后", "投诉", "�
                     ticket_type=ticket_type,
                 )
             )
-            conversation = s.get(Conversation, cid)
-            if conversation is not None:
-                conversation.status = "已转人工"
             try:
                 s.commit()
                 break

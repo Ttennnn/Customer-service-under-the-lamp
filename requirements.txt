@@ -9,3 +9,5 @@ sqlalchemy
 pymysql
 pymilvus==3.0.3
 python-multipart
+langgraph==1.2.20
+langgraph-checkpoint-sqlite==3.1.3

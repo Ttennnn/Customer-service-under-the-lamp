@@ -16,6 +16,7 @@ def test_get_or_create_new_after_archived(session):
 def test_load_history_rebuilds_tool_round(session):
     cid = get_or_create_conversation(session, "u1").id
     append_message(session, cid, "user", "物流到哪")
+    # 旧历史参数只回放、不执行，用于验证兼容性
     append_message(session, cid, "assistant", tool_calls=[{"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}])
     append_message(session, cid, "tool", "物流结果", tool_call_id="c1")
     append_message(session, cid, "assistant", "已为您查到")

@@ -1,24 +1,23 @@
 # tests/test_tools_ticket.py
-import re
 from app.db.seed import seed_faq
 from app.models import Conversation, Ticket
 from app.tools.context import current_conversation_id
-from app.tools.ticket import create_ticket
+from app.tools.ticket import TICKET_NO_PATTERN, create_ticket
 
 def _make_conversation(session):
     c = Conversation(user_id="u1", status="进行中")
     session.add(c); session.commit(); session.refresh(c)
     return c.id
 
-def test_create_ticket_writes_and_archives(session):
+def test_create_ticket_writes_only_ticket(session):
     cid = _make_conversation(session)
     current_conversation_id.set(cid)
     out = create_ticket.invoke({"description": "屏幕碎了", "ticket_type": "售后"})
     session.expire_all()
-    assert re.match(r"T\d{8}\d{3}", out)
+    assert TICKET_NO_PATTERN.match(out)
     t = session.query(Ticket).one()
     assert t.conversation_id == cid and t.status == "待处理"
-    assert session.query(Conversation).get(cid).status == "已转人工"
+    assert session.query(Conversation).get(cid).status == "进行中"
 
 def test_create_ticket_without_context_errors(session):
     current_conversation_id.set(None)

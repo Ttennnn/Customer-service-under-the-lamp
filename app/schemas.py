@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -26,6 +27,21 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, description="用户消息")
 
     @field_validator("session_id", "message", mode="before")
+    @classmethod
+    def _strip_not_blank(cls, v: str) -> str:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                raise ValueError("must not be blank")
+        return v
+
+
+class TicketRequest(BaseModel):
+    session_id: str = Field(min_length=1, description="会话 ID")
+    description: str = Field(min_length=1, description="工单描述")
+    ticket_type: Literal["售后", "投诉", "咨询"] = "咨询"
+
+    @field_validator("session_id", "description", mode="before")
     @classmethod
     def _strip_not_blank(cls, v: str) -> str:
         if isinstance(v, str):
