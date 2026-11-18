@@ -888,6 +888,7 @@ git commit -m "feat: keep the agent system prompt constant and move turn materia
 - Modify: `app/agent/graph.py`
 - Modify: `app/agent/coref.py`
 - Modify: `app/agent/intent.py`
+- Modify: `app/agent/subgraph.py` (remove Task 6's retired-kwarg compatibility shim)
 - Modify: `app/rag/retrieval.py`
 - Test: `tests/test_ch07_graph.py`
 - Update: `tests/test_agent_graph.py`, `tests/test_agent_coref.py`, `tests/test_agent_intent.py`, `tests/test_agent_refund_flow.py`, tests that assert SystemMessage picker
@@ -974,6 +975,8 @@ Expected: FAIL (coref still slices `messages[:-1]`).
 - Pass the new subgraph kwargs; remove `token_budget` / `max_context_tokens` from the build call.
 - Change `[: settings.rerank_top_n]` to `[: settings.effective_rerank_top_k]`.
 - In `app/rag/retrieval.py`, replace `settings.rerank_top_n` with `settings.effective_rerank_top_k` in the retrieval top-k selection.
+- Remove Task 6's retired-kwarg compatibility shim from `build_agent_subgraph`; `graph.py` passes only the new signature.
+- Add a graph-level multi-turn test with `messages` containing several user turns, a non-empty `prompt_history`, and a `turn_start_index` at the current user: assert material lands after the current/last user (not the first) and an oversized history is trimmed while current/material survive.
 - Update existing tests that assert `SystemMessage` for the picker or the old subgraph kwargs.
 
 - [ ] **Step 4: Run the graph and existing agent tests**
@@ -984,7 +987,7 @@ Expected: PASS.
 - [ ] **Step 5: Append dev-note and commit**
 
 ```bash
-git add app/agent/graph.py app/agent/coref.py app/agent/intent.py app/rag/retrieval.py tests/test_ch07_graph.py tests/test_agent_graph.py tests/test_agent_coref.py tests/test_agent_intent.py tests/test_agent_refund_flow.py dev-notes/ch07.md
+git add app/agent/graph.py app/agent/coref.py app/agent/intent.py app/agent/subgraph.py app/rag/retrieval.py tests/test_ch07_graph.py tests/test_agent_graph.py tests/test_agent_coref.py tests/test_agent_intent.py tests/test_agent_refund_flow.py dev-notes/ch07.md
 git commit -m "feat: drive ch07 graph from prompt_history and effective retrieval limits"
 ```
 
