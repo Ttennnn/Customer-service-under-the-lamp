@@ -122,3 +122,44 @@ def build_messages(
     blocks = _partition_blocks(history)
     kept = _keep_newest_blocks(blocks, budget, inclusive=True)
     return [system, *kept, current]
+
+
+_ROLE_LABELS = {
+    HumanMessage: "用户",
+    AIMessage: "客服",
+    SystemMessage: "系统",
+}
+
+
+def render_recent_dialogue(
+    messages: Sequence[BaseMessage],
+    max_chars: int = 1200,
+) -> str:
+    """Render recent user/assistant/system text in chronological order.
+
+    Only text content is kept: ``ToolMessage`` is skipped, as are assistant
+    rows with no text (e.g. pure tool calls) and empty messages. Messages are
+    walked newest-first within a *max_chars* budget, so older lines are dropped
+    first. The newest usable line is always kept, even when it alone exceeds
+    the budget, because it is the turn the current question refers back to.
+
+    Each line is ``用户：...`` / ``客服：...`` / ``系统：...``; lines are joined
+    with newlines. Returns ``""`` when nothing usable is found.
+    """
+    lines: list[str] = []
+    used = 0
+    for message in reversed(messages):
+        role = _ROLE_LABELS.get(type(message))
+        if role is None:
+            continue
+        content = message.content
+        if not isinstance(content, str) or not content.strip():
+            continue
+        line = f"{role}：{content}"
+        cost = len(line) + 1  # + newline separator
+        if lines and used + cost > max_chars:
+            break
+        lines.append(line)
+        used += cost
+    lines.reverse()
+    return "\n".join(lines)

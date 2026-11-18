@@ -1,6 +1,11 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.services.context import build_messages, estimate_tokens, trim_messages
+from app.services.context import (
+    build_messages,
+    estimate_tokens,
+    render_recent_dialogue,
+    trim_messages,
+)
 
 
 def test_estimate_tokens_is_len():
@@ -139,3 +144,28 @@ def test_trim_messages_keeps_newest_block_when_system_alone_exceeds_budget():
     msgs = trim_messages(system, history, max_tokens=5)
     # system 已超预算时仍保留最新历史块,只裁更旧的块。
     assert [m.content for m in msgs] == ["S" * 10, "new"]
+
+
+def test_render_recent_dialogue_drops_oldest_within_char_budget():
+    history = [
+        HumanMessage(content="OLD-MESSAGE-" + "x" * 50),
+        AIMessage(content="OLD-ANSWER"),
+        HumanMessage(content="NEW-MESSAGE"),
+    ]
+    text = render_recent_dialogue(history, max_chars=20)
+    # 预算只够最新一条,旧消息被丢弃,最新消息保留。
+    assert "NEW-MESSAGE" in text
+    assert "OLD-ANSWER" not in text
+    assert "OLD-MESSAGE" not in text
+
+
+def test_render_recent_dialogue_keeps_newest_even_when_it_exceeds_budget():
+    history = [HumanMessage(content="old"), HumanMessage(content="X" * 40)]
+    text = render_recent_dialogue(history, max_chars=10)
+    # 最新一条单条超预算也必须保留,更旧的被裁掉。
+    assert "X" * 40 in text
+    assert "old" not in text
+
+
+def test_render_recent_dialogue_empty_history():
+    assert render_recent_dialogue([]) == ""
