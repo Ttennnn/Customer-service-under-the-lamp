@@ -879,6 +879,12 @@
         }
         return;
       }
+      if (frame.type === "conversation") {
+        // Ch07 emits this status frame to tell the page which session is
+        // active; the ch06 page has no sidebar, so ignore it instead of
+        // letting the fallback print the JSON as an assistant token.
+        return;
+      }
       if (frame.type === "options" && Array.isArray(frame.options)) {
         renderOptions(ctx, frame.options);
         return;

@@ -13,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.api.ch05 import api_router as ch05_api_router
 from app.api.ch05 import page_router as ch05_page_router
-from app.api.ch06 import CH06_PAGE
 from app.api.ch06 import api_router as ch06_api_router
 from app.api.ch06 import close_ch06_graph
 from app.api.ch06 import page_router as ch06_page_router
+from app.api.ch07 import CH07_PAGE
 from app.api.ch07 import api_router as ch07_api_router
+from app.api.ch07 import page_router as ch07_page_router
 from app.api.conversations import api_router as conversations_api_router
 from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
@@ -71,6 +72,7 @@ app.include_router(rag_eval_page_router)
 app.include_router(rag_eval_api_router)
 app.include_router(ch06_page_router)
 app.include_router(ch06_api_router)
+app.include_router(ch07_page_router)
 app.include_router(ch07_api_router)
 app.include_router(conversations_api_router)
 app.include_router(ch05_page_router)
@@ -137,13 +139,13 @@ def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
     return result.model_dump()
 
 
-# The root URL is the chat entry point. Chapter 6 owns the chat experience
-# (order picker + refund form), so serve the native page directly at ``/``
-# as well as ``/ch06`` instead of the legacy React widget.
+# The root URL is the chat entry point. Chapter 7 owns the chat experience
+# (multi-conversation sidebar on top of the ch06 order picker/refund form), so
+# serve its native page directly at ``/``; ``/ch06`` keeps the old page.
 @app.get("/", include_in_schema=False)
 def root_chat_page() -> FileResponse:
     return FileResponse(
-        CH06_PAGE,
+        CH07_PAGE,
         media_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
