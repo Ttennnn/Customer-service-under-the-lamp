@@ -35,3 +35,10 @@ def test_root_serves_ch07_and_ch06_still_works(client):
 def test_ch06_page_ignores_conversation_frame():
     text = open("app/static/ch06.html", encoding="utf-8").read()
     assert 'frame.type === "conversation"' in text
+
+
+def test_send_invalidates_pending_history_fetch():
+    text = open("app/static/ch07.html", encoding="utf-8").read()
+    start = text.index("function sendMessage()")
+    end = text.index("composer.addEventListener", start)
+    assert "historyToken += 1;" in text[start:end]

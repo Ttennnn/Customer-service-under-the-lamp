@@ -1200,6 +1200,10 @@
     var text = input.value.trim();
     if (!text) return;
 
+    // A history fetch started by a sidebar switch must not append the old
+    // dialog after this new user message: invalidate it before sending.
+    historyToken += 1;
+
     input.value = "";
     lastUserMessage = text;
     appendMessage("user", text);
