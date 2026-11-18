@@ -282,7 +282,6 @@
   <header>
     <div>
       <h1>客服小猫<span class="tag">ch06</span></h1>
-      <p class="sub">订单选择器 + 退款工单，试试「我要退款」「我要投诉」「你好」。</p>
     </div>
     <div class="links">
       <a href="/kb">知识录入页</a>
@@ -815,7 +814,6 @@
           reasonSelect.disabled = true;
           trigger.textContent = "已提交退款工单";
           trigger.disabled = true;
-          appendSystemMessage("退款单已创建，退款单号：" + ticketNo);
         })
         .catch(function (err) {
           result.className = "form-result error";
