@@ -14,6 +14,31 @@ class ScriptedLLM:
         yield self.chunks.pop(0)
 
 
+class ScriptedStructuredLLM:
+    """Schema-aware fake for coref, intent and query-expansion calls."""
+
+    def __init__(self, resolved: str, intent, queries=None):
+        self.resolved = resolved
+        self.intent = intent
+        self.queries = queries or ["q1", "q2", "q3"]
+        self.schema = None
+        self.messages = []
+
+    def with_structured_output(self, schema, method=None):
+        self.schema = schema
+        return self
+
+    def invoke(self, messages):
+        from app.agent.coref import CorefRewrite
+        from app.rag.query_understanding import QueryExpansion
+        self.messages.extend(messages)
+        if self.schema is CorefRewrite:
+            return CorefRewrite(resolved_query=self.resolved)
+        if self.schema is QueryExpansion:
+            return QueryExpansion(queries=self.queries)
+        return self.intent
+
+
 def text_chunk(text):
     return AIMessageChunk(content=text)
 

@@ -1,13 +1,17 @@
-"""第 5 章父工作流图(设计文档 §6.1-§6.6)。
+"""第 6 章父工作流图(设计文档 §6.1-§6.11)。
 
 父图负责:
 
-- 指代消解(本章透传)与七类意图分类;
-- 硬编码意图 → 四出口路由;
-- 知识类强制预检索 + 置信度闸;闸失败直接写兜底话术,不进 Agent;
-- 投诉 / 闲聊固定话术,不调模型;
-- 业务类与闸通过的知识类进入 Agent ReAct 子图;
+- 指代消解 / Query 改写(``resolve_query``)与八类意图分类;
+- 硬编码意图 → 五出口路由 ``escalate / fallback_script / knowledge /
+  refund_flow / business``;
+- 知识类与退款类强制预检索 + 置信度闸;闸失败直接写兜底话术,不进 Agent;
+- 投诉固定安抚话术、闲聊/其他固定文案,不调模型;
+- 业务类与闸通过的知识/退款类进入 ``main_agent``(ch05 ReAct 子图);
 - 统一结构化日志。
+
+退款子流程的 ``fetch_order`` / ``retrieve_policy`` 在本任务仍是占位节点,
+由 Task 12/13 实现;只有 ``refund_flow`` 路由会走到它们。
 
 图不在 import 时构建:``build_graph`` 由 API 首次请求时懒加载调用。
 """
@@ -30,11 +34,13 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.confidence import assess_confidence
+from app.agent.coref import resolve_query
 from app.agent.intent import classify_intent
 from app.agent.routing import route_for_intent
 from app.agent.state import CustomerServiceState
 from app.agent.subgraph import build_agent_subgraph
 from app.config import Settings, get_settings
+from app.rag.query_understanding import QueryAnalysis, expand_synonyms
 from app.rag.retrieval import retrieve_hybrid
 from app.tools.context import CitationCollector
 from app.tools.faq import order_for_prompt
@@ -51,7 +57,14 @@ COMPLAINT_TEXT = (
     "非常抱歉给您带来不好的体验，您的感受我们很重视。"
     "您可以选择转接人工客服进一步处理，或创建一个工单，我们会尽快跟进。"
 )
-CHITCHAT_TEXT = "您好，我是客服小猫，很高兴为您服务。请问有什么可以帮您的？"
+CHITCHAT_TEXT = (
+    "您好，我是客服小猫，主要帮您处理订单、物流和售后问题。"
+    "请问有什么可以帮您的？"
+)
+OTHER_TEXT = (
+    "抱歉，我还没完全理解您的需求。"
+    "请具体说明您要咨询的订单、物流、商品或售后问题，我再帮您处理。"
+)
 COMPLAINT_ACTIONS: list[dict[str, str]] = [
     {"action": "transfer", "label": "转人工"},
     {"action": "ticket", "label": "建工单", "ticket_type": "投诉"},
@@ -116,24 +129,36 @@ def build_graph(
     )
 
     def resolve_reference(state: CustomerServiceState) -> dict[str, Any]:
-        logger.info("ch05 resolve_reference passthrough")
-        return {"resolved_message": state.get("user_message", "")}
+        message = state.get("user_message", "")
+        history = list(state.get("messages") or [])[:-1]
+        resolved = resolve_query(intent_llm, message, history)
+        return {"resolved_query": resolved}
 
     def classify_intent_node(state: CustomerServiceState) -> dict[str, Any]:
-        message = state.get("resolved_message") or state.get("user_message", "")
-        result = classify_intent(intent_llm, message)
-        return {"intent": result.intent}
+        query = state.get("resolved_query") or state.get("user_message", "")
+        history = list(state.get("messages") or [])[:-1]
+        result = classify_intent(intent_llm, query, history)
+        return {"intent": result.intent, "intent_confidence": result.confidence}
 
-    def route_intent_node(state: CustomerServiceState) -> dict[str, Any]:
+    def route_by_intent(state: CustomerServiceState) -> dict[str, Any]:
         return {"route": route_for_intent(state.get("intent", ""))}
 
     def retrieve_knowledge_node(state: CustomerServiceState) -> dict[str, Any]:
         intent = state.get("intent")
+        query = state.get("resolved_query") or state.get("user_message", "")
+        # Pre-built analysis reuses the coref rewrite instead of asking the
+        # retrieval layer to rewrite the query a second time.
+        analysis = QueryAnalysis(
+            original=state.get("user_message", ""),
+            rewritten=query,
+            keywords=expand_synonyms(query),
+            rewritten_by="llm",
+        )
         try:
-            result = retrieve_hybrid(state["resolved_message"])
+            result = retrieve_hybrid(query, analysis=analysis)
         except Exception:  # noqa: BLE001 - 基础设施故障走保守兜底
             logger.exception(
-                "ch05 retrieval_forced intent=%s failed", intent
+                "ch06 retrieval_forced intent=%s failed", intent
             )
             return {
                 "evidence": [],
@@ -146,7 +171,7 @@ def build_graph(
 
         top_score = max((chunk.score for chunk in result.chunks), default=None)
         logger.info(
-            "ch05 retrieval_forced intent=%s hits=%d top_score=%s rerank_failed=%s",
+            "ch06 retrieval_forced intent=%s hits=%d top_score=%s rerank_failed=%s",
             intent,
             len(result.chunks),
             top_score,
@@ -223,23 +248,43 @@ def build_graph(
             "suggested_actions": [dict(action) for action in COMPLAINT_ACTIONS],
         }
 
-    def chitchat_reply_node(state: CustomerServiceState) -> dict[str, Any]:
-        _emit(CHITCHAT_TEXT)
+    def script_reply_node(state: CustomerServiceState) -> dict[str, Any]:
+        text = OTHER_TEXT if state.get("intent") == "其他" else CHITCHAT_TEXT
+        _emit(text)
         return {
-            "answer": CHITCHAT_TEXT,
-            "messages": [AIMessage(content=CHITCHAT_TEXT)],
+            "answer": text,
+            "messages": [AIMessage(content=text)],
             "suggested_actions": [],
         }
+
+    def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
+        raise NotImplementedError(
+            "ch06 fetch_order is a placeholder; Task 12 replaces this node"
+        )
+
+    def retrieve_policy_node(state: CustomerServiceState) -> dict[str, Any]:
+        raise NotImplementedError(
+            "ch06 retrieve_policy is a placeholder; Task 13 replaces this node"
+        )
 
     def record_log_node(
         state: CustomerServiceState, config: RunnableConfig
     ) -> dict[str, Any]:
         configurable = config.get("configurable", {})
+        suggested_actions = state.get("suggested_actions") or []
+        refund_form = any(
+            isinstance(action, dict) and action.get("action") == "refund_form"
+            for action in suggested_actions
+        )
         payload = {
             "thread_id": configurable.get("thread_id"),
             "conversation_id": state.get("conversation_id"),
+            "resolved_query": state.get("resolved_query"),
             "intent": state.get("intent"),
+            "intent_confidence": state.get("intent_confidence"),
             "route": state.get("route"),
+            "order_id": state.get("order_id"),
+            "expanded_queries": list(state.get("expanded_queries") or []),
             "gate_passed": state.get("gate_passed", False),
             "gate_reason": state.get("gate_reason"),
             "confidence": state.get("confidence"),
@@ -247,50 +292,56 @@ def build_graph(
             "rerank_failed": state.get("rerank_failed", False),
             "tool_steps": state.get("step_count", 0),
             "token_estimate": state.get("token_estimate", 0),
-            "suggested_actions": state.get("suggested_actions") or [],
+            "suggested_actions": suggested_actions,
+            "refund_form": refund_form,
             "answer_chars": len(state.get("answer") or ""),
         }
-        logger.info("ch05 turn_log %s", json.dumps(payload, ensure_ascii=False))
+        logger.info("ch06 turn_log %s", json.dumps(payload, ensure_ascii=False))
         return {}
 
     def route_edge(state: CustomerServiceState) -> str:
         return state["route"]
 
     def gate_edge(state: CustomerServiceState) -> str:
-        return "agent" if state.get("gate_passed") else "record_log"
+        return "main_agent" if state.get("gate_passed") else "record_log"
 
     graph = StateGraph(CustomerServiceState)
     graph.add_node("resolve_reference", resolve_reference)
     graph.add_node("classify_intent", classify_intent_node)
-    graph.add_node("route_intent", route_intent_node)
+    graph.add_node("route_by_intent", route_by_intent)
     graph.add_node("retrieve_knowledge", retrieve_knowledge_node)
     graph.add_node("confidence_gate", confidence_gate_node)
     graph.add_node("complaint_reply", complaint_reply_node)
-    graph.add_node("chitchat_reply", chitchat_reply_node)
-    graph.add_node("agent", agent_subgraph)
+    graph.add_node("script_reply", script_reply_node)
+    graph.add_node("fetch_order", fetch_order_node)
+    graph.add_node("retrieve_policy", retrieve_policy_node)
+    graph.add_node("main_agent", agent_subgraph)
     graph.add_node("record_log", record_log_node)
 
     graph.add_edge(START, "resolve_reference")
     graph.add_edge("resolve_reference", "classify_intent")
-    graph.add_edge("classify_intent", "route_intent")
+    graph.add_edge("classify_intent", "route_by_intent")
     graph.add_conditional_edges(
-        "route_intent",
+        "route_by_intent",
         route_edge,
         {
+            "escalate": "complaint_reply",
+            "fallback_script": "script_reply",
             "knowledge": "retrieve_knowledge",
-            "business": "agent",
-            "complaint": "complaint_reply",
-            "chitchat": "chitchat_reply",
+            "refund_flow": "fetch_order",
+            "business": "main_agent",
         },
     )
     graph.add_edge("retrieve_knowledge", "confidence_gate")
+    graph.add_edge("fetch_order", "retrieve_policy")
+    graph.add_edge("retrieve_policy", "confidence_gate")
     graph.add_conditional_edges(
         "confidence_gate",
         gate_edge,
-        {"agent": "agent", "record_log": "record_log"},
+        {"main_agent": "main_agent", "record_log": "record_log"},
     )
     graph.add_edge("complaint_reply", "record_log")
-    graph.add_edge("chitchat_reply", "record_log")
-    graph.add_edge("agent", "record_log")
+    graph.add_edge("script_reply", "record_log")
+    graph.add_edge("main_agent", "record_log")
     graph.add_edge("record_log", END)
     return graph.compile(checkpointer=checkpointer)
