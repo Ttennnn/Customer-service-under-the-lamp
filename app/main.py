@@ -26,10 +26,13 @@ from app.api.rag_eval import api_router as rag_eval_api_router
 from app.api.rag_eval import page_router as rag_eval_page_router
 from app.config import Settings, build_llm, get_settings
 from app.db.session import get_db
+from app.logging_config import configure_file_logging
 from app.prompts.customer_service import render_system_prompt
 from app.schemas import ChatRequest, ExtractRequest
 from app.services.chat import stream_chat
+from app.services.context_budget import validate_budget
 from app.services.extract import extract_after_sale
+from app.services.summary_job import shutdown_summary_executor
 from app.tools.registry import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -37,11 +40,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Close a lazily-built ch06 graph on shutdown; never build one here."""
+    """Wire logging, self-check the context budget, release on shutdown.
+
+    The ch06 graph is still built lazily on the first request (and the ch07
+    graph is never built here), so startup stays cheap and offline-safe.
+    """
+    configure_file_logging()
+    validate_budget(get_settings())
     try:
         yield
     finally:
         close_ch06_graph(app)
+        shutdown_summary_executor()
 
 
 app = FastAPI(lifespan=lifespan)
