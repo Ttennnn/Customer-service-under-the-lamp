@@ -179,6 +179,7 @@ def build_agent_subgraph(
             system_content = render_after_sales_agent_system_prompt(
                 order_data=state.get("order_data"),
                 evidence=state.get("evidence"),
+                intent=state.get("intent") or "",
             )
         else:
             system_content = render_agent_system_prompt(

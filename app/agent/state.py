@@ -49,6 +49,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     evidence: list[dict]
     route: str
+    intent: str
     order_data: dict
     step_count: int
     token_estimate: int

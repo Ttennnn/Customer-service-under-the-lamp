@@ -25,6 +25,8 @@ from tests.agent_fakes import (
     ScriptedStructuredLLM,
     make_chunk,
     make_retrieval_result,
+    text_chunk,
+    tool_chunk,
 )
 
 CONFIG = {"configurable": {"thread_id": "test-refund-thread"}}
@@ -38,6 +40,20 @@ class ExplodingLLM:
 
     def stream(self, messages):
         raise AssertionError("Agent LLM must not be called")
+
+
+class RecordingScriptedLLM(ScriptedLLM):
+    """ScriptedLLM that records invocation order and the Agent prompt."""
+
+    def __init__(self, chunks, calls):
+        super().__init__(chunks)
+        self.calls = calls
+        self.messages = []
+
+    def stream(self, messages):
+        self.calls.append(("agent_llm", None))
+        self.messages = list(messages)
+        yield from super().stream(messages)
 
 
 def _state(message="能退吗", resolved=None, **overrides):
@@ -60,14 +76,17 @@ def _state(message="能退吗", resolved=None, **overrides):
     return state
 
 
-def _build(intent="退款退货", resolved=None, queries=None, **kwargs):
+def _build(llm=None, *, intent="退款退货", resolved=None, queries=None, **kwargs):
     intent_llm = ScriptedStructuredLLM(
         resolved or "能退吗",
         IntentResult(intent=intent, confidence=0.9),
         queries=queries,
     )
     return build_graph(
-        ExplodingLLM(), intent_llm, checkpointer=InMemorySaver(), **kwargs
+        llm if llm is not None else ExplodingLLM(),
+        intent_llm,
+        checkpointer=InMemorySaver(),
+        **kwargs,
     )
 
 
@@ -260,7 +279,11 @@ def test_retrieve_policy_runs_three_queries_and_merges(monkeypatch, caplog):
         return make_retrieval_result([make_chunk(0.9)])
 
     monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
-    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+    graph = _build(
+        ScriptedLLM([text_chunk("可以申请退款")]),
+        resolved="订单 1001 能退吗",
+        queries=["q1", "q2", "q3"],
+    )
 
     result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
 
@@ -275,8 +298,6 @@ def test_retrieve_policy_runs_three_queries_and_merges(monkeypatch, caplog):
     assert result["gate_passed"] is True
     assert result["gate_reason"] == "ok"
     assert result["confidence"] == 0.9
-    # Task 13 keeps the refund pass edge on record_log; ExplodingLLM would
-    # raise if main_agent were reached.
     assert any(
         "ch06 retrieve_policy order_id=1001" in record.getMessage()
         and "queries=['q1', 'q2', 'q3']" in record.getMessage()
@@ -299,7 +320,10 @@ def test_retrieve_policy_dedupes_and_keeps_max_score(monkeypatch):
     monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
     settings = Settings(_env_file=None, openai_api_key="x", rerank_top_n=2)
     graph = _build(
-        resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"], settings=settings
+        ScriptedLLM([text_chunk("可以申请退款")]),
+        resolved="订单 1001 能退吗",
+        queries=["q1", "q2", "q3"],
+        settings=settings,
     )
 
     result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
@@ -380,3 +404,126 @@ def test_retrieve_policy_low_score_fails_gate(monkeypatch):
     assert result["gate_reason"] == "below_threshold"
     assert result["answer"] == KNOWLEDGE_GAP_TEXT
     assert result["step_count"] == 0
+
+
+def test_refund_flow_order_then_policy_then_agent(monkeypatch):
+    calls = []
+
+    def fake_execute_tool(tool, args, **kwargs):
+        calls.append(("query_order", dict(args)))
+        return json.dumps(DEMO_ORDERS[args["order_id"]], ensure_ascii=False)
+
+    def fake_retrieve(query, **kwargs):
+        calls.append(("retrieve_hybrid", query))
+        return make_retrieval_result([_chunk(1, 0.9)])
+
+    monkeypatch.setattr("app.agent.graph.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
+    llm = RecordingScriptedLLM(
+        [text_chunk("订单 1001 符合退款条件,请填写退款表单。")], calls
+    )
+    graph = _build(llm, resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    # The deterministic path runs in full before the Agent model is invoked.
+    assert calls == [
+        ("query_order", {"order_id": "1001"}),
+        ("retrieve_hybrid", "q1"),
+        ("retrieve_hybrid", "q2"),
+        ("retrieve_hybrid", "q3"),
+        ("agent_llm", None),
+    ]
+    assert result["gate_passed"] is True
+    assert result["answer"] == "订单 1001 符合退款条件,请填写退款表单。"
+    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff"]
+    system_prompt = llm.messages[0].content
+    assert "订单号:1001" in system_prompt
+    assert "[1] 章节:售后/退款政策" in system_prompt
+
+
+def test_refund_gate_failure_skips_agent_and_form(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([_chunk(1, 0.02)]),
+    )
+    # ExplodingLLM would raise if the gate mistakenly reached main_agent.
+    graph = _build(resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert result["gate_passed"] is False
+    assert result["gate_reason"] == "below_threshold"
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
+    assert result["step_count"] == 0
+    assert not any(
+        action.get("action") == "refund_form"
+        for action in result.get("suggested_actions", [])
+    )
+
+
+def test_refund_question_can_emit_refund_form(monkeypatch):
+    tool_calls = []
+    _order_tool(monkeypatch, tool_calls)
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([_chunk(1, 0.9)]),
+    )
+    llm = ScriptedLLM(
+        [
+            tool_chunk("submit_refund", '{"order_id": "1001"}'),
+            text_chunk("符合退款条件,请填写退款表单。"),
+        ]
+    )
+    graph = _build(llm, resolved="订单 1001 能退吗", queries=["q1", "q2", "q3"])
+
+    result = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
+
+    assert {
+        "action": "refund_form",
+        "label": "提交退款工单",
+        "order_id": "1001",
+    } in result["suggested_actions"]
+    assert result["answer"] == "符合退款条件,请填写退款表单。"
+
+
+def test_after_sales_repair_does_not_emit_refund_form(monkeypatch):
+    tool_calls = []
+    calls = []
+    _order_tool(monkeypatch, tool_calls)
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([_chunk(1, 0.9)]),
+    )
+    llm = RecordingScriptedLLM(
+        [
+            tool_chunk(
+                "suggest_handoff",
+                '{"options": ["ticket"], "ticket_type": "售后", "reason": "维修"}',
+            ),
+            text_chunk("该订单可按保修政策维修,已为您记录售后工单建议。"),
+        ],
+        calls,
+    )
+    graph = _build(
+        llm,
+        intent="售后",
+        resolved="订单 1001 保修维修怎么处理",
+        queries=["q1", "q2", "q3"],
+    )
+
+    result = graph.invoke(_state(resolved="订单 1001 保修维修怎么处理"), CONFIG)
+
+    assert not any(
+        action.get("action") == "refund_form"
+        for action in result.get("suggested_actions", [])
+    )
+    assert {
+        "action": "ticket",
+        "label": "建工单",
+        "ticket_type": "售后",
+    } in result["suggested_actions"]
+    # The classified intent reaches the after-sales prompt via AgentState.
+    assert "【识别意图】售后" in llm.messages[0].content

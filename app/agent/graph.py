@@ -10,10 +10,11 @@
 - 业务类与闸通过的知识/退款类进入 ``main_agent``(ch05 ReAct 子图);
 - 统一结构化日志。
 
-退款子流程的 ``fetch_order`` 已实现订单槽位与 interrupt/resume,
-``retrieve_policy`` 已实现多 query 扩写、检索与合并;闸通过后暂时仍落
-``record_log``,由 Task 14 接到 ``main_agent``。只有 ``refund_flow``
-路由会走到它们。
+退款子流程走 ``fetch_order → retrieve_policy → confidence_gate →
+main_agent → record_log``:先校验订单目录并取订单数据,再按 3 条扩写
+query 检索并合并政策证据,闸通过后才把这一单交给售后 Agent;闸失败
+直接写兜底话术并落 ``record_log``,不进 Agent、不出退款表单。只有
+``refund_flow`` 路由会走到这条链。
 
 图不在 import 时构建:``build_graph`` 由 API 首次请求时懒加载调用。
 """
@@ -508,11 +509,9 @@ def build_graph(
         return "retrieve_policy"
 
     def gate_edge(state: CustomerServiceState) -> str:
+        # A failed gate (knowledge gap, infra or rerank failure) is answered by
+        # ``confidence_gate`` and skips the Agent; a passing gate enters it.
         if not state.get("gate_passed"):
-            return "record_log"
-        # Task 14 connects the refund/after-sales agent; until then a passing
-        # refund gate stays on record_log.
-        if state.get("route") == "refund_flow":
             return "record_log"
         return "main_agent"
 
