@@ -37,23 +37,27 @@ _logger = logging.getLogger(__name__)
 
 #: Lower bound of a usable segment, in characters (runtime validation).
 SUMMARY_MIN_CHARS = 20
-#: Upper bound of a segment, in characters (runtime validation).
+#: Hard ceiling of a segment, in characters (runtime validation).
 SUMMARY_MAX_CHARS = 400
-#: Prompt target length, in Chinese characters.
-_SUMMARY_TARGET_CHARS = "50–200"
+#: Default prompt target, in Chinese characters.
+SUMMARY_DEFAULT_MAX_CHARS = 200
 
-SUMMARY_SYSTEM_PROMPT = (
+_SUMMARY_SYSTEM_PROMPT_TEMPLATE = (
     "你是电商客服会话的摘要助手。请把【本段新对话】压缩成一小段事实与诉求摘要。\n"
     "红线：\n"
     "1. 只提炼事实与诉求：问过哪款商品/型号、报过的订单号/手机号、明确的退款/退货/"
     "售后诉求、尚未解决的问题、已确认的处理结论。\n"
     "2. 对话里没出现的内容一个字都不许编造；不确定就不写。\n"
     "3. 寒暄、闲聊、客套、重复确认一律不要保留。\n"
-    f"4. 长度控制在 {_SUMMARY_TARGET_CHARS} 个汉字左右，不得少于 "
-    f"{SUMMARY_MIN_CHARS} 字，不得超过 {SUMMARY_MAX_CHARS} 字。\n"
-    "5. 只输出 JSON：{\"summary\": \"<这一段的事实与诉求>\"}，不要解释，不要 Markdown。\n"
+    "4. 长度控制在 50–{max_chars} 个汉字左右，不要超过 {max_chars} 字。\n"
+    "5. 只输出 JSON：{{\"summary\": \"<这一段的事实与诉求>\"}}，不要解释，不要 Markdown。\n"
     "6. 【旧摘要】只作背景，帮助理解指代；不要把旧摘要的内容重新概括进新段，"
     "不要合并、改写旧摘要。\n"
+)
+
+#: Default system prompt (200-character target); kept importable for eval jobs.
+SUMMARY_SYSTEM_PROMPT = _SUMMARY_SYSTEM_PROMPT_TEMPLATE.format(
+    max_chars=SUMMARY_DEFAULT_MAX_CHARS
 )
 
 
@@ -98,6 +102,12 @@ def _get_executor() -> ThreadPoolExecutor:
     return _executor
 
 
+def _clear_inflight(conversation_id: int) -> None:
+    """Drop the in-flight marker for one conversation (idempotent)."""
+    with _lock:
+        _inflight.discard(conversation_id)
+
+
 def _run_and_clear(conversation_id: int, settings: Settings) -> None:
     """Run one job and always drop the conversation's in-flight marker."""
     try:
@@ -105,8 +115,7 @@ def _run_and_clear(conversation_id: int, settings: Settings) -> None:
     except Exception:  # noqa: BLE001 - background job must never crash silently
         _logger.exception("summary failed conv=%d", conversation_id)
     finally:
-        with _lock:
-            _inflight.discard(conversation_id)
+        _clear_inflight(conversation_id)
 
 
 def schedule_summary(conversation_id: int, settings: Settings) -> bool:
@@ -121,11 +130,22 @@ def schedule_summary(conversation_id: int, settings: Settings) -> bool:
             return False
         _inflight.add(conversation_id)
         try:
-            _get_executor().submit(_run_and_clear, conversation_id, settings)
+            future = _get_executor().submit(
+                _run_and_clear, conversation_id, settings
+            )
         except RuntimeError:
             # The executor was shut down concurrently; do not leak the marker.
             _inflight.discard(conversation_id)
             raise
+
+    # Registered outside ``_lock`` so an already-done/cancelled future cannot
+    # invoke the callback (and re-acquire the lock) on this thread.  This also
+    # clears markers for queued jobs cancelled by ``shutdown`` without ever
+    # starting; ``_run_and_clear``'s ``finally`` stays as a second, idempotent
+    # cleanup path for jobs that do run.
+    future.add_done_callback(
+        lambda _future: _clear_inflight(conversation_id)
+    )
     return True
 
 
@@ -139,11 +159,19 @@ def shutdown_summary_executor() -> None:
 
 
 def build_summary_prompt(
-    prior_summary: str, dialogue: str
+    prior_summary: str,
+    dialogue: str,
+    max_chars: int = SUMMARY_DEFAULT_MAX_CHARS,
 ) -> list[BaseMessage]:
-    """Build the two-message prompt for one segment summary."""
+    """Build the two-message prompt for one segment summary.
+
+    *max_chars* is the configured segment target; the model only sees the
+    ``50–{max_chars}`` guidance, never the runtime 20/400 validation bounds.
+    """
     return [
-        SystemMessage(content=SUMMARY_SYSTEM_PROMPT),
+        SystemMessage(
+            content=_SUMMARY_SYSTEM_PROMPT_TEMPLATE.format(max_chars=max_chars)
+        ),
         HumanMessage(
             content=(
                 f"【旧摘要，仅作背景，不要合并】\n{prior_summary}\n\n"
@@ -154,12 +182,16 @@ def build_summary_prompt(
 
 
 def _render_row(row: Message) -> str:
-    """Render one dialog row as a ``用户：``/``客服：`` line."""
+    """Render one dialog row as a ``用户：``/``客服：`` line.
+
+    ``[订单选择]`` rows are UI audit records, not user speech; they are
+    rendered as a system fact so the model does not attribute them to the user.
+    """
     content = row.content or ""
     if row.role == "user":
         match = _ORDER_AUDIT_RE.match(content)
         if match:
-            content = f"用户选择了订单 {match.group(1)}"
+            return f"系统事实：用户选择了订单 {match.group(1)}"
         return f"用户：{content}"
     return f"客服：{content}"
 
@@ -224,8 +256,13 @@ def run_summary(
                 "boundary_moved", started, from_id=from_id, upto_id=upto_id
             )
 
+        effective_cap = max(
+            50, min(SUMMARY_MAX_CHARS, settings.summary_max_chars)
+        )
         dialogue = "\n".join(_render_row(row) for row in rows)
-        prompt = build_summary_prompt(conversation.summary or "", dialogue)
+        prompt = build_summary_prompt(
+            conversation.summary or "", dialogue, effective_cap
+        )
 
         if llm is None:
             llm = build_llm(
@@ -275,7 +312,7 @@ def run_summary(
         summary = summary.strip()
         if len(summary) < SUMMARY_MIN_CHARS:
             return _skip("too_short", started, from_id=from_id, upto_id=upto_id)
-        if len(summary) > SUMMARY_MAX_CHARS:
+        if len(summary) > effective_cap:
             return _skip("too_long", started, from_id=from_id, upto_id=upto_id)
 
         segment = append_summary_segment(

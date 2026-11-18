@@ -1,10 +1,17 @@
 import threading
 import time
+from types import SimpleNamespace
 from langchain_core.messages import AIMessage
 from app.config import Settings
 from app.models import ConversationSummary
 from app.services.history import append_message, create_conversation, get_conversation
-from app.services.summary_job import run_summary, schedule_summary, shutdown_summary_executor
+from app.services.summary_job import (
+    _render_row,
+    build_summary_prompt,
+    run_summary,
+    schedule_summary,
+    shutdown_summary_executor,
+)
 
 
 class FakeLLM:
@@ -16,8 +23,8 @@ class FakeLLM:
         return type("R", (), {"summary": self.summary})()
 
 
-def _settings():
-    return Settings(_env_file=None, openai_api_key="x")
+def _settings(**kwargs):
+    return Settings(_env_file=None, openai_api_key="x", **kwargs)
 
 
 def _seed(session, summary_upto=None, layer1_from=None):
@@ -38,6 +45,7 @@ def test_run_summary_appends_segment_and_advances_upto(session):
     assert result.status == "done" and result.seq == 1
     updated = get_conversation(session, conv.id)
     assert updated.summary_upto_msg_id == 4
+    assert updated.summary.startswith("第1段:")
     assert "订单 1001" in updated.summary
 
 
@@ -55,6 +63,10 @@ def test_run_summary_does_not_rewrite_old_segments(session):
     run_summary(conv.id, _settings(), session=session, llm=FakeLLM(new))
     rows = session.query(ConversationSummary).order_by(ConversationSummary.seq).all()
     assert [row.content for row in rows] == [old, new]
+    updated = get_conversation(session, conv.id)
+    assert "第1段:" in updated.summary and "第2段:" in updated.summary
+    assert f"第1段:{old}" in updated.summary
+    assert f"第2段:{new}" in updated.summary
 
 
 def test_run_summary_skips_empty_range(session):
@@ -83,3 +95,56 @@ def test_schedule_summary_is_non_blocking_and_deduplicated(monkeypatch):
 def test_shutdown_is_idempotent():
     shutdown_summary_executor()
     shutdown_summary_executor()
+
+
+def test_render_row_marks_order_audit_as_system_fact():
+    line = _render_row(SimpleNamespace(role="user", content="[订单选择] 订单 1001"))
+    assert line == "系统事实：用户选择了订单 1001"
+    assert "用户：" not in line
+    assert "[订单选择]" not in line
+
+
+def test_build_summary_prompt_uses_configured_cap():
+    messages = build_summary_prompt("旧摘要", "用户：你好", max_chars=80)
+    system = messages[0].content
+    assert "50–80" in system
+    assert "400" not in system
+    assert "不得少于 20" not in system
+
+
+def test_run_summary_respects_configured_max_chars(session):
+    conv = _seed(session, layer1_from=4)
+    result = run_summary(
+        conv.id,
+        _settings(summary_max_chars=50),
+        session=session,
+        llm=FakeLLM("长" * 60),
+    )
+    assert result.status == "skip" and result.reason == "too_long"
+
+
+def test_cancelled_queued_job_clears_inflight(monkeypatch):
+    import app.services.summary_job as summary_job
+
+    release, both_started = threading.Event(), threading.Event()
+    running = []
+
+    def slow(cid, settings):
+        if cid <= 2:
+            running.append(cid)
+            if len(running) == 2:
+                both_started.set()
+            release.wait(2)
+
+    monkeypatch.setattr("app.services.summary_job.run_summary", slow)
+    try:
+        assert schedule_summary(1, _settings()) is True
+        assert schedule_summary(2, _settings()) is True
+        assert both_started.wait(2)
+        assert schedule_summary(3, _settings()) is True  # queued behind both workers
+        assert 3 in summary_job._inflight
+        shutdown_summary_executor()
+        assert 3 not in summary_job._inflight
+    finally:
+        release.set()
+        shutdown_summary_executor()
