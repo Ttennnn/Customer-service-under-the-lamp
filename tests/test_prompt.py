@@ -77,6 +77,42 @@ def test_agent_prompt_requires_tracking_no_from_query_order():
     assert "不要用订单号或猜测值代替" in p
 
 
+def test_after_sales_prompt_has_order_and_repair_rules():
+    from app.prompts.customer_service import render_after_sales_agent_system_prompt
+    prompt = render_after_sales_agent_system_prompt(
+        order_data={"order_id": "1001", "status": "已签收"},
+        evidence=[],
+        intent="售后",
+    )
+    assert "1001" in prompt
+    assert "不调用 submit_refund" in prompt
+    assert "退款表单" in prompt
+
+
+def test_after_sales_prompt_covers_refund_and_warranty_branches():
+    from app.prompts.customer_service import render_after_sales_agent_system_prompt
+
+    prompt = render_after_sales_agent_system_prompt(
+        order_data={"order_id": "1001", "status": "已签收"},
+        evidence=[{"n": 1, "section_path": "售后政策", "question": "保修", "answer": "一年保修"}],
+    )
+    assert "退款/退货" in prompt or "退款、退货" in prompt
+    assert "保修" in prompt and "维修" in prompt and "补发" in prompt
+    assert "suggest_handoff" in prompt
+    assert "ticket_type" in prompt and "售后" in prompt
+    assert "[1] 章节:售后政策" in prompt
+    assert "不得编造" in prompt
+    assert "自动提交" in prompt
+
+
+def test_after_sales_prompt_without_order_data_asks_for_order():
+    from app.prompts.customer_service import render_after_sales_agent_system_prompt
+
+    prompt = render_after_sales_agent_system_prompt()
+    assert "未提供订单数据" in prompt
+    assert "不要猜测" in prompt
+
+
 def test_answer_prompt_reuses_blocks_without_tool_list():
     p = render_answer_system_prompt()
     assert "[n]" in p and "不得编造" in p
