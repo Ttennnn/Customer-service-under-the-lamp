@@ -34,26 +34,36 @@ COREF_SYSTEM_PROMPT = """你是电商客服系统的指代消解与 Query 改写
 """
 
 
-def _build_human_message(message: str, history: Sequence[BaseMessage]) -> HumanMessage:
-    """把最近对话渲染进 HumanMessage,让单次调用同时看到上下文和当前问题。"""
+def _build_human_message(
+    message: str,
+    history: Sequence[BaseMessage],
+    summary: str = "",
+) -> HumanMessage:
+    """把最近对话与早前摘要渲染进 HumanMessage,让单次调用看到完整上下文。"""
     recent = render_recent_dialogue(history)
+    prefix = f"(早前对话摘要: {summary})\n" if summary else ""
     if not recent:
-        return HumanMessage(content=message)
-    return HumanMessage(content=f"最近对话：\n{recent}\n\n当前用户消息：{message}")
+        if not prefix:
+            return HumanMessage(content=message)
+        return HumanMessage(content=f"{prefix}\n当前用户消息：{message}")
+    return HumanMessage(
+        content=f"{prefix}最近对话：\n{recent}\n\n当前用户消息：{message}"
+    )
 
 
 def resolve_query(
     llm,
     message: str,
     history: Sequence[BaseMessage] = (),
+    summary: str = "",
 ) -> str:
-    """把 *message* 结合 *history* 补全成独立问题;异常/空输出回退原文。"""
+    """把 *message* 结合 *history* 与 *summary* 补全成独立问题;异常/空输出回退原文。"""
     try:
         structured = llm.with_structured_output(CorefRewrite, method="json_mode")
         result = structured.invoke(
             [
                 SystemMessage(content=COREF_SYSTEM_PROMPT),
-                _build_human_message(message, history),
+                _build_human_message(message, history, summary),
             ]
         )
         resolved = getattr(result, "resolved_query", "") or ""

@@ -110,12 +110,21 @@ def _history_messages(history: Sequence[Any]) -> list[BaseMessage]:
     return messages
 
 
-def _build_human_message(message: str, history: Sequence[Any]) -> HumanMessage:
-    """把最近对话渲染进 HumanMessage,让单次调用同时看到上下文与当前消息。"""
+def _build_human_message(
+    message: str,
+    history: Sequence[Any],
+    summary: str = "",
+) -> HumanMessage:
+    """把最近对话与早前摘要渲染进 HumanMessage,让单次调用看到完整上下文。"""
     recent = render_recent_dialogue(_history_messages(history))
+    prefix = f"(早前对话摘要: {summary})\n" if summary else ""
     if not recent:
-        return HumanMessage(content=message)
-    return HumanMessage(content=f"最近对话：\n{recent}\n\n当前用户消息：{message}")
+        if not prefix:
+            return HumanMessage(content=message)
+        return HumanMessage(content=f"{prefix}\n当前用户消息：{message}")
+    return HumanMessage(
+        content=f"{prefix}最近对话：\n{recent}\n\n当前用户消息：{message}"
+    )
 
 
 def _clamp_confidence(value: Any) -> float:
@@ -135,18 +144,20 @@ def classify_intent(
     history: Sequence[Any] = (),
     *,
     raise_on_error: bool = False,
+    summary: str = "",
 ) -> IntentResult:
     """调用 LLM 分类意图;异常、越界或空输出回退 ``其他``。
 
     ``raise_on_error=True`` 时把异常原样抛给调用方,供评估脚本区分
-    「真实其他」和网络/解析失败。
+    「真实其他」和网络/解析失败;``summary`` 是更早对话的摘要,作为上下文
+    前缀传给模型。
     """
     try:
         structured = llm.with_structured_output(IntentResult, method="json_mode")
         result = structured.invoke(
             [
                 SystemMessage(content=INTENT_SYSTEM_PROMPT),
-                _build_human_message(message, history),
+                _build_human_message(message, history, summary),
             ]
         )
         intent = getattr(result, "intent", None)

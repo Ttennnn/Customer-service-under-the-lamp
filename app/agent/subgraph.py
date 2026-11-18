@@ -161,12 +161,6 @@ def build_agent_subgraph(
     tool_result_max_tokens: int = 2000,
     settings: Settings | None = None,
     tools: Sequence[BaseTool] | None = None,
-    # Retired ch05/ch06 limits. They are accepted (and ignored) until the
-    # parent graph migrates to the ch07 context window; the token budget no
-    # longer cuts the Agent off mid-turn.
-    token_budget: int | None = None,
-    tool_result_max_chars: int | None = None,
-    max_context_tokens: int | None = None,
 ):
     """Return a compiled Agent subgraph (no checkpointer; parent propagates it).
 
@@ -182,24 +176,6 @@ def build_agent_subgraph(
     (used by tests and callers with a fixed tool set).
     """
     settings = settings or get_settings()
-    retired_kwargs = [
-        name
-        for name, value in (
-            ("token_budget", token_budget),
-            ("tool_result_max_chars", tool_result_max_chars),
-            ("max_context_tokens", max_context_tokens),
-        )
-        if value is not None
-    ]
-    if retired_kwargs:
-        _logger.warning(
-            "build_agent_subgraph retired kwargs supplied (%s); they are "
-            "ignored, use max_steps/tool_result_max_tokens/settings instead",
-            ", ".join(retired_kwargs),
-        )
-    if tool_result_max_chars is not None:
-        # Legacy callers still pass the old character cap; one char is one token.
-        tool_result_max_tokens = tool_result_max_chars
     explicit_tools: list[BaseTool] | None = (
         list(tools) if tools is not None else None
     )

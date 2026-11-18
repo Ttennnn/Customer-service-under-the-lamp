@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.config import get_stream_writer
@@ -202,7 +202,7 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
             }
         order_id = selected
         messages.append(
-            SystemMessage(content=f"[订单选择器] 用户选择了订单 {order_id}")
+            HumanMessage(content=f"【订单选择器】用户选择了订单 {order_id}")
         )
 
     logger.info("ch06 fetch_order order_id=%s source=%s", order_id, source)
@@ -226,7 +226,7 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
             "gate_reason": "order_fetch_failed",
         }
         # A valid picker selection already filled the slot; keep it (and its
-        # SystemMessage above) even though the lookup failed.
+        # HumanMessage above) even though the lookup failed.
         if source == "picker":
             failure["order_id"] = order_id
         return failure
@@ -252,22 +252,31 @@ def build_graph(
 
     agent_subgraph = build_agent_subgraph(
         llm,
-        max_steps=settings.agent_max_steps,
-        token_budget=settings.agent_token_budget,
-        tool_result_max_chars=settings.agent_tool_result_max_chars,
-        max_context_tokens=settings.max_context_tokens,
+        max_steps=settings.effective_max_agent_steps,
+        tool_result_max_tokens=settings.effective_tool_result_max_tokens,
+        settings=settings,
     )
 
     def resolve_reference(state: CustomerServiceState) -> dict[str, Any]:
         message = state.get("user_message", "")
-        history = list(state.get("messages") or [])[:-1]
-        resolved = resolve_query(intent_llm, message, history)
+        history = list(state.get("prompt_history") or [])
+        resolved = resolve_query(
+            intent_llm,
+            message,
+            history,
+            summary=state.get("summary") or "",
+        )
         return {"resolved_query": resolved}
 
     def classify_intent_node(state: CustomerServiceState) -> dict[str, Any]:
         query = state.get("resolved_query") or state.get("user_message", "")
-        history = list(state.get("messages") or [])[:-1]
-        result = classify_intent(intent_llm, query, history)
+        history = list(state.get("prompt_history") or [])
+        result = classify_intent(
+            intent_llm,
+            query,
+            history,
+            summary=state.get("summary") or "",
+        )
         return {"intent": result.intent, "intent_confidence": result.confidence}
 
     def route_by_intent(state: CustomerServiceState) -> dict[str, Any]:
@@ -451,7 +460,7 @@ def build_graph(
 
         merged_chunks = sorted(
             merged.values(), key=lambda chunk: chunk.score, reverse=True
-        )[: settings.rerank_top_n]
+        )[: settings.effective_rerank_top_k]
         ordered = order_for_prompt(merged_chunks)
         collector = CitationCollector()
         collector.add(ordered)

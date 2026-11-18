@@ -527,7 +527,7 @@ def test_disabled_query_rewrite_skips_analyzer_and_uses_fallback(
         lambda: SimpleNamespace(
             query_rewrite_enabled=False,
             hybrid_recall_top_k=50,
-            rerank_top_n=10,
+            effective_rerank_top_k=10,
             hybrid_rrf_k=60,
         ),
     )
@@ -556,7 +556,7 @@ def test_injected_analysis_wins_even_when_rewrite_disabled(session, monkeypatch)
         lambda: SimpleNamespace(
             query_rewrite_enabled=False,
             hybrid_recall_top_k=50,
-            rerank_top_n=10,
+            effective_rerank_top_k=10,
             hybrid_rrf_k=60,
         ),
     )

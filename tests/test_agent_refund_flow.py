@@ -162,7 +162,7 @@ def test_fetch_order_rejects_unknown_id_and_interrupts(monkeypatch):
     assert snap.values.get("order_id") is None
 
 
-def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
+def test_fetch_order_resume_fills_slot_and_adds_human_message(monkeypatch):
     calls = []
     _order_tool(monkeypatch, calls)
     # Keep the test hermetic: the resumed graph continues into retrieve_policy,
@@ -189,8 +189,8 @@ def test_fetch_order_resume_fills_slot_and_adds_system_message(monkeypatch):
     markers = [
         message
         for message in values["messages"]
-        if isinstance(message, SystemMessage)
-        and message.content == "[订单选择器] 用户选择了订单 1001"
+        if isinstance(message, HumanMessage)
+        and message.content == "【订单选择器】用户选择了订单 1001"
     ]
     # The node restarts from the top on resume; the marker must appear once.
     assert len(markers) == 1
@@ -294,8 +294,8 @@ def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):
     markers = [
         message
         for message in values["messages"]
-        if isinstance(message, SystemMessage)
-        and message.content == "[订单选择器] 用户选择了订单 1001"
+        if isinstance(message, HumanMessage)
+        and message.content == "【订单选择器】用户选择了订单 1001"
     ]
     assert len(markers) == 1
     assert isinstance(values["messages"][-1], AIMessage)
