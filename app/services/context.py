@@ -223,15 +223,18 @@ def split_layers(
     ``db-`` id. Both boundaries are exclusive: the anchor message itself stays
     in the earlier layer.
 
-    When an anchor is missing (``None``) its sentinel threshold keeps the
-    boundary at the start of the list, and an unanchored history degrades to a
-    single L1. If no user anchor can be found at all, the whole history is L1.
+    A missing ``layer1_from_msg_id`` means no L2 window is closed yet, so the
+    whole history is L1. A missing ``summary_upto_msg_id`` means L2 starts at
+    the beginning. Message ids are global autoincrements, never compared against
+    the number of messages. If no user anchor can be found at all, the whole
+    history is L1.
     """
     items = list(messages)
+    if layer1_from_msg_id is None:
+        return [], items
     l2_threshold = summary_upto_msg_id if summary_upto_msg_id is not None else 0
-    l1_threshold = layer1_from_msg_id if layer1_from_msg_id is not None else len(items)
     l2_start = _first_user_after(items, l2_threshold)
-    l1_start = _first_user_after(items, l1_threshold)
+    l1_start = _first_user_after(items, layer1_from_msg_id)
     if l2_start is None or l1_start is None:
         return [], items
     return items[l2_start:l1_start], items[l1_start:]

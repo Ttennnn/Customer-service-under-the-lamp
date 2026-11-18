@@ -36,6 +36,22 @@ def test_split_layers_null_anchors():
     assert l2 == [] and len(l1) == 8
 
 
+def test_split_layers_null_layer1_anchor_does_not_compare_ids_to_message_count():
+    # db ids are global autoincrements: db-20 must not look "past" a 4-message list.
+    hist = [
+        HumanMessage(content="问1", id="db-2"),
+        AIMessage(content="答1"),
+        HumanMessage(content="问2", id="db-20"),
+        AIMessage(content="答2"),
+    ]
+    l2, l1 = split_layers(hist, summary_upto_msg_id=None, layer1_from_msg_id=None)
+    assert l2 == [] and l1 == hist
+
+    l2, l1 = split_layers(hist, summary_upto_msg_id=None, layer1_from_msg_id=2)
+    assert l2 == hist[:2]
+    assert l1[0].content == "问2" and l1[-1].content == "答2"
+
+
 def test_render_l2_keeps_user_full_prefixes_assistant_and_marks_tool():
     # summary_upto=10 → L2 从 问2 起；layer1_from=20 → L1 从 问3 起
     l2, _ = split_layers(_hist(), 10, 20)
