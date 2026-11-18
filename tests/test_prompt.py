@@ -113,6 +113,20 @@ def test_after_sales_prompt_without_order_data_asks_for_order():
     assert "不要猜测" in prompt
 
 
+def test_after_sales_prompt_never_asks_refund_reason_in_chat():
+    from app.prompts.customer_service import render_after_sales_agent_system_prompt
+
+    prompt = render_after_sales_agent_system_prompt(
+        order_data={"order_id": "1001", "status": "已签收"},
+    )
+    assert "退款/退货原因一律不在对话中追问" in prompt
+    assert "不要询问退款原因" in prompt
+    assert "商品有问题还是不想要了" in prompt
+    assert "质量问题还是七天无理由" in prompt
+    assert "不得用提问替代表单" in prompt
+    assert "固定类目" in prompt
+
+
 def test_answer_prompt_reuses_blocks_without_tool_list():
     p = render_answer_system_prompt()
     assert "[n]" in p and "不得编造" in p
