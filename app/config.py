@@ -1,3 +1,5 @@
+from typing import Literal
+
 from langchain_openai import ChatOpenAI
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,10 +45,20 @@ class Settings(BaseSettings):
     confidence_min_score: float = 0.1
     langgraph_checkpoint_db: str = ".data/ch05-checkpoints.sqlite"
 
+    intent_model: str = ""
+    intent_small_model: str = ""
+    intent_mode: Literal["accuracy", "cost"] = "accuracy"
+    intent_conf_threshold: float = 0.7
+    ch06_checkpoint_db: str = ".data/ch06-checkpoints.sqlite"
 
-def build_llm(settings: Settings, temperature: float = 0.7) -> ChatOpenAI:
+
+def build_llm(
+    settings: Settings,
+    temperature: float = 0.7,
+    model: str | None = None,
+) -> ChatOpenAI:
     return ChatOpenAI(
-        model=settings.model_name,
+        model=model or settings.model_name,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         streaming=True,
