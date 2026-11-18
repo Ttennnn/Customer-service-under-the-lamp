@@ -1,4 +1,6 @@
 # tests/test_tools_ticket.py
+import pytest
+
 from app.db.seed import seed_faq
 from app.models import Conversation, Ticket
 from app.tools.context import current_conversation_id
@@ -23,6 +25,17 @@ def test_create_ticket_without_context_errors(session):
     current_conversation_id.set(None)
     out = create_ticket.invoke({"description": "x", "ticket_type": "咨询"})
     assert "失败" in out or "错误" in out
+
+@pytest.mark.parametrize("ticket_type", ["退款"])
+def test_create_ticket_accepts_refund(session, ticket_type):
+    cid = _make_conversation(session)
+    current_conversation_id.set(cid)
+    out = create_ticket.invoke(
+        {"description": "商品有质量问题,申请退款", "ticket_type": ticket_type}
+    )
+    session.expire_all()
+    assert TICKET_NO_PATTERN.match(out)
+    assert session.query(Ticket).one().ticket_type == "退款"
 
 def test_registry_has_five_tools():
     from app.tools.registry import ALL_TOOLS

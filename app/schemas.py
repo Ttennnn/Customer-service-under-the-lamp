@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
 class TicketRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
     description: str = Field(min_length=1, description="工单描述")
-    ticket_type: Literal["售后", "投诉", "咨询"] = "咨询"
+    ticket_type: Literal["售后", "投诉", "咨询", "退款"] = "咨询"
 
     @field_validator("session_id", "description", mode="before")
     @classmethod
