@@ -1,3 +1,5 @@
+import logging
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agent.subgraph import build_agent_subgraph
@@ -179,6 +181,17 @@ def test_max_steps_runs_finalize(monkeypatch):
     assert result["exhausted"] is True
     assert result["answer"]
     assert {"action": "transfer", "label": "转人工"} in result["suggested_actions"]
+
+
+def test_retired_kwargs_log_deprecation_warning(caplog):
+    caplog.set_level(logging.WARNING)
+    llm = ScriptedLLM([text_chunk("答")])
+    result = build_agent_subgraph(llm, token_budget=1).invoke(_initial_state())
+
+    assert result["answer"] == "答"
+    assert result["exhausted"] is False
+    assert "retired kwargs" in caplog.text
+    assert "token_budget" in caplog.text
 
 
 def test_legacy_token_budget_no_longer_runs_finalize():
