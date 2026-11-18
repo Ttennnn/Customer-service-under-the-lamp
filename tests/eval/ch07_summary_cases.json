@@ -1,0 +1,86 @@
+[
+  {
+    "id": "order-refund",
+    "note": "订单号 + 手机号 + 退款诉求；寒暄不得进入摘要",
+    "history": [
+      {"role": "user", "content": "你好"},
+      {"role": "assistant", "content": "您好，请问有什么可以帮您？"},
+      {"role": "user", "content": "我的订单 1001 想申请退款，手机号 13800000000"},
+      {"role": "assistant", "content": "好的，已为您登记订单 1001 的退款申请，请留意审核结果。"},
+      {"role": "user", "content": "谢谢"},
+      {"role": "assistant", "content": "不客气，祝您生活愉快。"}
+    ],
+    "prior_summary": "",
+    "contains": ["1001", "13800000000", "退款"],
+    "not_contains": ["你好", "谢谢"]
+  },
+  {
+    "id": "product-warranty",
+    "note": "商品型号 + 保修诉求 + 未解决问题（灯不亮）",
+    "history": [
+      {"role": "user", "content": "我买的 LD-200 还在保修期内吗？"},
+      {"role": "assistant", "content": "LD-200 的保修期是购买后 12 个月，请提供订单信息。"},
+      {"role": "user", "content": "现在灯不亮，能保修吗？"},
+      {"role": "assistant", "content": "灯不亮可能是质量问题，可以走保修流程，需要您先寄回检测。"}
+    ],
+    "prior_summary": "用户此前咨询过 LD-200 的价格。",
+    "contains": ["LD-200", "保修", "灯不亮"],
+    "not_contains": ["退款"]
+  },
+  {
+    "id": "chitchat-only",
+    "note": "纯寒暄会话，摘要应极短且不出现业务词",
+    "history": [
+      {"role": "user", "content": "你好"},
+      {"role": "assistant", "content": "您好，请问有什么可以帮您？"},
+      {"role": "user", "content": "在吗"},
+      {"role": "assistant", "content": "在的，您请说。"},
+      {"role": "user", "content": "谢谢"},
+      {"role": "assistant", "content": "不客气，祝您生活愉快。"}
+    ],
+    "prior_summary": "",
+    "contains": [],
+    "not_contains": ["订单", "退款", "手机"],
+    "max_chars": 60
+  },
+  {
+    "id": "order-corrected",
+    "note": "用户先报 1001 后更正为 1002，摘要只保留更正后的订单",
+    "history": [
+      {"role": "user", "content": "我查一下订单 1001 的物流"},
+      {"role": "assistant", "content": "订单 1001 显示已签收。"},
+      {"role": "user", "content": "不好意思说错了，是订单 1002，还没收到"},
+      {"role": "assistant", "content": "我查到订单 1002 正在运输途中，预计明天送达。"}
+    ],
+    "prior_summary": "",
+    "contains": ["1002"],
+    "not_contains": ["1001"]
+  },
+  {
+    "id": "no-fabrication",
+    "note": "对话里没有订单号，摘要不得编造 4 位以上数字",
+    "history": [
+      {"role": "user", "content": "你们家发什么快递？"},
+      {"role": "assistant", "content": "默认发顺丰，偏远地区会转邮政。"},
+      {"role": "user", "content": "那大概几天能到？"},
+      {"role": "assistant", "content": "一般 2 到 3 天送达，具体以物流为准。"}
+    ],
+    "prior_summary": "用户此前询问过发货时间。",
+    "contains": [],
+    "not_contains": [],
+    "not_contains_regex": "\\d{4,}"
+  },
+  {
+    "id": "refund-rejected",
+    "note": "退款被拒绝 + 拒绝原因（超过七天）",
+    "history": [
+      {"role": "user", "content": "订单 1001 的退款怎么还没通过？"},
+      {"role": "assistant", "content": "抱歉，您的退款申请已拒绝退款，原因是超过七天无理由退货期限。"},
+      {"role": "user", "content": "那还能怎么办？"},
+      {"role": "assistant", "content": "可以尝试联系品牌售后检测，若是质量问题可申请保修。"}
+    ],
+    "prior_summary": "",
+    "contains": ["拒绝", "超过七天"],
+    "not_contains": []
+  }
+]
