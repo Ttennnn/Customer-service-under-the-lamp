@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>客服小猫 · ch07</title>
+<title>灯下客服</title>
 <style>
   :root {
     --bg: #171310;
@@ -372,7 +372,7 @@
 <div class="wrap">
   <header>
     <div>
-      <h1>客服小猫<span class="tag">ch07</span></h1>
+      <h1>灯下客服</h1>
     </div>
     <div class="links">
       <a href="/kb">知识录入页</a>
@@ -391,7 +391,7 @@
 
     <main class="chat-panel">
       <div id="messages" class="messages" role="log" aria-live="polite" aria-label="对话消息">
-        <p class="empty" id="empty-hint">您好，我是客服小猫，请问有什么可以帮您的？</p>
+        <p class="empty" id="empty-hint">您好，我是灯下客服，请问有什么可以帮您的？</p>
       </div>
       <form id="composer" class="composer" autocomplete="off">
         <input type="hidden" id="session-key" value="lamp-cs-ch07-user-id">
@@ -416,7 +416,7 @@
   var TICKET_LABEL = "建工单";
   var REFUND_LABEL = "提交退款工单";
   var TRANSFERRED_TEXT = "已转接人工客服";
-  var HUMAN_GREETING = "您好，我是客服小猫，请问有什么可以帮您的？";
+  var HUMAN_GREETING = "您好，我是灯下客服，请问有什么可以帮您的？";
   var REFUND_REASONS = ["七天无理由", "质量问题", "发错货", "不想要了", "其他"];
   // Spec §7.2: 90 seconds without a single byte from the server means the
   // stream is dead. Agent turns may involve several tools, so every reader
@@ -592,7 +592,7 @@
   function appendMessage(role, text) {
     hideEmptyHint();
     var row = el("div", "msg " + role);
-    var labels = { user: "我", assistant: "小猫", system: "系统" };
+    var labels = { user: "我", assistant: "灯下", system: "系统" };
     var avatar = el("span", "avatar", labels[role] || "系统");
     var body = el("div", "body");
     var bubble = el("div", "bubble", role === "system" ? null : text);
@@ -718,7 +718,7 @@
     var orders = Array.isArray(payload.orders) ? payload.orders : [];
     hideEmptyHint();
     var row = el("div", "msg assistant picker-msg");
-    var avatar = el("span", "avatar", "小猫");
+    var avatar = el("span", "avatar", "灯下");
     var body = el("div", "body");
     var bubble = el("div", "bubble picker-bubble");
     bubble.append(el("div", "picker-title", "找到多个订单，请选择要处理的一单："));
