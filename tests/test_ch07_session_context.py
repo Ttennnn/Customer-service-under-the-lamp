@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.config import Settings
 from app.models import Conversation
 from app.services.history import append_message, create_conversation, get_conversation
-from app.services.session_context import prepare_context
+from app.services.session_context import _summary_upto_id, prepare_context
 
 
 def _settings(**kw):
@@ -57,7 +57,30 @@ def test_prepare_context_merges_db_history_before_oldest_state_id(session):
     assert any(m.content == "问1" for m in plan.prompt_history)
 
 
-def test_prepare_context_triggers_summary_when_l2_over_budget(session, monkeypatch):
+def test_prepare_context_prepends_missing_prefix_to_non_empty_state(session):
+    conv, msgs, ids = _seed(session, turns=3)
+    # State 从第二轮开始：第一轮必须补到前面，已在 State 的第二轮不能重复
+    state = msgs[2:]
+    plan = prepare_context(session, conv, state, len(state), _settings())
+    contents = [m.content for m in plan.prompt_history]
+    assert contents[0] == "问0"
+    assert contents.count("问1") == 1
+
+
+def test_prepare_context_rebuild_excludes_current_user(session):
+    conv, msgs, ids = _seed(session, turns=3)
+    plan = prepare_context(
+        session, conv, [], 0, _settings(), current_msg_id=ids[-1][0]
+    )
+    contents = [m.content for m in plan.prompt_history]
+    assert "问0" in contents and "问1" in contents
+    assert "问2" not in contents  # 当前用户行不再补进历史
+
+
+def test_prepare_context_triggers_summary_when_l2_over_budget(
+    session, monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO)
     conv, msgs, ids = _seed(session, turns=6, answer="答" * 400, question="问" + "细" * 500)
     conv.layer1_from_msg_id = ids[-2][1]  # 倒数第二轮 assistant 之后是最后一轮 L1
     session.commit()
@@ -65,11 +88,26 @@ def test_prepare_context_triggers_summary_when_l2_over_budget(session, monkeypat
     monkeypatch.setattr("app.services.session_context.schedule_summary", lambda cid, settings: calls.append(cid) or True)
     prepare_context(session, conv, msgs, len(msgs), _settings())
     assert calls == [conv.id]
+    # 摘取范围必须止于 L1 起点之前，即倒数第二轮 assistant
+    assert f"upto={ids[-2][1]}" in caplog.text
+
+
+def test_summary_upto_uses_layer1_anchor_when_it_is_last_l2_id(session):
+    conv, msgs, ids = _seed(session, turns=2)
+    l2 = [
+        HumanMessage(content="问0", id=f"db-{ids[0][0]}"),
+        AIMessage(content="答0", id=f"db-{ids[0][1]}"),
+    ]
+    assert _summary_upto_id(session, conv.id, l2, [], ids[0][1]) == ids[0][1]
 
 
 def test_prepare_context_does_not_trigger_within_budget(session, monkeypatch):
-    conv, msgs, _ = _seed(session, turns=2)
+    conv, msgs, ids = _seed(session, turns=2)
+    conv.layer1_from_msg_id = ids[0][1]  # L2 非空，但远低于层 2 预算
+    session.commit()
     calls = []
     monkeypatch.setattr("app.services.session_context.schedule_summary", lambda cid, settings: calls.append(cid) or True)
-    prepare_context(session, conv, msgs, len(msgs), _settings())
+    plan = prepare_context(session, conv, msgs, len(msgs), _settings())
+    # 确认真的走到了 token 比较分支：L2 非空且未超预算
+    assert plan.history_l2 and plan.l2_tokens <= plan.budget.layer2
     assert calls == []
