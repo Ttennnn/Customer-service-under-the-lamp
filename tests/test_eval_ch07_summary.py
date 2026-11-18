@@ -40,7 +40,28 @@ def test_evaluate_case_max_chars_and_regex():
 def test_evaluate_case_handles_missing_summary():
     result = evaluate_case({"id": "c3", "contains": ["退款"]}, None)
     assert result["passed"] is False
-    assert "missing" in result["reason"]
+    assert "empty" in result["reason"]
+
+
+def test_evaluate_case_allow_empty_only_for_chitchat():
+    chitchat = {
+        "id": "c4",
+        "contains": [],
+        "not_contains": ["订单", "退款"],
+        "allow_empty": True,
+    }
+    result = evaluate_case(chitchat, "")
+    assert result["passed"] is True
+    assert result["chars"] == 0
+
+    business = {"id": "c5", "contains": ["1001"]}
+    rejected = evaluate_case(business, "")
+    assert rejected["passed"] is False
+    assert "empty" in rejected["reason"]
+
+    # Even a case with no required tokens still needs a real summary.
+    no_tokens = {"id": "c6", "not_contains_regex": r"\d{4,}"}
+    assert evaluate_case(no_tokens, "")["passed"] is False
 
 
 REQUIRED_IDS = {
@@ -72,6 +93,7 @@ def test_cases_schema_and_required_scenarios():
     assert chitchat["contains"] == []
     assert {"订单", "退款", "手机"} <= set(chitchat["not_contains"])
     assert chitchat["max_chars"] == 60
+    assert chitchat["allow_empty"] is True
 
     corrected = by_id["order-corrected"]
     assert corrected["contains"] == ["1002"]

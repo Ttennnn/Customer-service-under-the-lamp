@@ -29,7 +29,7 @@
   },
   {
     "id": "chitchat-only",
-    "note": "纯寒暄会话，摘要应极短且不出现业务词",
+    "note": "纯寒暄会话，摘要应为空（allow_empty）或极短且不出现业务词",
     "history": [
       {"role": "user", "content": "你好"},
       {"role": "assistant", "content": "您好，请问有什么可以帮您？"},
@@ -41,7 +41,8 @@
     "prior_summary": "",
     "contains": [],
     "not_contains": ["订单", "退款", "手机"],
-    "max_chars": 60
+    "max_chars": 60,
+    "allow_empty": true
   },
   {
     "id": "order-corrected",

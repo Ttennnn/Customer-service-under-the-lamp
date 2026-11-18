@@ -7,7 +7,8 @@
 - ``contains``:摘要必须保留的事实(订单号、手机号、型号、诉求、拒绝原因);
 - ``not_contains``:摘要不得残留的内容(寒暄、更正前的旧订单号);
 - ``max_chars``:摘要长度上限(纯寒暄样例要求更短);
-- ``not_contains_regex``:禁止出现的内容模式(如无来源的 4 位以上数字)。
+- ``not_contains_regex``:禁止出现的内容模式(如无来源的 4 位以上数字);
+- ``allow_empty``:纯寒暄样例允许空摘要(运行时按 ``too_short`` 跳过)。
 
 :func:`load_cases` / :func:`build_dialogue` / :func:`evaluate_case` /
 :func:`summarize` 是纯函数;导入本模块不会构建 LLM,也不会访问网络。只有
@@ -49,9 +50,10 @@ PASS_OVERALL = 0.90
 
 #: 生成报告时写入的 prompt 调整记录;若本轮调整了 prompt,在运行前改这里。
 PROMPT_NOTE = (
-    "无。本次验证未修改 `app/services/summary_job.py` 的 "
-    "`SUMMARY_SYSTEM_PROMPT`;评估使用 200 字默认模板"
-    "(`build_summary_prompt` 的默认 `max_chars`)。"
+    "本次验证为 `app/services/summary_job.py` 的 `SUMMARY_SYSTEM_PROMPT` "
+    "新增两条红线:(7) 整段只有问候/寒暄且无事实或明确诉求时 summary 留空;"
+    "(8) 同一事实被用户更正后只保留最新值,不重复被更正的旧值。"
+    "评估使用 200 字默认模板(`build_summary_prompt` 的默认 `max_chars`)。"
 )
 
 _ROLE_LABELS = {"user": "用户", "assistant": "客服", "system": "系统"}
@@ -81,10 +83,28 @@ def evaluate_case(case: dict, summary: str | None) -> dict:
     Returns ``{"id", "passed", "reason", "chars"}``. A case passes only when
     every ``contains`` token is present, no ``not_contains`` token is present,
     the text fits ``max_chars`` (when given) and ``not_contains_regex`` (when
-    given) does not match.
+    given) does not match. ``allow_empty`` marks pure-chitchat cases where an
+    empty summary is the correct answer; all other cases reject empty output.
     """
     text = summary.strip() if isinstance(summary, str) else ""
     reasons: list[str] = []
+
+    if not text:
+        # Pure chitchat segments should yield an empty summary (the runtime
+        # skips it as too_short); every other case still needs real content.
+        if case.get("allow_empty"):
+            return {
+                "id": case.get("id", ""),
+                "passed": True,
+                "reason": "ok (empty allowed for chitchat)",
+                "chars": 0,
+            }
+        return {
+            "id": case.get("id", ""),
+            "passed": False,
+            "reason": "empty summary",
+            "chars": 0,
+        }
 
     missing = [token for token in case.get("contains") or [] if token not in text]
     if missing:

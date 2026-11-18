@@ -53,6 +53,9 @@ _SUMMARY_SYSTEM_PROMPT_TEMPLATE = (
     "5. 只输出 JSON：{{\"summary\": \"<这一段的事实与诉求>\"}}，不要解释，不要 Markdown。\n"
     "6. 【旧摘要】只作背景，帮助理解指代；不要把旧摘要的内容重新概括进新段，"
     "不要合并、改写旧摘要。\n"
+    "7. 如果整段对话只有问候、寒暄、客套，没有任何事实或明确诉求，summary 留空"
+    "（空字符串），不要为了凑长度列举业务类别。\n"
+    "8. 同一事实被用户更正后（订单号、手机号等），只保留最新值，不重复被更正的旧值。\n"
 )
 
 #: Default system prompt (200-character target); kept importable for eval jobs.
