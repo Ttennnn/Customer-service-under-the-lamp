@@ -11,10 +11,12 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from app.api.ch05 import CH05_PAGE
 from app.api.ch05 import api_router as ch05_api_router
-from app.api.ch05 import close_ch05_graph
 from app.api.ch05 import page_router as ch05_page_router
+from app.api.ch06 import CH06_PAGE
+from app.api.ch06 import api_router as ch06_api_router
+from app.api.ch06 import close_ch06_graph
+from app.api.ch06 import page_router as ch06_page_router
 from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
 from app.api.rag_eval import api_router as rag_eval_api_router
@@ -32,21 +34,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Close a lazily-built ch05 graph on shutdown; never build one here."""
+    """Close a lazily-built ch06 graph on shutdown; never build one here."""
     try:
         yield
     finally:
-        close_ch05_graph(app)
+        close_ch06_graph(app)
 
 
 app = FastAPI(lifespan=lifespan)
 
-# Populated on the first /ch05/chat request by ``get_ch05_graph_dep``.  State
-# is initialised here so the lifespan and dependency share one lock without
+# Populated on the first /ch06 request by ``get_ch06_graph_dep``.  State is
+# initialised here so the lifespan and dependency share one lock without
 # constructing any LLM or opening the SQLite checkpoint at import time.
-app.state.ch05_graph = None
-app.state.ch05_checkpoint_handle = None
-app.state.ch05_graph_lock = threading.Lock()
+app.state.ch06_graph = None
+app.state.ch06_checkpoint_handle = None
+app.state.ch06_graph_lock = threading.Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,6 +67,8 @@ app.include_router(kb_page_router)
 app.include_router(kb_api_router)
 app.include_router(rag_eval_page_router)
 app.include_router(rag_eval_api_router)
+app.include_router(ch06_page_router)
+app.include_router(ch06_api_router)
 app.include_router(ch05_page_router)
 app.include_router(ch05_api_router)
 
@@ -129,12 +133,12 @@ def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
     return result.model_dump()
 
 
-# The root URL is the chat entry point. Chapter 5 owns the chat experience
-# (including the complaint buttons), so serve the native page directly at
-# ``/`` as well as ``/ch05`` instead of the legacy React widget.
+# The root URL is the chat entry point. Chapter 6 owns the chat experience
+# (order picker + refund form), so serve the native page directly at ``/``
+# as well as ``/ch06`` instead of the legacy React widget.
 @app.get("/", include_in_schema=False)
 def root_chat_page() -> FileResponse:
-    return FileResponse(CH05_PAGE, media_type="text/html")
+    return FileResponse(CH06_PAGE, media_type="text/html")
 
 
 # The legacy Vite/React widget is still mounted for any static assets when a

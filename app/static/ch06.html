@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>客服小猫 · ch06</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 20px; }
+    #messages { min-height: 240px; background: #fff; border-radius: 8px; padding: 12px; }
+    #messages p { margin: 6px 0; white-space: pre-wrap; }
+    form { display: flex; gap: 8px; margin-top: 12px; }
+    input { flex: 1; padding: 10px; border: 1px solid #ccd; border-radius: 6px; }
+    button { padding: 10px 18px; border: 0; border-radius: 6px; background: #2f6fed; color: #fff; }
+    button:disabled { background: #9db3e6; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>客服小猫（第六章占位页）</h1>
+    <div id="messages"></div>
+    <form id="chat-form">
+      <input id="message" name="message" type="text" autocomplete="off"
+             placeholder="请输入您的问题" required>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </main>
+  <script>
+    // Task 17 会补订单卡片与退款表单；这里只保留最小发送占位。
+    const SESSION_KEY = "lamp-cs-ch06-session-id";
+    const sessionId = localStorage.getItem(SESSION_KEY) ||
+      (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    localStorage.setItem(SESSION_KEY, sessionId);
+
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("message");
+    const messages = document.getElementById("messages");
+
+    function append(text) {
+      const p = document.createElement("p");
+      p.textContent = text;
+      messages.appendChild(p);
+      return p;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      append("我：" + text);
+      const reply = append("");
+      try {
+        const res = await fetch("/ch06/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, message: text }),
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop();
+          for (const event of events) {
+            const line = event.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+            reply.textContent += data;
+          }
+        }
+      } catch (err) {
+        reply.textContent = "客服服务暂时不可用，请稍后重试";
+      }
+    });
+  </script>
+</body>
+</html>

@@ -62,3 +62,42 @@ class ExtractRequest(BaseModel):
             if not v:
                 raise ValueError("must not be blank")
         return v
+
+
+# 退款原因固定类目（前后端同一份），由前端下拉选择，后端校验。
+REFUND_REASONS: tuple[str, ...] = (
+    "七天无理由",
+    "质量问题",
+    "发错货",
+    "不想要了",
+    "其他",
+)
+
+
+class ResumeRequest(BaseModel):
+    session_id: str = Field(min_length=1, description="会话 ID")
+    order_id: str = Field(min_length=1, description="用户选择的订单号")
+
+    @field_validator("session_id", "order_id", mode="before")
+    @classmethod
+    def _strip_not_blank(cls, v: str) -> str:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                raise ValueError("must not be blank")
+        return v
+
+
+class RefundRequest(BaseModel):
+    session_id: str = Field(min_length=1, description="会话 ID")
+    order_id: str = Field(min_length=1, description="退款订单号")
+    reason: Literal[*REFUND_REASONS] = Field(description="退款原因")
+
+    @field_validator("session_id", "order_id", mode="before")
+    @classmethod
+    def _strip_not_blank(cls, v: str) -> str:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                raise ValueError("must not be blank")
+        return v
