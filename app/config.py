@@ -1,6 +1,7 @@
 from typing import Literal
 
 from langchain_openai import ChatOpenAI
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,6 +89,13 @@ class Settings(BaseSettings):
     @property
     def effective_rerank_top_k(self) -> int:
         return self.rerank_top_k if self.rerank_top_k is not None else self.rerank_top_n
+
+    @field_validator("max_agent_steps", "tool_result_max_tokens", "rerank_top_k", mode="before")
+    @classmethod
+    def _blank_optional_int_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 def build_llm(

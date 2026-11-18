@@ -38,3 +38,21 @@ def test_window_only_goes_to_zero_and_warns(caplog):
     b = validate_budget(s)
     assert b.history == 0
     assert any("上下文预算不足" in rec.message for rec in caplog.records)
+
+
+def test_layer1_ratio_is_honored():
+    s = _base(model_context_window=18000, max_output_tokens=2000, max_user_input_tokens=2000,
+              max_agent_steps=3, tool_result_max_tokens=1200, rerank_top_k=5,
+              layer1_ratio=0.5)
+    b = compute_budget(s)
+    assert (b.history, b.layer1, b.layer2) == (5650, 2825, 2825)
+
+
+def test_blank_optional_env_values_fall_back():
+    s = _base(max_agent_steps="", tool_result_max_tokens=" ", rerank_top_k="")
+    assert s.max_agent_steps is None
+    assert s.tool_result_max_tokens is None
+    assert s.rerank_top_k is None
+    assert s.effective_max_agent_steps == s.agent_max_steps
+    assert s.effective_tool_result_max_tokens == s.agent_tool_result_max_chars
+    assert s.effective_rerank_top_k == s.rerank_top_n

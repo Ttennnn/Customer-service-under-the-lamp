@@ -37,7 +37,7 @@ def compute_budget(settings: Settings, summary_tokens: int = 0) -> ContextBudget
     surplus = settings.model_context_window - fixed - transient
     target = settings.history_target_turns * settings.history_tokens_per_turn
     history = max(0, min(target, surplus))
-    layer1 = history * 7 // 10
+    layer1 = int(round(history * settings.layer1_ratio))
     layer2 = history - layer1
     return ContextBudget(
         window=settings.model_context_window,
