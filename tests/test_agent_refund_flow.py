@@ -84,17 +84,22 @@ def test_extract_order_id_patterns():
     assert extract_order_id("订单号：1002") == "1002"
     assert extract_order_id("1003号订单") == "1003"
     assert extract_order_id("金额 299 元") is None
+    assert extract_order_id("金额 1299 元") is None
+    assert extract_order_id("1299 元") is None
+    assert extract_order_id("1299块") is None
     assert extract_order_id("2026年能退吗") is None
 
 
 def test_fetch_order_rejects_unknown_id_and_interrupts(monkeypatch):
     calls = []
     _order_tool(monkeypatch, calls)
-    graph = _build()
+    graph = _build(resolved="订单 1004 能退吗")
 
     snap = _run_to_interrupt(graph, resolved="订单 1004 能退吗")
 
     assert snap.interrupts
+    # Prove the catalog-external ID actually reached the node and was rejected.
+    assert snap.values["resolved_query"] == "订单 1004 能退吗"
     payload = snap.interrupts[0].value
     assert payload["kind"] == "select_order"
     assert payload["slot"] == "order_id"
@@ -165,6 +170,36 @@ def test_fetch_order_valid_id_from_message_calls_query_once(monkeypatch):
     assert values["order_data"]["order_id"] == "1001"
     assert calls == [("query_order", {"order_id": "1001"})]
     assert not graph.get_state(CONFIG).interrupts
+
+
+def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):
+    calls = []
+
+    def failing_execute_tool(tool, args, **kwargs):
+        calls.append((tool.name, dict(args)))
+        return "工具执行失败"
+
+    monkeypatch.setattr("app.agent.graph.execute_tool", failing_execute_tool)
+    graph = _build()
+
+    _run_to_interrupt(graph)
+    list(graph.stream(Command(resume="1001"), CONFIG, stream_mode="custom"))
+    values = graph.get_state(CONFIG).values
+
+    assert values["answer"] == ORDER_FAILED_TEXT
+    assert values["gate_reason"] == "order_fetch_failed"
+    assert values["order_id"] == "1001"
+    assert values.get("order_data") is None
+    markers = [
+        message
+        for message in values["messages"]
+        if isinstance(message, SystemMessage)
+        and message.content == "[订单选择器] 用户选择了订单 1001"
+    ]
+    assert len(markers) == 1
+    assert isinstance(values["messages"][-1], AIMessage)
+    assert values["messages"][-1].content == ORDER_FAILED_TEXT
+    assert calls == [("query_order", {"order_id": "1001"})]
 
 
 def test_fetch_order_tool_failure_falls_back(monkeypatch):

@@ -122,6 +122,8 @@ _ORDER_PREFIX_RE = re.compile(r"订单(?:号)?[：:\s]*([0-9]{4,})")
 _ORDER_SUFFIX_RE = re.compile(r"([0-9]{4,})\s*号订单")
 _BARE_NUMBER_RE = re.compile(r"(?<![0-9])([0-9]{4,})(?![0-9])")
 _DATE_UNITS = ("年", "月", "日")
+_AMOUNT_UNITS = ("元", "块", "¥", "￥", "$")
+_AMOUNT_PREFIXES = ("金额", "价格", "售价", "¥", "￥", "$")
 
 
 def extract_order_id(text: str) -> str | None:
@@ -129,7 +131,7 @@ def extract_order_id(text: str) -> str | None:
 
     Order-adjacent numbers (``订单 1001`` / ``1001号订单``) win; a bare
     number is accepted only as a last resort and never when it looks like a
-    year or a date component.
+    year, a date component, or a monetary amount.
     """
     for pattern in (_ORDER_PREFIX_RE, _ORDER_SUFFIX_RE):
         match = pattern.search(text)
@@ -137,7 +139,11 @@ def extract_order_id(text: str) -> str | None:
             return match.group(1)
     for match in _BARE_NUMBER_RE.finditer(text):
         candidate = match.group(1)
-        if text[match.end() : match.end() + 1] in _DATE_UNITS:
+        after = text[match.end() :].lstrip()
+        if after[:1] in _DATE_UNITS or after[:1] in _AMOUNT_UNITS:
+            continue
+        before = text[: match.start()].rstrip()
+        if before.endswith(_AMOUNT_PREFIXES):
             continue
         if 1900 <= int(candidate) <= 2099:
             continue
@@ -195,12 +201,17 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - 工具/解析失败走兜底,不进 Agent
         logger.exception("ch06 fetch_order failed order_id=%s", order_id)
         _emit(ORDER_FAILED_TEXT)
-        return {
+        failure: dict[str, Any] = {
             "answer": ORDER_FAILED_TEXT,
-            "messages": [AIMessage(content=ORDER_FAILED_TEXT)],
+            "messages": [*messages, AIMessage(content=ORDER_FAILED_TEXT)],
             "gate_passed": False,
             "gate_reason": "order_fetch_failed",
         }
+        # A valid picker selection already filled the slot; keep it (and its
+        # SystemMessage above) even though the lookup failed.
+        if source == "resume":
+            failure["order_id"] = order_id
+        return failure
 
     return {"order_id": order_id, "order_data": order_data, "messages": messages}
 
