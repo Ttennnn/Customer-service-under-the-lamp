@@ -12,9 +12,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.api.ch06 import CH06_PAGE
 from app.db.session import get_db
 from app.schemas import TicketRequest
 from app.services.history import get_or_create_conversation
@@ -30,10 +31,14 @@ page_router = APIRouter()
 TICKET_CREATE_FAILED = "工单创建失败,请稍后重试"
 
 
-@page_router.get("/ch05")
-def ch05_page() -> RedirectResponse:
-    """Redirect the retired ch05 page to the ch06 chat page."""
-    return RedirectResponse(url="/ch06", status_code=307)
+@page_router.get("/ch05", response_class=FileResponse)
+def ch05_page() -> FileResponse:
+    """Serve the latest ch06 chat page at the legacy /ch05 URL."""
+    return FileResponse(
+        CH06_PAGE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @api_router.post("/chat")

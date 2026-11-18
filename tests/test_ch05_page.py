@@ -7,12 +7,15 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-def test_ch05_page_redirects_to_ch06():
+def test_ch05_page_serves_latest_ch06_page():
     with TestClient(app) as client:
-        response = client.get("/ch05", follow_redirects=False)
+        response = client.get("/ch05")
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/ch06"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    assert "lamp-cs-ch06-session-id" in response.text
+    assert "/ch06/chat" in response.text
 
 
 def test_ch06_page_route_serves_html():
@@ -21,6 +24,7 @@ def test_ch06_page_route_serves_html():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
     assert "lamp-cs-ch06-session-id" in response.text
 
 
@@ -30,6 +34,7 @@ def test_root_serves_ch06_page_directly():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
     assert "lamp-cs-ch06-session-id" in response.text
     assert "/ch06/chat" in response.text
 

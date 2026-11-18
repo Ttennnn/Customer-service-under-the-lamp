@@ -138,7 +138,11 @@ def extract(req: ExtractRequest, llm=Depends(get_llm_dep)):
 # as well as ``/ch06`` instead of the legacy React widget.
 @app.get("/", include_in_schema=False)
 def root_chat_page() -> FileResponse:
-    return FileResponse(CH06_PAGE, media_type="text/html")
+    return FileResponse(
+        CH06_PAGE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # The legacy Vite/React widget is still mounted for any static assets when a

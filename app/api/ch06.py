@@ -151,7 +151,11 @@ def require_pending_interrupt(
 @page_router.get("/ch06", response_class=FileResponse)
 def ch06_page() -> FileResponse:
     """Serve the self-contained ch06 chat page."""
-    return FileResponse(CH06_PAGE, media_type="text/html")
+    return FileResponse(
+        CH06_PAGE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @api_router.post("/chat", response_class=EventSourceResponse)

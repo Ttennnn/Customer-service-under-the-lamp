@@ -23,11 +23,11 @@ def client(session):
     app.dependency_overrides.clear()
 
 
-def test_ch05_page_redirects_to_ch06(client):
+def test_ch05_page_serves_latest_ch06_page(client):
     r = client.get("/ch05", follow_redirects=False)
 
-    assert r.status_code == 307
-    assert r.headers["location"] == "/ch06"
+    assert r.status_code == 200
+    assert "lamp-cs-ch06-session-id" in r.text
 
 
 def test_ch05_page_redirect_lands_on_ch06(client):

@@ -46,8 +46,10 @@ def test_ch06_page_and_root(client):
     assert "lamp-cs-ch06-session-id" in client.get("/ch06").text
 
 
-def test_ch05_redirects(client):
-    assert client.get("/ch05", follow_redirects=False).status_code == 307
+def test_ch05_page_serves_latest_and_chat_redirects(client):
+    page = client.get("/ch05", follow_redirects=False)
+    assert page.status_code == 200
+    assert "lamp-cs-ch06-session-id" in page.text
     assert (
         client.post(
             "/ch05/chat",
@@ -58,15 +60,13 @@ def test_ch05_redirects(client):
     )
 
 
-def test_ch05_redirects_point_at_ch06(client):
-    page = client.get("/ch05", follow_redirects=False)
+def test_ch05_chat_redirects_point_at_ch06_chat(client):
     chat = client.post(
         "/ch05/chat",
         json={"session_id": "s", "message": "x"},
         follow_redirects=False,
     )
 
-    assert page.headers["location"] == "/ch06"
     assert chat.headers["location"] == "/ch06/chat"
 
 
