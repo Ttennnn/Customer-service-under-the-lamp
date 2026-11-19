@@ -1,10 +1,11 @@
 """统一工具执行引擎。
 
 所有工具调用走同一条管道:校验 → 权限门 → 执行(超时/重试) →
-结果分诊 → 格式化 → 审计。对外保持同步:同步工具在 daemon 子线程执行,
+结果分诊 → 格式化 → 审计。对外保持同步:内置工具在 daemon 子线程执行,
 主线程用 ``queue.Queue.get(timeout=...)`` 等待;开线程前把
 ``current_conversation_id`` 写入 contextvar 再 ``copy_context()``,保证
-工具线程能读到会话上下文。
+工具线程能读到会话上下文。MCP 工具走 :func:`run_async`,把
+``spec.tool.ainvoke`` 投递到常驻事件循环线程,超时/重试语义保持一致。
 
 任何路径都返回 :class:`ToolRun`,不向调用方抛异常。审计失败也在引擎层
 再兜一层 try/except(与 :func:`record_tool_audit` 内部的兜底构成双重防线)。
@@ -24,6 +25,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from app.config import get_settings
+from app.tools.async_bridge import run_async
 from app.tools.audit import record_tool_audit
 from app.tools.context import current_conversation_id
 from app.tools.formatting import classify_result, format_result
@@ -112,6 +114,15 @@ def _invoke_sync(
     return payload
 
 
+def _invoke(
+    spec: ToolSpec, arguments: object, timeout: float, ctx: contextvars.Context
+) -> object:
+    """Dispatch to the async bridge for MCP tools, sync thread otherwise."""
+    if spec.source == "mcp":
+        return run_async(spec.tool.ainvoke(arguments), timeout=timeout)
+    return _invoke_sync(spec, arguments, timeout, ctx)
+
+
 def _execute_with_retries(
     spec: ToolSpec,
     arguments: object,
@@ -130,7 +141,7 @@ def _execute_with_retries(
         # Context 不能被两个线程并发进入。
         ctx = contextvars.copy_context()
         try:
-            raw = _invoke_sync(spec, arguments, timeout, ctx)
+            raw = _invoke(spec, arguments, timeout, ctx)
         except TimeoutError:
             if attempt < attempts - 1:
                 time.sleep(0.2 * attempt)

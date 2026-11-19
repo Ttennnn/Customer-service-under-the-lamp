@@ -5,6 +5,8 @@
 未知工具审计,以及 ``deny_*`` 辅助入口。
 """
 
+import asyncio
+import json
 import time
 
 import pytest
@@ -200,3 +202,76 @@ def test_builtin_write_outside_allowlist_rejected_by_register():
             register(_spec(permission="write"))
     finally:
         reset_registry()
+
+
+# --- MCP async branch ---
+
+MCP_SCHEMA = {
+    "type": "object",
+    "properties": {"tracking_no": {"type": "string"}},
+    "required": ["tracking_no"],
+}
+
+
+def _mcp_spec(tool_obj, timeout=2.0):
+    return ToolSpec(
+        name="query_logistics",
+        description="MCP logistics.",
+        json_schema=MCP_SCHEMA,
+        tool=tool_obj,
+        permission="read",
+        source="mcp",
+        mcp_server="logistics",
+        timeout=timeout,
+    )
+
+
+class _AsyncMCPTool:
+    def __init__(self):
+        self.calls = []
+        self.thread_name = None
+
+    async def ainvoke(self, arguments):
+        import threading
+
+        self.calls.append(arguments)
+        self.thread_name = threading.current_thread().name
+        return json.dumps(
+            {
+                "tracking_no": arguments["tracking_no"],
+                "carrier": "顺丰速运",
+                "status_code": "TRANSIT",
+                "traces": [{"desc": "运输中"}],
+            },
+            ensure_ascii=False,
+        )
+
+
+class _SlowAsyncMCPTool:
+    async def ainvoke(self, arguments):
+        await asyncio.sleep(5)
+        return "{}"
+
+
+def test_mcp_tool_goes_through_async_bridge(session, monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.engine._invoke_sync",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("sync path")),
+    )
+    tool_obj = _AsyncMCPTool()
+    run = execute(_mcp_spec(tool_obj), {"tracking_no": "SF1"}, conversation_id=1)
+
+    assert run.status == "ok"
+    assert tool_obj.calls == [{"tracking_no": "SF1"}]
+    assert tool_obj.thread_name != "MainThread"
+    assert run.data["status_code"] == "运输中"
+    assert session.query(ToolAuditLog).one().tool_source == "mcp"
+
+
+def test_mcp_read_timeout_is_retried(session):
+    spec = _mcp_spec(_SlowAsyncMCPTool(), timeout=0.05)
+    run = execute(spec, {"tracking_no": "SF1"}, conversation_id=1, retries=1)
+    assert run.status == "timeout"
+    assert run.retry_count == 1
+    row = session.query(ToolAuditLog).one()
+    assert row.status == "超时" and row.retry_count == 1

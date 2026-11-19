@@ -23,6 +23,7 @@ from langchain_core.tools import BaseTool
 
 from app.tools.builtin.orders import query_order, query_product
 from app.tools.faq import query_faq
+from app.tools.mcp_client import fetch_mcp_specs
 from app.tools.policy import WRITE_TOOLS
 from app.tools.spec import ToolSpec
 from app.tools.ticket import create_ticket
@@ -66,15 +67,6 @@ TOOL_LABELS: dict[str, str] = {
 
 _BUILTIN: dict[str, ToolSpec] = {}
 _LOADED = False
-
-
-def fetch_mcp_specs(settings: Settings) -> list[ToolSpec]:
-    """Return specs discovered from MCP servers.
-
-    Temporary stub: the real MCP client arrives in Task 7, which replaces this
-    name with ``app.tools.mcp_client.fetch_mcp_specs``. Tests monkeypatch it.
-    """
-    return []
 
 
 def register(spec: ToolSpec) -> None:
