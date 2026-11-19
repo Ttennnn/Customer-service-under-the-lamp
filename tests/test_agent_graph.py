@@ -282,9 +282,13 @@ def test_checkpointer_keeps_history_across_turns():
 
 
 def test_parent_stream_receives_subgraph_custom_frames(monkeypatch):
+    from app.tools.spec import ToolRun
+
     monkeypatch.setattr(
-        "app.agent.subgraph.execute_tool",
-        lambda tool, args, timeout_s=5: "订单1001已发货",
+        "app.agent.subgraph.execute_tool_call",
+        lambda tool_call, conversation_id, **kwargs: ToolRun(
+            status="ok", content="订单1001已发货"
+        ),
     )
     llm = ScriptedLLM(
         [

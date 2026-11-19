@@ -1,15 +1,85 @@
 import json
 
+from langchain_core.tools import tool
+
 from app.agent.tools import (
-    AGENT_TOOLS,
+    legacy_tools,
     suggested_actions_from_handoff,
+    tools_for_route,
 )
+from app.tools.registry import builtin_specs
+from app.tools.spec import spec_from_tool
 
 
-def test_agent_tools_exclude_faq_and_create_ticket():
-    assert [t.name for t in AGENT_TOOLS] == [
-        "query_order", "query_product", "suggest_handoff"
+def test_business_route_binds_exposed_registry_tools_in_registry_order():
+    names = [t.name for t in tools_for_route("business", builtin_specs())]
+
+    assert names == [
+        "query_order",
+        "query_product",
+        "query_promotions",
+        "suggest_handoff",
+        "create_ticket",
     ]
+    assert "query_faq" not in names
+
+
+def test_refund_route_binds_controls_and_aftersales_only():
+    specs = builtin_specs()
+
+    @tool
+    def query_warranty(order_id: str) -> str:
+        """查询保修。"""
+        return "{}"
+
+    specs["query_warranty"] = spec_from_tool(
+        query_warranty, source="mcp", mcp_server="aftersales"
+    )
+
+    names = [t.name for t in tools_for_route("refund_flow", specs)]
+
+    assert names == [
+        "submit_refund",
+        "suggest_handoff",
+        "create_ticket",
+        "query_warranty",
+    ]
+    assert "query_order" not in names
+    assert "query_faq" not in names
+
+
+def test_other_routes_exclude_aftersales_mcp_tools():
+    specs = builtin_specs()
+
+    @tool
+    def query_warranty(order_id: str) -> str:
+        """查询保修。"""
+        return "{}"
+
+    specs["query_warranty"] = spec_from_tool(
+        query_warranty, source="mcp", mcp_server="aftersales"
+    )
+
+    for route in ("knowledge", "business", "", "escalate"):
+        names = [t.name for t in tools_for_route(route, specs)]
+        assert "query_warranty" not in names
+        assert "submit_refund" not in names
+        assert "query_faq" not in names
+
+
+def test_route_scoped_spec_only_binds_to_its_route():
+    specs = builtin_specs()
+    assert "submit_refund" in [
+        t.name for t in tools_for_route("refund_flow", specs)
+    ]
+    assert "submit_refund" not in [
+        t.name for t in tools_for_route("knowledge", specs)
+    ]
+
+
+def test_legacy_tools_are_the_three_read_tools():
+    names = [t.name for t in legacy_tools(builtin_specs())]
+    assert names == ["query_order", "query_product", "query_faq"]
 
 
 def test_suggested_actions_are_independent_and_deduped():
@@ -24,22 +94,6 @@ def test_invalid_handoff_option_is_dropped():
     assert suggested_actions_from_handoff(["bogus", "ticket"], "咨询") == [
         {"action": "ticket", "label": "建工单", "ticket_type": "咨询"}
     ]
-
-
-def test_tools_for_route_splits_refund_and_business():
-    from app.agent.tools import tools_for_route
-    assert [t.name for t in tools_for_route("refund_flow")] == ["submit_refund", "suggest_handoff"]
-    assert [t.name for t in tools_for_route("business")] == [
-        "query_order", "query_product", "suggest_handoff"
-    ]
-
-
-def test_tools_for_route_defaults_to_general_tools():
-    from app.agent.tools import tools_for_route
-    for route in ("knowledge", "", "escalate"):
-        assert [t.name for t in tools_for_route(route)] == [
-            "query_order", "query_product", "suggest_handoff"
-        ]
 
 
 def test_submit_refund_only_acknowledges():

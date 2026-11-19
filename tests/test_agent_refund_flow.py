@@ -492,7 +492,11 @@ def test_refund_flow_order_then_policy_then_agent(monkeypatch):
     ]
     assert result["gate_passed"] is True
     assert result["answer"] == "订单 1001 符合退款条件,请填写退款表单。"
-    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff"]
+    assert llm.bound_tool_names == [
+        "submit_refund",
+        "suggest_handoff",
+        "create_ticket",
+    ]
     # The system prompt stays constant; order and evidence ride in the
     # per-turn material as a HumanMessage after the user question.
     system_prompt = llm.messages[0].content

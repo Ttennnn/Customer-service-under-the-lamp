@@ -118,9 +118,13 @@ def test_turn_material_sits_after_user_before_tool_messages():
 
 
 def test_tool_result_truncated_to_token_limit(monkeypatch):
+    from app.tools.spec import ToolRun
+
     monkeypatch.setattr(
-        "app.agent.subgraph.execute_tool",
-        lambda tool, args, timeout_s=5: "X" * 100,
+        "app.agent.subgraph.execute_tool_call",
+        lambda tool_call, conversation_id, **kwargs: ToolRun(
+            status="ok", content="X" * 100
+        ),
     )
     llm = ScriptedLLM(
         [

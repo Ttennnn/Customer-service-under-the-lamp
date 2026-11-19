@@ -1,7 +1,8 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agent.subgraph import build_agent_subgraph
-from app.agent.tools import AGENT_TOOLS
+from app.tools.registry import builtin_specs
+from app.tools.spec import ToolRun
 from tests.agent_fakes import ScriptedLLM, text_chunk, tool_chunk
 
 
@@ -41,14 +42,51 @@ def test_subgraph_can_ask_follow_up():
     assert not last.tool_calls
 
 
+def test_business_route_binds_registry_tools(monkeypatch):
+    llm = ScriptedLLM([text_chunk("hi")])
+    monkeypatch.setattr(
+        "app.agent.subgraph.get_all_specs",
+        lambda settings: {
+            "query_order": builtin_specs()["query_order"],
+            "create_ticket": builtin_specs()["create_ticket"],
+            "query_faq": builtin_specs()["query_faq"],
+            "suggest_handoff": builtin_specs()["suggest_handoff"],
+        },
+    )
+    build_agent_subgraph(llm).invoke(_initial_state())
+    assert llm.bound_tool_names == ["query_order", "create_ticket", "suggest_handoff"]
+
+
+def test_tools_node_uses_engine(monkeypatch):
+    seen = {}
+
+    def fake_execute_tool_call(
+        tool_call, conversation_id, *, confirmed=False, specs=None, settings=None
+    ):
+        seen["name"] = tool_call["name"]
+        return ToolRun(status="ok", content="订单已签收")
+
+    monkeypatch.setattr("app.agent.subgraph.execute_tool_call", fake_execute_tool_call)
+    llm = ScriptedLLM([
+        tool_chunk("query_order", '{"order_id":"1001"}'),
+        text_chunk("已查"),
+    ])
+    result = build_agent_subgraph(llm).invoke(_initial_state())
+    assert seen["name"] == "query_order"
+    assert any(isinstance(m, ToolMessage) and m.content == "订单已签收"
+               for m in result["messages"])
+
+
 def test_subgraph_executes_tool_then_converges(monkeypatch):
     calls = []
 
-    def fake_execute_tool(tool, args, timeout_s=5):
-        calls.append((tool.name, args, timeout_s))
-        return "订单1001已发货"
+    def fake_execute_tool_call(
+        tool_call, conversation_id, *, confirmed=False, specs=None, settings=None
+    ):
+        calls.append((tool_call["name"], tool_call["args"], conversation_id))
+        return ToolRun(status="ok", content="订单1001已发货")
 
-    monkeypatch.setattr("app.agent.subgraph.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.agent.subgraph.execute_tool_call", fake_execute_tool_call)
     llm = ScriptedLLM(
         [
             tool_chunk("query_order", '{"order_id": "1001"}'),
@@ -59,27 +97,56 @@ def test_subgraph_executes_tool_then_converges(monkeypatch):
 
     assert result["answer"] == "您的订单已发货"
     assert result["step_count"] == 2
-    assert calls == [("query_order", {"order_id": "1001"}, 5.0)]
+    assert calls == [("query_order", {"order_id": "1001"}, 1)]
     assert any(
         isinstance(m, ToolMessage) and m.content == "订单1001已发货"
         for m in result["messages"]
     )
 
 
-def test_subgraph_does_not_bind_create_ticket_or_query_faq():
+def test_refund_route_binds_create_ticket_but_excludes_faq_and_order_tools():
+    llm = ScriptedLLM([text_chunk("hi")])
+    build_agent_subgraph(llm).invoke(
+        _initial_state(route="refund_flow", order_data={"order_id": "1001"})
+    )
+
+    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff", "create_ticket"]
+    assert "query_faq" not in llm.bound_tool_names
+    assert "query_order" not in llm.bound_tool_names
+
+
+def test_business_route_binds_exposed_builtin_tools():
     llm = ScriptedLLM([text_chunk("hi")])
     build_agent_subgraph(llm).invoke(_initial_state())
 
-    assert llm.bound_tool_names == [t.name for t in AGENT_TOOLS]
-    assert "create_ticket" not in llm.bound_tool_names
+    assert llm.bound_tool_names == [
+        "query_order",
+        "query_product",
+        "query_promotions",
+        "suggest_handoff",
+        "create_ticket",
+    ]
     assert "query_faq" not in llm.bound_tool_names
 
 
 def test_suggest_handoff_records_options_without_side_effect(monkeypatch):
-    def boom(*args, **kwargs):
-        raise AssertionError("suggest_handoff must not call execute_tool")
+    seen = {}
 
-    monkeypatch.setattr("app.agent.subgraph.execute_tool", boom)
+    def fake_execute(
+        spec,
+        args,
+        *,
+        conversation_id,
+        tool_call_id=None,
+        confirmed=False,
+        settings=None,
+        retries=None,
+    ):
+        seen["name"] = spec.name
+        seen["args"] = args
+        return ToolRun(status="ok", content="已记录转人工/建工单建议。")
+
+    monkeypatch.setattr("app.agent.subgraph.execute", fake_execute)
     llm = ScriptedLLM(
         [
             tool_chunk(
@@ -92,6 +159,8 @@ def test_suggest_handoff_records_options_without_side_effect(monkeypatch):
     result = build_agent_subgraph(llm).invoke(_initial_state())
 
     assert result["answer"] == "已为您记录转人工与建工单建议"
+    assert seen["name"] == "suggest_handoff"
+    assert seen["args"]["options"] == ["transfer", "ticket"]
     assert result["suggested_actions"] == [
         {"action": "transfer", "label": "转人工"},
         {"action": "ticket", "label": "建工单", "ticket_type": "投诉"},
@@ -99,14 +168,43 @@ def test_suggest_handoff_records_options_without_side_effect(monkeypatch):
     assert any(isinstance(m, ToolMessage) for m in result["messages"])
 
 
-def test_submit_refund_is_intercepted_without_execute_tool(monkeypatch):
-    import app.agent.subgraph as sg
+def test_invalid_handoff_denied_by_validation_without_execute(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("invalid handoff must not execute")
 
-    monkeypatch.setattr(
-        sg,
-        "execute_tool",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not execute")),
+    monkeypatch.setattr("app.agent.subgraph.execute", boom)
+    llm = ScriptedLLM(
+        [
+            tool_chunk("suggest_handoff", '{"options": ["bogus"]}'),
+            text_chunk("已记录"),
+        ]
     )
+    result = build_agent_subgraph(llm).invoke(_initial_state())
+
+    assert result["suggested_actions"] == []
+    assert any(
+        isinstance(m, ToolMessage) and "参数无效" in m.content
+        for m in result["messages"]
+    )
+
+
+def test_submit_refund_runs_through_engine_and_emits_action(monkeypatch):
+    seen = {}
+
+    def fake_execute(
+        spec,
+        args,
+        *,
+        conversation_id,
+        tool_call_id=None,
+        confirmed=False,
+        settings=None,
+        retries=None,
+    ):
+        seen["name"] = spec.name
+        return ToolRun(status="ok", content="已准备退款表单。")
+
+    monkeypatch.setattr("app.agent.subgraph.execute", fake_execute)
     llm = ScriptedLLM([
         tool_chunk("submit_refund", '{"order_id": "1001"}'),
         text_chunk("可以退,请填写退款原因。"),
@@ -120,19 +218,17 @@ def test_submit_refund_is_intercepted_without_execute_tool(monkeypatch):
         "token_estimate": 0,
         "conversation_id": 1,
     })
+    assert seen["name"] == "submit_refund"
     assert result["suggested_actions"] == [
         {"action": "refund_form", "label": "提交退款工单", "order_id": "1001"}
     ]
 
 
 def test_submit_refund_with_mismatched_order_emits_no_action(monkeypatch):
-    import app.agent.subgraph as sg
+    def boom(*args, **kwargs):
+        raise AssertionError("mismatched refund must not execute")
 
-    monkeypatch.setattr(
-        sg,
-        "execute_tool",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not execute")),
-    )
+    monkeypatch.setattr("app.agent.subgraph.execute", boom)
     llm = ScriptedLLM([
         tool_chunk("submit_refund", '{"order_id": "1002"}'),
         text_chunk("当前订单暂不支持退款。"),
@@ -163,13 +259,15 @@ def test_refund_route_binds_after_sales_tools_and_prompt():
         "token_estimate": 0,
         "conversation_id": 1,
     })
-    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff"]
+    assert llm.bound_tool_names == ["submit_refund", "suggest_handoff", "create_ticket"]
 
 
 def test_max_steps_runs_finalize(monkeypatch):
     monkeypatch.setattr(
-        "app.agent.subgraph.execute_tool",
-        lambda tool, args, timeout_s=5: "ok",
+        "app.agent.subgraph.execute_tool_call",
+        lambda tool_call, conversation_id, **kwargs: ToolRun(
+            status="ok", content="ok"
+        ),
     )
     llm = ScriptedLLM(
         [tool_chunk("query_order", '{"order_id": "1"}') for _ in range(5)]
@@ -195,8 +293,10 @@ def test_legacy_token_budget_no_longer_runs_finalize():
 
 def test_custom_stream_emits_tool_then_tokens(monkeypatch):
     monkeypatch.setattr(
-        "app.agent.subgraph.execute_tool",
-        lambda tool, args, timeout_s=5: "ok",
+        "app.agent.subgraph.execute_tool_call",
+        lambda tool_call, conversation_id, **kwargs: ToolRun(
+            status="ok", content="ok"
+        ),
     )
     llm = ScriptedLLM(
         [
