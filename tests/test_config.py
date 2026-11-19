@@ -60,7 +60,7 @@ def test_ch09_langfuse_defaults():
 
 def test_ch09_confidence_flywheel_and_report_defaults():
     s = Settings(_env_file=None, openai_api_key="x")
-    assert s.evidence_confidence_threshold == 0.0
+    assert s.evidence_confidence_threshold == 0.15
     assert s.evidence_valid_floor == 0.1
     assert s.evidence_valid_cap == 3
     assert s.evidence_margin_scale == 0.2

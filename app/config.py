@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     langfuse_environment: str = "development"
     langfuse_trace_name: str = "cs-chat"
     stream_usage: bool = True
-    evidence_confidence_threshold: float = 0.0
+    evidence_confidence_threshold: float = 0.15
     evidence_valid_floor: float = 0.1
     evidence_valid_cap: int = 3
     evidence_margin_scale: float = 0.2
