@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-11-19T16:26:08+00:00",
+  "window_days": 7,
+  "rows": [
+    {
+      "intent": "商品咨询",
+      "requests": 3,
+      "total_tokens": 5740,
+      "avg_tokens": 1913,
+      "share": 0.8758
+    },
+    {
+      "intent": "闲聊",
+      "requests": 1,
+      "total_tokens": 814,
+      "avg_tokens": 814,
+      "share": 0.1242
+    }
+  ]
+}

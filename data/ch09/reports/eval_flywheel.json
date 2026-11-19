@@ -1,0 +1,151 @@
+{
+  "generated_at": "2026-11-20T00:25:58",
+  "commit": "1b64339",
+  "cases_loaded": 30,
+  "cases": 21,
+  "excluded": {
+    "count": 9,
+    "cases": [
+      {
+        "id": "A21",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A22",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A24",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A25",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A26",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A27",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A28",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A29",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      },
+      {
+        "id": "A30",
+        "bucket": "A_policy",
+        "reason": "points_missing"
+      }
+    ]
+  },
+  "strategies": [
+    "hybrid_rerank"
+  ],
+  "mode": "full",
+  "run": {
+    "model": "deepseek-chat",
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "recall_top_k": 50,
+    "rrf_k": 60,
+    "top_k": 10
+  },
+  "overall": {
+    "hybrid_rerank": {
+      "retrieval": {
+        "n": 21,
+        "recall_at_5": 1.0,
+        "recall_at_10": 1.0,
+        "mrr_at_10": 1.0,
+        "cases_with_evidence": 21,
+        "evidence_case_coverage": 1.0
+      },
+      "generation": {
+        "n": 21,
+        "refusal_rate": 0.047619047619047616,
+        "faithfulness": 1.0,
+        "citation_validity": 1.0,
+        "model_refusals": 4,
+        "answer_coverage": 0.7619047619047619
+      },
+      "d_accuracy": {
+        "evaluable": 0,
+        "refusal": 0,
+        "model_refusal": 0,
+        "other": 0,
+        "accuracy": null
+      },
+      "status_counts": {
+        "answered": 16,
+        "model_refusal": 4,
+        "refusal": 1
+      }
+    }
+  },
+  "buckets": {
+    "A_policy": {
+      "hybrid_rerank": {
+        "retrieval": {
+          "n": 21,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "mrr_at_10": 1.0,
+          "cases_with_evidence": 21,
+          "evidence_case_coverage": 1.0
+        },
+        "generation": {
+          "n": 21,
+          "refusal_rate": 0.047619047619047616,
+          "faithfulness": 1.0,
+          "citation_validity": 1.0,
+          "model_refusals": 4,
+          "answer_coverage": 0.7619047619047619
+        },
+        "d_accuracy": {
+          "evaluable": 0,
+          "refusal": 0,
+          "model_refusal": 0,
+          "other": 0,
+          "accuracy": null
+        },
+        "status_counts": {
+          "answered": 16,
+          "model_refusal": 4,
+          "refusal": 1
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "rerank": {
+      "runs": 0,
+      "case_ids": []
+    },
+    "rewrite": {
+      "cases": 0,
+      "case_ids": []
+    }
+  },
+  "faith_cases": {
+    "enabled": true,
+    "new": 0,
+    "recurrence": 0,
+    "errors": 0,
+    "entries": []
+  }
+}
