@@ -188,6 +188,22 @@ cron 示例（每天 03:00，标记为“定时”）：
 
 趋势以 `eval_runs` 为唯一权威来源，`/observability` 读取最近 10 轮。
 
+### 飞轮 prompt 样例评估（真实 LLM，≥80% 门槛）
+
+```bash
+make eval-flywheel-prompts
+# 等价于：
+.venv/Scripts/python.exe -m app.jobs.eval_flywheel_prompts
+```
+
+- 输入：`tests/eval/flywheel_samples.json`（10–15 条标注样例，含候选队列与
+  期望命中 id / 标准化关键词）。
+- 统计命中、未命中、坏 JSON（含模型异常）；通过率 **≥ 80%** 时退出码 0，
+  否则退出 1。不要放宽标注或伪造通过率。
+- 导入 `app.jobs.eval_flywheel_prompts` 不会创建 LLM、不联网；纯离线单测在
+  `tests/test_eval_flywheel_prompts.py`，真实模型只在上面命令的 `main()`
+  里构建。需要 `.env` 里配好模型 key 才能跑 live。
+
 ---
 
 ## 7. 报表路径与后台页面
@@ -249,10 +265,16 @@ key 时脚本提示先 `make langfuse-up` 并以退出码 1 结束。
    `review_queue`。
 4. 打开 `/review` 审核：
    - **通过**：弹框填核准答案（可预填 `ai_suggested_answer`），提交
-     `POST /api/review/{id}/approve`。后端用 ch03 的 `insert_mined_qa`
-     写入知识库为 `mined_qa` 分类，并同步 `vectorize_pending`；只有向量化
-     成功才置为「通过」并保存 `approved_answer`。向量化失败时状态保持
-     「待审」，已落库 chunk 保持 pending，重试会复用同一行。
+     `POST /api/review/{id}/approve`。后端先删除同一标准化问题下的旧
+     `mined_qa` chunk（有 `vector_id` 时先删 Milvus 向量，再删 MySQL 行），
+     再用 ch03 的 `insert_mined_qa` 写入本次核准答案，最后**只对本条**调用
+     `vectorize_rows` 同步向量化。只有向量化成功才置为「通过」并保存
+     `approved_answer`。
+     - 旧答案不会被重新发布：失败一次后重试用新答案，旧的 pending/done 行
+       已在写回前清除；向量化也绝不会顺带发布其他无关的 pending chunk。
+     - 向量化失败时本次新 chunk 的向量与行会被 best-effort 删除，审核状态
+       保持「待审」，可以直接重试（不会留下可发布的脏数据）。
+     - 同一问题只保留最新核准答案的知识行。
    - **驳回**：`POST /api/review/{id}/reject`，置「驳回」。驳回是终审，
      飞轮再次命中只累加次数，不复活、不新建。
    - 仅「待审」可操作，否则 409；行不存在 404；核准答案为空 422；

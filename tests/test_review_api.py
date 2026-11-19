@@ -33,12 +33,16 @@ class FakeEmbedder:
 class FakeStore:
     def __init__(self, error=None):
         self.items = []
+        self.deleted = []
         self.error = error
 
     def upsert(self, items):
         if self.error is not None:
             raise self.error
         self.items.extend(items)
+
+    def delete_ids(self, ids):
+        self.deleted.extend(ids)
 
 
 @pytest.fixture
@@ -134,7 +138,7 @@ def test_approve_writes_mined_chunk_and_vectorizes(session):
     assert store.items[0].chunk_id == chunk.id
 
 
-def test_vectorize_failure_then_retry_reuses_the_same_chunk(session):
+def test_vectorize_failure_removes_chunk_then_retry_succeeds(session):
     review = _review(session)
     with pytest.raises(RuntimeError, match="milvus down"):
         approve_review(
@@ -147,8 +151,8 @@ def test_vectorize_failure_then_retry_reuses_the_same_chunk(session):
 
     session.expire_all()
     assert session.get(ReviewQueue, review.id).review_status == "待审"
-    pending = session.query(KnowledgeChunk).one()
-    assert pending.vectorize_status == "pending"
+    # A failed writeback must not leave a publishable chunk behind.
+    assert session.query(KnowledgeChunk).count() == 0
 
     approved = approve_review(
         session,
@@ -162,6 +166,139 @@ def test_vectorize_failure_then_retry_reuses_the_same_chunk(session):
     session.expire_all()
     assert session.query(KnowledgeChunk).count() == 1
     assert session.query(KnowledgeChunk).one().vectorize_status == "done"
+
+
+# --- regression: approval must never publish a superseded/unapproved answer ---
+
+
+def test_failed_old_answer_then_retry_publishes_only_new_answer(session):
+    """A failed OLD approval must not leak into the retried NEW approval."""
+    review = _review(session)
+
+    with pytest.raises(RuntimeError, match="milvus down"):
+        approve_review(
+            session,
+            review.id,
+            "旧答案",
+            embedder=FakeEmbedder(),
+            store=FakeStore(error=RuntimeError("milvus down")),
+        )
+    session.expire_all()
+    assert session.query(KnowledgeChunk).count() == 0
+
+    embedder = FakeEmbedder()
+    store = FakeStore()
+    approved = approve_review(
+        session, review.id, "新答案", embedder=embedder, store=store
+    )
+
+    assert approved.review_status == "通过"
+    session.expire_all()
+    chunks = session.query(KnowledgeChunk).all()
+    assert len(chunks) == 1
+    assert chunks[0].answer == "新答案"
+    assert chunks[0].vectorize_status == "done"
+    # The only text embedded/upserted is the NEW answer.
+    assert embedder.calls == [["通用\n退款多久到账\n新答案"]]
+    assert [item.text for item in store.items] == ["通用\n退款多久到账\n新答案"]
+    assert store.deleted == []
+
+
+def test_approving_a_does_not_vectorize_unrelated_pending_b(session):
+    review = _review(session)
+    unrelated = KnowledgeChunk(
+        category="通用",
+        questions="怎么开发票",
+        answer="B 的旧答案",
+        section_path=None,
+        content_type="mined_qa",
+        is_key_clause=False,
+        vectorize_status="pending",
+    )
+    session.add(unrelated)
+    session.commit()
+    session.refresh(unrelated)
+
+    embedder = FakeEmbedder()
+    store = FakeStore()
+    approve_review(session, review.id, "A 的答案", embedder=embedder, store=store)
+
+    session.expire_all()
+    # Only A was embedded/upserted; B is untouched and still pending.
+    assert embedder.calls == [["通用\n退款多久到账\nA 的答案"]]
+    assert [item.chunk_id for item in store.items] == [
+        session.query(KnowledgeChunk).filter_by(answer="A 的答案").one().id
+    ]
+    assert session.get(KnowledgeChunk, unrelated.id).vectorize_status == "pending"
+
+
+def test_unrelated_failing_pending_b_does_not_block_a(session):
+    """B's bad pending row is irrelevant: scoped vectorize only touches A."""
+    review = _review(session)
+    bad = KnowledgeChunk(
+        category="通用",
+        questions="会失败的问题",
+        answer="B",
+        section_path=None,
+        content_type="mined_qa",
+        is_key_clause=False,
+        vectorize_status="pending",
+    )
+    session.add(bad)
+    session.commit()
+
+    class ShortEmbedder(FakeEmbedder):
+        """Would fail if asked for B: returns too few vectors for any batch > 0."""
+
+        def embed(self, texts):
+            self.calls.append(list(texts))
+            if any("会失败的问题" in text for text in texts):
+                return []
+            return [[0.1] * 1024 for _ in texts]
+
+    embedder = ShortEmbedder()
+    approved = approve_review(
+        session, review.id, "A 的答案", embedder=embedder, store=FakeStore()
+    )
+
+    assert approved.review_status == "通过"
+    session.expire_all()
+    assert session.get(ReviewQueue, review.id).review_status == "通过"
+    assert session.get(KnowledgeChunk, bad.id).vectorize_status == "pending"
+
+
+def test_stale_same_question_done_row_is_deleted_with_its_vector(session):
+    """A done-but-unapproved chunk is removed (Milvus vector first)."""
+    review = _review(session)
+    stale = KnowledgeChunk(
+        category="通用",
+        questions="退款多久到账",
+        answer="旧答案",
+        section_path=None,
+        content_type="mined_qa",
+        is_key_clause=False,
+        vectorize_status="done",
+        vector_id="chunk_999",
+    )
+    session.add(stale)
+    session.commit()
+    session.refresh(stale)
+
+    store = FakeStore()
+    approved = approve_review(
+        session, review.id, "新答案", embedder=FakeEmbedder(), store=store
+    )
+
+    assert approved.review_status == "通过"
+    session.expire_all()
+    assert store.deleted == ["chunk_999"]
+    chunks = session.query(KnowledgeChunk).all()
+    assert len(chunks) == 1
+    # The stale answer/vector is gone; only the new approved chunk remains.
+    # (SQLite may reuse the deleted row id, so assert on content, not id.)
+    assert chunks[0].answer == "新答案"
+    assert chunks[0].vectorize_status == "done"
+    assert session.query(KnowledgeChunk).filter_by(answer="旧答案").count() == 0
 
 
 def test_approve_blank_answer_is_rejected_before_any_write(session):
