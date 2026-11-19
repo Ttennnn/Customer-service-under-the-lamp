@@ -22,6 +22,38 @@ def test_missing_required_is_chinese():
     assert errors and "缺少必填参数 description" in errors[0]
 
 
+def test_multiple_missing_required_are_not_duplicated():
+    schema = {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string"},
+            "ticket_type": {"type": "string"},
+        },
+        "required": ["description", "ticket_type"],
+    }
+    errors = validate_arguments(schema, {})
+    assert len(errors) == 2
+    assert len(set(errors)) == 2
+    assert any("缺少必填参数 description" in error for error in errors)
+    assert any("缺少必填参数 ticket_type" in error for error in errors)
+
+
+def test_invalid_schema_returns_chinese_error_instead_of_raising():
+    errors = validate_arguments({"type": 5}, {"a": 1})
+    assert errors
+    assert errors[0].startswith("参数校验未通过：")
+
+
+def test_unresolvable_ref_returns_chinese_error_instead_of_raising():
+    schema = {
+        "type": "object",
+        "properties": {"a": {"$ref": "#/$defs/missing"}},
+    }
+    errors = validate_arguments(schema, {"a": 1})
+    assert errors
+    assert errors[0].startswith("参数校验未通过：")
+
+
 def test_type_enum_and_minimum():
     schema = {
         "type": "object",

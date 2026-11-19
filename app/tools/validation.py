@@ -45,17 +45,19 @@ def _actual_type(value) -> str:
 
 
 def _format_required(error) -> list[str]:
+    # jsonschema yields one error per missing property, each carrying the
+    # full ``required`` list in ``validator_value``. Derive only the single
+    # property named by this error so callers never see duplicates.
+    match = _REQUIRED_NAME.search(error.message)
+    if match:
+        return [f"{_PREFIX}缺少必填参数 {match.group(1)}"]
+
     instance = error.instance
-    required = error.validator_value
     missing = [
         name
-        for name in required
+        for name in error.validator_value
         if not isinstance(instance, dict) or name not in instance
     ]
-    if not missing:
-        match = _REQUIRED_NAME.search(error.message)
-        if match:
-            missing = [match.group(1)]
     return [
         f"{_PREFIX}缺少必填参数 {name}" for name in missing
     ] or [f"{_PREFIX}{error.message}"]
@@ -91,11 +93,20 @@ def validate_arguments(schema: dict, arguments: object) -> list[str]:
 
     Returns an empty list when valid, otherwise Chinese error strings.
     """
-    validator = Draft202012Validator(schema)
     errors: list[str] = []
-    for error in sorted(
-        validator.iter_errors(arguments),
-        key=lambda item: ".".join(str(part) for part in item.absolute_path),
-    ):
-        errors.extend(_format_error(error))
+    seen: set[str] = set()
+    try:
+        validator = Draft202012Validator(schema)
+        for error in sorted(
+            validator.iter_errors(arguments),
+            key=lambda item: ".".join(str(part) for part in item.absolute_path),
+        ):
+            for message in _format_error(error):
+                if message not in seen:
+                    seen.add(message)
+                    errors.append(message)
+    except Exception as exc:  # noqa: BLE001 - 校验层不能把异常抛给引擎
+        message = f"{_PREFIX}无法完成参数校验（{type(exc).__name__}）"
+        if message not in seen:
+            errors.append(message)
     return errors
