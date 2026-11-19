@@ -70,6 +70,36 @@ def test_create_ticket_sleeps_after_commit(session, monkeypatch):
     assert session.query(Ticket).count() == 1
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_description_is_a_validation_error_and_writes_nothing(session, blank):
+    from app.tools.engine import execute_tool_call
+    from app.tools.registry import builtin_specs
+
+    cid = _make_conversation(session)
+    spec = builtin_specs()["create_ticket"]
+    assert spec.json_schema["properties"]["description"]["minLength"] == 1
+
+    run = execute_tool_call(
+        {
+            "name": "create_ticket",
+            "args": {"description": blank, "ticket_type": "售后"},
+            "id": "c1",
+        },
+        cid,
+        confirmed=True,
+        specs={"create_ticket": spec},
+    )
+
+    assert run.status == "validation_error"
+    session.expire_all()
+    assert session.query(Ticket).count() == 0
+
+
+def test_create_ticket_body_guards_blank_description():
+    out = create_ticket.func("   ", "售后")
+    assert "不能为空" in out
+
+
 def test_registry_keeps_legacy_exports_without_logistics():
     from app.tools.registry import ALL_TOOLS
     assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_faq", "create_ticket"]

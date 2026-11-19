@@ -80,6 +80,14 @@ ENUM_MAPS: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 
+# Nested enum fields: ``{tool: {list_field: {item_field: mapping}}}``. Only
+# the listed subfields are translated; every other item field is preserved.
+NESTED_ENUM_MAPS: dict[str, dict[str, dict[str, dict[str, str]]]] = {
+    "query_logistics": {
+        "traces": {"status_code": ENUM_MAPS["query_logistics"]["status_code"]},
+    },
+}
+
 _TICKET_NO = re.compile(r"^T\d{11}$")
 _UNPARSEABLE = object()
 
@@ -166,6 +174,18 @@ def _format_known(name: str, raw: object) -> tuple[str, object]:
         for field, mapping in ENUM_MAPS.get(name, {}).items():
             if field in value and value[field] in mapping:
                 value[field] = mapping[value[field]]
+        for field, item_maps in NESTED_ENUM_MAPS.get(name, {}).items():
+            items = value.get(field)
+            if isinstance(items, list):
+                translated: list[object] = []
+                for item in items:
+                    if isinstance(item, dict):
+                        item = dict(item)
+                        for item_field, mapping in item_maps.items():
+                            if item.get(item_field) in mapping:
+                                item[item_field] = mapping[item[item_field]]
+                    translated.append(item)
+                value[field] = translated
     return _serialize(value), value
 
 

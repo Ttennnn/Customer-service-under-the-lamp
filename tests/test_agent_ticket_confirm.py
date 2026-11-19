@@ -139,8 +139,11 @@ def test_cancel_creates_no_ticket_and_audits_permission_denied(session):
     assert session.query(Ticket).count() == 0
     row = session.query(ToolAuditLog).one()
     assert row.status == "权限拒绝"
-    assert "取消" in (row.error_message or "")
-    assert any("取消" in message.content for message in _tool_messages(final))
+    assert row.error_message == "用户取消了本次建工单,请不要再发起。"
+    assert any(
+        message.content == "用户取消了本次建工单,请不要再发起。"
+        for message in _tool_messages(final)
+    )
 
 
 def test_invalid_resume_fails_closed(session):

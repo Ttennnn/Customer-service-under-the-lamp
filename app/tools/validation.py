@@ -85,6 +85,12 @@ def _format_error(error) -> list[str]:
     if validator == "maximum":
         return [f"{_PREFIX}参数 {path} 不能大于 {error.validator_value}"]
 
+    if validator == "minLength":
+        return [f"{_PREFIX}参数 {path} 不能为空"]
+
+    if validator == "pattern":
+        return [f"{_PREFIX}参数 {path} 不能为空或仅包含空白字符"]
+
     return [f"{_PREFIX}参数 {path} {error.message}"]
 
 

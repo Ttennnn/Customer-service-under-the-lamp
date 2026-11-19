@@ -50,7 +50,7 @@ from app.services.low_confidence import record_low_confidence
 from app.tools.context import CitationCollector, current_citation_collector
 from app.tools.engine import execute_tool_call
 from app.tools.faq import ERROR_TEXT
-from app.tools.registry import TOOL_LABELS
+from app.tools.registry import TOOL_LABELS, builtin_specs
 from app.tools.spec import ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -129,9 +129,10 @@ def stream_chat(
     execution: only specs for those names are handed to the engine, so a call
     for an unbound tool (e.g. a hallucinated ``create_ticket`` on the legacy
     page) resolves to ``未知工具`` through the normal path and gets audited, but
-    never executes. ``specs`` is the registry mapping; ``None`` lets the engine
-    load the registry itself. ``settings`` is forwarded to the engine so the
-    caller's retry/timeout configuration is used.
+    never executes. ``specs`` is the registry mapping; when it is ``None`` the
+    allowlist is derived from ``builtin_specs()`` filtered to the bound tool
+    names, so there is no full-registry fallback. ``settings`` is forwarded to
+    the engine so the caller's retry/timeout configuration is used.
     """
     conversation = get_or_create_conversation(session, user_id)
     cid = conversation.id
@@ -212,16 +213,17 @@ def stream_chat(
     # Only bindings of the tools actually exposed to the model may execute.
     # Unbound/hallucinated names (e.g. create_ticket on the legacy page) are
     # still sent to the engine, which returns "未知工具" and writes an audit
-    # row; they can never write business data. The filtered mapping also keeps
-    # legacy from running control or MCP tools.
-    call_specs = (
-        {name: spec for name, spec in specs.items() if name in bound_names}
-        if specs is not None
-        else None
-    )
+    # row; they can never write business data. When the caller does not pass
+    # a registry mapping, derive it from the bound builtin specs only — never
+    # fall back to the full registry, which would expose write/control/MCP
+    # tools on the legacy page.
+    available = specs if specs is not None else builtin_specs()
+    call_specs = {
+        name: spec for name, spec in available.items() if name in bound_names
+    }
     results: list[tuple[dict, str]] = []
     for tc in ai_msg.tool_calls:
-        spec = specs.get(tc["name"]) if specs is not None else None
+        spec = call_specs.get(tc["name"])
         label = (
             spec.label
             if spec is not None and spec.label

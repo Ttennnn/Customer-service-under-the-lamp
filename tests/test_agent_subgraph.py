@@ -1,9 +1,15 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agent.subgraph import build_agent_subgraph
+from app.config import Settings
+from app.models import ToolAuditLog
 from app.tools.registry import builtin_specs
 from app.tools.spec import ToolRun
 from tests.agent_fakes import ScriptedLLM, text_chunk, tool_chunk
+
+
+def _settings():
+    return Settings(_env_file=None, openai_api_key="test")
 
 
 def _initial_state(**overrides):
@@ -127,6 +133,64 @@ def test_business_route_binds_exposed_builtin_tools():
         "create_ticket",
     ]
     assert "query_faq" not in llm.bound_tool_names
+
+
+def test_business_route_hallucinated_query_faq_is_unknown_and_audited(
+    session, monkeypatch
+):
+    calls = []
+
+    def spy_retrieve(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("query_faq must not run on the business route")
+
+    # The registry exposes query_faq to the parent graph only; if it leaks
+    # into the business allowlist the engine would invoke the tool, which
+    # calls retrieve_hybrid.
+    monkeypatch.setattr("app.tools.builtin.faq.retrieve_hybrid", spy_retrieve)
+    llm = ScriptedLLM(
+        [
+            tool_chunk("query_faq", '{"keyword": "邮费"}'),
+            text_chunk("知识库暂未收录"),
+        ]
+    )
+
+    result = build_agent_subgraph(llm, settings=_settings()).invoke(
+        _initial_state()
+    )
+
+    assert calls == []
+    session.expire_all()
+    row = session.query(ToolAuditLog).filter_by(tool_name="query_faq").one()
+    assert row.status == "失败"
+    assert "未知工具" in (row.error_message or "")
+    assert any(
+        isinstance(message, ToolMessage) and "未知工具" in message.content
+        for message in result["messages"]
+    )
+
+
+def test_business_route_hallucinated_submit_refund_is_unknown_and_audited(session):
+    llm = ScriptedLLM(
+        [
+            tool_chunk("submit_refund", '{"order_id": "1001"}'),
+            text_chunk("无法准备退款表单"),
+        ]
+    )
+
+    result = build_agent_subgraph(llm, settings=_settings()).invoke(
+        _initial_state(order_data={"order_id": "1001"})
+    )
+
+    assert result["suggested_actions"] == []
+    session.expire_all()
+    row = session.query(ToolAuditLog).filter_by(tool_name="submit_refund").one()
+    assert row.status == "失败"
+    assert "未知工具" in (row.error_message or "")
+    assert any(
+        isinstance(message, ToolMessage) and "未知工具" in message.content
+        for message in result["messages"]
+    )
 
 
 def test_suggest_handoff_records_options_without_side_effect(monkeypatch):

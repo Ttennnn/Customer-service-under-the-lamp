@@ -5,7 +5,8 @@
 - ``agent``:按 ``route`` 从注册中心绑定工具子集(``refund_flow`` 用售后
   prompt + 退款控制工具,其余用通用 prompt + 业务工具),流式调用绑定
   工具的模型,累加 ``AIMessageChunk`` 并把完整回复写回 ``messages``;
-- ``tools``:所有工具调用统一走 :mod:`app.tools.engine`;``suggest_handoff``
+- ``tools``:所有工具调用统一走 :mod:`app.tools.engine`,且只允许执行本
+  路由实际绑定的工具(未绑定/幻觉调用按未知工具审计);``suggest_handoff``
   与 ``submit_refund`` 先做参数/订单校验,再把建议合并进
   ``suggested_actions``;``create_ticket`` 在执行前先 ``interrupt`` 等待
   前端确认,未确认前不执行任何工具(本节点 resume 后会从头重跑);
@@ -79,7 +80,7 @@ _INVALID_HANDOFF_OPTIONS = "参数无效: options 只能是 transfer/ticket。"
 _INVALID_REFUND_ORDER = "订单号与当前订单不一致,无法准备退款表单。"
 _VALID_HANDOFF_OPTIONS = frozenset({"transfer", "ticket"})
 _VALID_TICKET_TYPES = frozenset({"售后", "投诉", "咨询"})
-_TICKET_CANCEL_TEXT = "用户在前端取消建单"
+_TICKET_CANCEL_TEXT = "用户取消了本次建工单,请不要再发起。"
 _TICKET_INVALID_CONFIRM_TEXT = "确认信息无效,已按取消处理"
 _TICKET_MULTIPLE_TEXT = "一轮只能处理一个建工单请求"
 
@@ -133,6 +134,25 @@ def _refund_order_matches(args: dict, order_data: dict) -> bool:
     order_id = args.get("order_id")
     current = order_data.get("order_id") if isinstance(order_data, dict) else None
     return bool(order_id) and current is not None and str(order_id) == str(current)
+
+
+def _bound_specs(
+    route: str,
+    all_specs: dict[str, ToolSpec],
+    explicit_tools: Sequence[BaseTool] | None,
+) -> dict[str, ToolSpec]:
+    """Return the ``{name: spec}`` allowlist executable on this route.
+
+    This mirrors the binding decided by ``agent_node``: the tools offered to
+    the model are exactly the tools allowed to execute. A hallucinated tool
+    outside this mapping is treated as unknown by the engine and audited.
+    """
+    if explicit_tools is None:
+        bound = tools_for_route(route, all_specs)
+    else:
+        bound = explicit_tools
+    names = {tool.name for tool in bound}
+    return {name: spec for name, spec in all_specs.items() if name in names}
 
 
 def build_agent_subgraph(
@@ -235,7 +255,11 @@ def build_agent_subgraph(
         return update
 
     def tools_node(state: AgentState) -> dict[str, Any]:
-        specs = get_all_specs(settings)
+        route = state.get("route") or "business"
+        # Execution is limited to the tools bound for this route (or the
+        # explicit override): anything else is an unknown tool. This prevents
+        # hallucinated calls to unexposed or route-restricted tools.
+        specs = _bound_specs(route, get_all_specs(settings), explicit_tools)
         messages = state.get("messages", [])
         last = messages[-1] if messages else None
         if not isinstance(last, AIMessage) or not last.tool_calls:

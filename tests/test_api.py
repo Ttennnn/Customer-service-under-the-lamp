@@ -97,6 +97,21 @@ def test_chat_upstream_error_not_hang(client):
     assert "error" in body and "data: [DONE]" in body
 
 
+def test_lifespan_loads_builtin_tools_and_shuts_down_async_bridge(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.main.load_builtin_tools", lambda: calls.append("load")
+    )
+    monkeypatch.setattr(
+        "app.main.shutdown_async_bridge", lambda: calls.append("shutdown")
+    )
+
+    with TestClient(app):
+        pass
+
+    assert calls == ["load", "shutdown"]
+
+
 def test_legacy_chat_binds_only_three_read_tools(client, monkeypatch):
     seen = {}
 

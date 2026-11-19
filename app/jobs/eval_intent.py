@@ -228,7 +228,7 @@ def render_report(
     encoding = os.environ.get("PYTHONIOENCODING") or "(unset)"
 
     lines = [
-        "# ch06 意图分类评估报告",
+        "# ch08 意图分类评估报告",
         "",
         "## 运行参数",
         "",

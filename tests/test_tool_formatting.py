@@ -65,6 +65,33 @@ def test_logistics_status_code_is_translated():
     assert data["status_code"] == "运输中"
 
 
+def test_logistics_nested_trace_status_codes_are_translated():
+    spec = ToolSpec(
+        name="query_logistics",
+        description="",
+        json_schema={},
+        tool=query_order,
+        permission="read",
+        source="mcp",
+        mcp_server="logistics",
+    )
+    raw = json.dumps(
+        {
+            "tracking_no": "SF1",
+            "traces": [
+                {"desc": "已揽收", "status_code": "PICKED_UP"},
+                {"desc": "运输中", "status_code": "TRANSIT"},
+            ],
+        }
+    )
+    content, data = format_result(spec, raw, 2000)
+
+    assert "PICKED_UP" not in content
+    assert "TRANSIT" not in content
+    assert [trace["status_code"] for trace in data["traces"]] == ["已揽收", "运输中"]
+    assert [trace["desc"] for trace in data["traces"]] == ["已揽收", "运输中"]
+
+
 def test_known_tool_filters_fields_outside_allowlist():
     spec = builtin_specs()["query_order"]
     raw = json.dumps(

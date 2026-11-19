@@ -14,9 +14,10 @@
 import re
 import time
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from langchain.tools import tool
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
@@ -30,7 +31,8 @@ TICKET_NO_PATTERN = re.compile(r"^T\d{11}$")
 
 @tool
 def create_ticket(
-    description: str, ticket_type: Literal["售后", "投诉", "咨询", "退款"]
+    description: Annotated[str, Field(min_length=1, pattern=r"\S")],
+    ticket_type: Literal["售后", "投诉", "咨询", "退款"],
 ) -> str:
     """创建工单。
 
@@ -39,9 +41,15 @@ def create_ticket(
     转人工由前端独立模拟。
 
     Args:
-        description: 工单描述(问题详情)
+        description: 工单描述(问题详情),不能为空或只包含空白字符
         ticket_type: 工单类型,取值「售后」「投诉」「咨询」「退款」之一
     """
+    # Defense in depth: the JSON Schema rejects blank input before the tool
+    # runs; this guard keeps a direct in-process call from writing an empty
+    # ticket description.
+    if not description.strip():
+        return "创建工单失败:工单描述不能为空。"
+
     cid = current_conversation_id.get()
     if cid is None:
         return "创建工单失败:缺少会话上下文。"

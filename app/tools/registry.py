@@ -5,8 +5,9 @@
 文件包含两代 API,迁移期并存:
 
 - 旧 API(``ALL_TOOLS`` / ``TOOLS_BY_NAME`` / ``TOOL_LABELS`` /
-  ``TOOL_TIMEOUTS`` / ``tool_timeout``):仍被 ``app.main``、
-  ``app.services.chat``、``app.agent.subgraph`` 消费,待后续任务迁移。
+  ``TOOL_TIMEOUTS`` / ``tool_timeout``):仍被 ``app.agent.raw_demo``、
+  ``app.agent.raw_loop``、``app.agent.subgraph``(标签)与
+  ``app.services.chat``(标签)消费,待后续任务迁移。
 - 新 API(``ToolSpec`` + ``register`` / ``load_builtin_tools`` /
   ``get_all_specs`` 等):内置工具通过 ``app.tools.builtin`` 包自动扫描,
   MCP 工具由 ``fetch_mcp_specs`` 合并。
@@ -17,6 +18,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+import threading
 from typing import TYPE_CHECKING
 
 from langchain_core.tools import BaseTool
@@ -67,19 +69,26 @@ TOOL_LABELS: dict[str, str] = {
 
 _BUILTIN: dict[str, ToolSpec] = {}
 _LOADED = False
+_LOCK = threading.RLock()
 
 
-def register(spec: ToolSpec) -> None:
-    """Register *spec*, rejecting duplicate names and illegal builtin writes."""
-    if spec.name in _BUILTIN:
-        raise ValueError(f"duplicate tool: {spec.name}")
+def _validate_spec(spec: ToolSpec) -> None:
+    """Reject builtin write tools that are not in the write-tool allowlist."""
     if spec.source == "builtin" and spec.permission == "write":
         if spec.name not in WRITE_TOOLS:
             raise ValueError(
                 f"builtin tool {spec.name!r} cannot declare write permission; "
                 f"only {sorted(WRITE_TOOLS)!r} are write tools"
             )
-    _BUILTIN[spec.name] = spec
+
+
+def register(spec: ToolSpec) -> None:
+    """Register *spec*, rejecting duplicate names and illegal builtin writes."""
+    _validate_spec(spec)
+    with _LOCK:
+        if spec.name in _BUILTIN:
+            raise ValueError(f"duplicate tool: {spec.name}")
+        _BUILTIN[spec.name] = spec
 
 
 def load_builtin_tools() -> None:
@@ -88,18 +97,43 @@ def load_builtin_tools() -> None:
     Builtin modules expose a module-level ``SPECS: list[ToolSpec]`` instead of
     registering as an import side effect, so reset + reload still works even
     when the modules are already cached in ``sys.modules``.
+
+    Loading is guarded by a lock with a double-checked ``_LOADED`` flag, so
+    concurrent first requests cannot race each other into a duplicate-tool
+    error. The whole scan is collected locally first and merged only after
+    every module imports successfully: a failing plugin leaves the registry
+    untouched instead of half-populated, so a later call can retry cleanly.
+    Names already registered (e.g. by tests or another caller) are skipped
+    during the merge, making scanned registration idempotent; a duplicate
+    name across two scanned modules is still a programmer error.
     """
     global _LOADED
     if _LOADED:
         return
 
-    import app.tools.builtin as builtin_pkg
+    with _LOCK:
+        if _LOADED:
+            return
 
-    for module_info in pkgutil.iter_modules(builtin_pkg.__path__):
-        module = importlib.import_module(f"{builtin_pkg.__name__}.{module_info.name}")
-        for spec in getattr(module, "SPECS", ()):
-            register(spec)
-    _LOADED = True
+        import app.tools.builtin as builtin_pkg
+
+        scanned: dict[str, ToolSpec] = {}
+        for module_info in pkgutil.iter_modules(builtin_pkg.__path__):
+            module = importlib.import_module(
+                f"{builtin_pkg.__name__}.{module_info.name}"
+            )
+            for spec in getattr(module, "SPECS", ()):
+                _validate_spec(spec)
+                if spec.name in scanned:
+                    raise ValueError(f"duplicate tool: {spec.name}")
+                scanned[spec.name] = spec
+
+        # Atomic merge: either every scanned spec lands, or (on an earlier
+        # import/validation failure) none of them did. Skipping names that are
+        # already present keeps reload/re-entry paths idempotent.
+        for name, spec in scanned.items():
+            _BUILTIN.setdefault(name, spec)
+        _LOADED = True
 
 
 def builtin_specs() -> dict[str, ToolSpec]:
@@ -131,5 +165,6 @@ def get_all_specs(settings: Settings | None = None) -> dict[str, ToolSpec]:
 def reset_registry() -> None:
     """Clear the registry so tests can start from a clean slate."""
     global _LOADED
-    _BUILTIN.clear()
-    _LOADED = False
+    with _LOCK:
+        _BUILTIN.clear()
+        _LOADED = False

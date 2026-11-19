@@ -2,7 +2,7 @@
 
 父图负责:
 
-- 指代消解 / Query 改写(``resolve_query``)与八类意图分类;
+- 指代消解 / Query 改写(``resolve_query``)与九类意图分类;
 - 硬编码意图 → 五出口路由 ``escalate / fallback_script / knowledge /
   refund_flow / business``;
 - 知识类与退款类强制预检索 + 置信度闸;闸失败直接写兜底话术,不进 Agent;

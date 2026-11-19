@@ -1451,7 +1451,7 @@ Confirm ports 8101/8102 are listening.
 
 - [ ] **Step 4: Run acceptance 1–6**
 
-- 验收 1: `app/tools/builtin/promotions.py` exists; restart客服; ask 「现在有什么优惠活动」; Agent calls `query_promotions`.
+- 验收 1: `app/tools/builtin/promotions.py` exists; restart客服; ask 「订单 1001 能参加什么优惠活动」(业务路由问题;纯知识问题会被置信度闸拦截,不进 Agent); Agent calls `query_promotions`.
 - 验收 2: ask 「订单 1001 的物流到哪了」; logs/tool frames show `query_order` then MCP `query_logistics`; answer includes tracking data.
 - 验收 3: add `query_delivery_eta` to `logistics_server.py`, restart only 8101, ask 「这单预计什么时候送达」; Agent uses the new tool without restarting客服.
 - 验收 4: 「帮我建个工单」→ follow-up missing description → preview → confirm → `tickets` row + ticket number in reply.

@@ -138,3 +138,11 @@ def test_agent_prompt_has_handoff_and_ticket_confirmation_rules():
         "",
     )
     assert "[1] 章节:退货政策" in material
+
+
+def test_agent_prompt_mentions_the_promotions_tool():
+    from app.prompts.customer_service import render_agent_system_prompt
+
+    prompt = render_agent_system_prompt()
+    assert "query_promotions" in prompt
+    assert "优惠" in prompt

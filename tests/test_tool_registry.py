@@ -4,8 +4,14 @@
 (内置优先)、以及模块已缓存时 ``reset_registry`` + 重新加载仍可用。
 """
 
+import importlib
+import pkgutil
+import threading
+
 import pytest
 from langchain.tools import tool
+
+import app.tools.builtin as builtin_pkg
 
 from app.config import Settings
 from app.tools.registry import (
@@ -91,3 +97,66 @@ def test_reset_registry_reloads_when_modules_already_cached():
     reset_registry()
     load_builtin_tools()
     assert "query_promotions" in builtin_specs()
+
+
+def _expected_builtin_names() -> set[str]:
+    names: set[str] = set()
+    for module_info in pkgutil.iter_modules(builtin_pkg.__path__):
+        module = importlib.import_module(
+            f"{builtin_pkg.__name__}.{module_info.name}"
+        )
+        names.update(spec.name for spec in getattr(module, "SPECS", ()))
+    return names
+
+
+def test_concurrent_first_load_registers_one_spec_set():
+    reset_registry()
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def load() -> None:
+        try:
+            barrier.wait(timeout=5)
+            load_builtin_tools()
+        except BaseException as exc:  # noqa: BLE001 - surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=load) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert set(builtin_specs()) == _expected_builtin_names()
+
+
+def test_failed_scan_leaves_registry_untouched_and_retryable(monkeypatch):
+    import app.tools.registry as registry
+
+    reset_registry()
+    calls = {"n": 0}
+
+    class _FlakyImportlib:
+        """Proxy for the registry's module-level ``importlib`` reference."""
+
+        @staticmethod
+        def import_module(name):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise ImportError("simulated plugin import failure")
+            return importlib.import_module(name)
+
+    monkeypatch.setattr(registry, "importlib", _FlakyImportlib)
+    with pytest.raises(ImportError):
+        load_builtin_tools()
+
+    # The failed scan must not leave a partial registry behind, and a later
+    # call must be able to retry from a clean slate instead of hitting a
+    # duplicate-tool error.
+    assert registry._BUILTIN == {}
+    assert registry._LOADED is False
+
+    monkeypatch.setattr(registry, "importlib", importlib)
+    load_builtin_tools()
+    assert set(builtin_specs()) == _expected_builtin_names()

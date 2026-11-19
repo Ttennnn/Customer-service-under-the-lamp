@@ -34,25 +34,30 @@ from app.services.chat import stream_chat
 from app.services.context_budget import validate_budget
 from app.services.extract import extract_after_sale
 from app.services.summary_job import shutdown_summary_executor
-from app.tools.registry import get_all_specs
+from app.tools.async_bridge import shutdown_async_bridge
+from app.tools.registry import get_all_specs, load_builtin_tools
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Wire logging, self-check the context budget, release on shutdown.
+    """Wire logging, load plugins, self-check the budget, release on shutdown.
 
-    The ch06 graph is still built lazily on the first request (and the ch07
-    graph is never built here), so startup stays cheap and offline-safe.
+    Builtin tools are scanned once here so a broken plugin/import surfaces at
+    startup instead of failing the first chat turn. The ch06 graph is still
+    built lazily on the first request (and the ch07 graph is never built
+    here), so startup stays cheap and offline-safe.
     """
     configure_file_logging()
+    load_builtin_tools()
     validate_budget(get_settings())
     try:
         yield
     finally:
         close_ch06_graph(app)
         shutdown_summary_executor()
+        shutdown_async_bridge()
 
 
 app = FastAPI(lifespan=lifespan)

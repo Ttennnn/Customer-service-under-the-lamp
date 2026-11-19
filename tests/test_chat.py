@@ -147,3 +147,43 @@ def test_legacy_chat_does_not_bind_or_execute_create_ticket(session):
     tool_rows = [row for row in session.query(Message).all() if row.role == "tool"]
     assert len(tool_rows) == 1
     assert "未知工具" in tool_rows[0].content
+
+
+def test_legacy_specs_none_cannot_execute_create_ticket(session):
+    llm = FakeTicketLLM()
+    events = list(
+        stream_chat(llm, session, LEGACY_TOOLS, "SYS", "u1", "投诉", 1000)
+    )
+
+    # ``specs=None`` must derive the allowlist from the bound tools, not fall
+    # back to the full registry.
+    assert llm.bound_names == ["query_order", "query_product", "query_faq"]
+    assert session.query(Ticket).count() == 0
+    audit = session.query(ToolAuditLog).filter_by(tool_name="create_ticket").one()
+    assert audit.status == "失败"
+    assert "未知工具" in (audit.error_message or "")
+    assert events[-1] == "转人工"
+
+
+def test_legacy_specs_none_passes_only_bound_specs_to_engine(session, monkeypatch):
+    calls = []
+
+    def fake_execute_tool_call(tool_call, cid, **kwargs):
+        calls.append(set(kwargs["specs"]))
+        return ToolRun(status="ok", content="订单已签收")
+
+    monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
+    events = list(
+        stream_chat(
+            FakeLLM(tool_call=True),
+            session,
+            LEGACY_TOOLS,
+            "SYS",
+            "u1",
+            "订单1001物流",
+            1000,
+        )
+    )
+
+    assert calls == [{"query_order", "query_product", "query_faq"}]
+    assert events[-1] == "查到"
