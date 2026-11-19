@@ -29,6 +29,7 @@ from app.tools.async_bridge import run_async
 from app.tools.audit import record_tool_audit
 from app.tools.context import current_conversation_id
 from app.tools.formatting import classify_result, format_result
+from app.tools.mcp_client import normalize_mcp_result
 from app.tools.policy import effective_permission
 from app.tools.registry import get_all_specs
 from app.tools.spec import ToolRun, ToolSpec
@@ -119,7 +120,9 @@ def _invoke(
 ) -> object:
     """Dispatch to the async bridge for MCP tools, sync thread otherwise."""
     if spec.source == "mcp":
-        return run_async(spec.tool.ainvoke(arguments), timeout=timeout)
+        raw = run_async(spec.tool.ainvoke(arguments), timeout=timeout)
+        # MCP 适配器返回 content-block 列表,先还原成内层 JSON 再分诊/格式化。
+        return normalize_mcp_result(raw)
     return _invoke_sync(spec, arguments, timeout, ctx)
 
 

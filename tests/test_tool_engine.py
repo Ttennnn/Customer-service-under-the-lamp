@@ -11,10 +11,13 @@ import time
 
 import pytest
 from langchain.tools import tool
+from langchain_core.tools import StructuredTool
 
+from app.config import Settings
 from app.models import ToolAuditLog
 from app.tools.context import current_conversation_id
 from app.tools.engine import deny_permission, deny_validation, execute, execute_tool_call
+from app.tools.mcp_client import _spec_from_mcp_tool
 from app.tools.registry import register, reset_registry
 from app.tools.spec import ToolSpec
 
@@ -227,24 +230,42 @@ def _mcp_spec(tool_obj, timeout=2.0):
 
 
 class _AsyncMCPTool:
-    def __init__(self):
+    """Returns the adapter's real shape: a list of text content blocks."""
+
+    def __init__(self, payload=None):
         self.calls = []
         self.thread_name = None
+        self.payload = payload or {
+            "tracking_no": "SF1",
+            "carrier": "顺丰速运",
+            "status_code": "TRANSIT",
+            "traces": [{"desc": "运输中"}],
+        }
 
     async def ainvoke(self, arguments):
         import threading
 
         self.calls.append(arguments)
         self.thread_name = threading.current_thread().name
-        return json.dumps(
-            {
-                "tracking_no": arguments["tracking_no"],
-                "carrier": "顺丰速运",
-                "status_code": "TRANSIT",
-                "traces": [{"desc": "运输中"}],
-            },
-            ensure_ascii=False,
-        )
+        payload = dict(self.payload)
+        if "tracking_no" in payload:
+            payload["tracking_no"] = arguments["tracking_no"]
+        return [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
+
+
+def _adapter_structured_tool(payload: str = '{"found": false}'):
+    """Build a tool the way langchain-mcp-adapters does (dict full inputSchema)."""
+
+    async def _call(**kwargs):
+        return ([{"type": "text", "text": payload}], None)
+
+    return StructuredTool(
+        name="query_logistics",
+        description="",
+        args_schema=MCP_SCHEMA,
+        coroutine=_call,
+        response_format="content_and_artifact",
+    )
 
 
 class _SlowAsyncMCPTool:
@@ -275,3 +296,35 @@ def test_mcp_read_timeout_is_retried(session):
     assert run.retry_count == 1
     row = session.query(ToolAuditLog).one()
     assert row.status == "超时" and row.retry_count == 1
+
+
+def test_mcp_content_block_found_false_is_empty(session):
+    run = execute(
+        _mcp_spec(_AsyncMCPTool({"found": False})),
+        {"tracking_no": "SF1"},
+        conversation_id=1,
+    )
+    assert run.status == "empty"
+    assert "未查询到相关结果" in run.content
+
+
+def test_mcp_adapter_schema_rejects_missing_and_wrong_type(session):
+    settings = Settings(_env_file=None, openai_api_key="test")
+    spec = _spec_from_mcp_tool(_adapter_structured_tool(), "logistics", settings)
+    assert spec.json_schema["type"] == "object"
+    assert spec.json_schema["required"] == ["tracking_no"]
+
+    missing = execute(spec, {}, conversation_id=1)
+    assert missing.status == "validation_error"
+    assert "缺少必填参数 tracking_no" in missing.content
+
+    wrong_type = execute(spec, {"tracking_no": 123}, conversation_id=1)
+    assert wrong_type.status == "validation_error"
+    assert "类型应为 string" in wrong_type.content
+
+
+def test_real_adapter_structured_tool_result_is_normalized(session):
+    settings = Settings(_env_file=None, openai_api_key="test")
+    spec = _spec_from_mcp_tool(_adapter_structured_tool(), "logistics", settings)
+    run = execute(spec, {"tracking_no": "SF1"}, conversation_id=1)
+    assert run.status == "empty"

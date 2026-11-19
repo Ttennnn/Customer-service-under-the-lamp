@@ -4,13 +4,14 @@
 """
 
 import asyncio
+import json
 
 import pytest
 
 from app.config import Settings
 from app.tools.async_bridge import run_async, shutdown_async_bridge
 from app.tools.builtin.orders import query_order
-from app.tools.mcp_client import _build_client, fetch_mcp_specs
+from app.tools.mcp_client import _build_client, fetch_mcp_specs, normalize_mcp_result
 from app.tools.registry import get_all_specs, load_builtin_tools, reset_registry
 from app.tools.spec import ToolSpec
 
@@ -52,18 +53,37 @@ def test_run_async_rejects_call_from_loop_thread():
     assert run_async(inner()) == "done"
 
 
+# --- 结果归一化 ---
+
+
+def test_normalize_mcp_result_unwraps_text_blocks():
+    payload = {"tracking_no": "SF1", "status_code": "TRANSIT"}
+    raw = [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
+    assert normalize_mcp_result(raw) == payload
+
+
+def test_normalize_mcp_result_keeps_non_text_blocks():
+    raw = [{"type": "image", "base64": "abc", "mime_type": "image/png"}]
+    assert normalize_mcp_result(raw) is raw
+
+
 # --- 发现与合并 ---
 
 
+FULL_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"tracking_no": {"type": "string"}},
+    "required": ["tracking_no"],
+}
+
+
 class FakeTool:
+    """Adapter-shaped fake: dict ``args_schema`` holds the full inputSchema."""
+
     def __init__(self, name: str):
         self.name = name
         self.description = f"{name} mock"
-        self.args = {
-            "type": "object",
-            "properties": {"tracking_no": {"type": "string"}},
-            "required": ["tracking_no"],
-        }
+        self.args_schema = dict(FULL_INPUT_SCHEMA)
 
 
 class FakeClient:
@@ -98,6 +118,7 @@ def test_build_client_uses_streamable_http_transport():
         "url": "http://x:8101/mcp",
     }
     assert client.connections["aftersales"]["transport"] == "streamable_http"
+    assert client.handle_tool_errors is False
 
 
 def test_fetch_builds_mcp_specs(monkeypatch):
@@ -123,7 +144,9 @@ def test_fetch_builds_mcp_specs(monkeypatch):
     assert logistics.timeout == 10
     assert logistics.classify is None
     assert logistics.format_result is None
+    # The full adapter inputSchema survives, not just its ``properties`` map.
     assert logistics.json_schema["type"] == "object"
+    assert logistics.json_schema["required"] == ["tracking_no"]
     assert specs["query_warranty"].mcp_server == "aftersales"
 
 

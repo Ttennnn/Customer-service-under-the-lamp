@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -43,20 +44,49 @@ def _build_client(settings: Settings) -> MultiServerMCPClient:
                 "transport": "streamable_http",
                 "url": settings.mcp_aftersales_url,
             },
-        }
+        },
+        # MCP ``isError=True`` 结果改为抛异常,由引擎按失败处理而不是伪装成功。
+        handle_tool_errors=False,
     )
 
 
+def _coerce_json_schema(schema: object) -> dict | None:
+    """Return *schema* as a full JSON Schema dict, or ``None``."""
+    if isinstance(schema, dict):
+        return schema
+    model_json_schema = getattr(schema, "model_json_schema", None)
+    if callable(model_json_schema):
+        return model_json_schema()
+    return None
+
+
+def _json_schema_from_tool(tool: BaseTool) -> dict:
+    """Derive the tool's **full** JSON Schema.
+
+    ``langchain-mcp-adapters`` builds ``StructuredTool(args_schema=tool.inputSchema)``
+    with a dict, so ``tool.tool_call_schema`` (and ``args_schema``) is already the
+    complete ``{"type": "object", "properties": ..., "required": ...}`` schema.
+
+    ``BaseTool.args`` must NOT be used: in ``langchain-core`` it returns only the
+    ``properties`` map, which would silently disable required/type validation.
+    """
+    for attr in ("tool_call_schema", "args_schema"):
+        schema = _coerce_json_schema(getattr(tool, attr, None))
+        if schema is not None:
+            return schema
+
+    # 最后兜底:把 ``args`` 的 properties 映射包成合法 object schema。
+    args = getattr(tool, "args", None)
+    if isinstance(args, dict):
+        return {"type": "object", "properties": args}
+    return {"type": "object", "properties": {}}
+
+
 def _spec_from_mcp_tool(tool: BaseTool, server_name: str, settings: Settings) -> ToolSpec:
-    schema = getattr(tool, "args", None)
-    if not schema:
-        args_schema = getattr(tool, "args_schema", None)
-        if args_schema is not None:
-            schema = args_schema.model_json_schema()
     return ToolSpec(
         name=tool.name,
         description=getattr(tool, "description", "") or "",
-        json_schema=schema or {"type": "object", "properties": {}},
+        json_schema=_json_schema_from_tool(tool),
         tool=tool,
         permission="read",
         source="mcp",
@@ -65,6 +95,31 @@ def _spec_from_mcp_tool(tool: BaseTool, server_name: str, settings: Settings) ->
         classify=None,
         format_result=None,
     )
+
+
+def normalize_mcp_result(raw: object) -> object:
+    """Unwrap MCP content blocks to the inner text/JSON payload.
+
+    ``langchain-mcp-adapters`` returns ``[{"type": "text", "text": "<json>"}]``
+    from ``_convert_call_tool_result``; passing that wrapper to the default
+    classifier/formatter hides ``found:false`` and internal enum codes. We
+    concatenate text blocks, parse JSON when possible, and otherwise return
+    the text. Non-text blocks are left untouched for the generic formatter.
+    """
+    if not isinstance(raw, list):
+        return raw
+    if not raw:
+        return ""
+    if not all(
+        isinstance(block, dict) and block.get("type") == "text" for block in raw
+    ):
+        return raw
+
+    text = "".join(str(block.get("text") or "") for block in raw)
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return text
 
 
 async def _fetch_all(
