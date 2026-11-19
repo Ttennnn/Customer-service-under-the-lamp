@@ -14,6 +14,14 @@ from langchain_core.tools import BaseTool
 
 Permission = Literal["read", "write"]
 ToolSource = Literal["builtin", "mcp"]
+ToolRunStatus = Literal[
+    "ok",
+    "empty",
+    "error",
+    "timeout",
+    "validation_error",
+    "permission_denied",
+]
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,23 @@ class ToolSpec:
     exposed_to_agent: bool = True
     routes: frozenset[str] | None = None
     label: str | None = None
+
+
+@dataclass
+class ToolRun:
+    """一次工具调用的最终结局。
+
+    这是执行引擎唯一对外的返回类型:模型可见内容放 ``content``,程序可用
+    的结构化结果放 ``data``;``status`` 只表达执行层面的结局,业务空结果
+    仍是 ``empty`` 而不是 ``error``。
+    """
+
+    status: ToolRunStatus
+    content: str
+    data: object = None
+    duration_ms: int = 0
+    retry_count: int = 0
+    error_message: str | None = None
 
 
 def spec_from_tool(

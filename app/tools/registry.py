@@ -23,6 +23,7 @@ from langchain_core.tools import BaseTool
 
 from app.tools.builtin.orders import query_order, query_product
 from app.tools.faq import query_faq
+from app.tools.policy import WRITE_TOOLS
 from app.tools.spec import ToolSpec
 from app.tools.ticket import create_ticket
 
@@ -77,9 +78,15 @@ def fetch_mcp_specs(settings: Settings) -> list[ToolSpec]:
 
 
 def register(spec: ToolSpec) -> None:
-    """Register *spec*, rejecting duplicate builtin names."""
+    """Register *spec*, rejecting duplicate names and illegal builtin writes."""
     if spec.name in _BUILTIN:
         raise ValueError(f"duplicate tool: {spec.name}")
+    if spec.source == "builtin" and spec.permission == "write":
+        if spec.name not in WRITE_TOOLS:
+            raise ValueError(
+                f"builtin tool {spec.name!r} cannot declare write permission; "
+                f"only {sorted(WRITE_TOOLS)!r} are write tools"
+            )
     _BUILTIN[spec.name] = spec
 
 
