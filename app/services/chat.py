@@ -41,6 +41,7 @@ from collections.abc import Iterator
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.rag.router import is_pure_knowledge_question
 from app.rag.self_check import assess_evidence
 from app.services.context import build_messages
@@ -109,6 +110,7 @@ def stream_chat(
     self_check_llm=None,
     *,
     specs: dict[str, ToolSpec] | None = None,
+    settings: Settings | None = None,
 ) -> Iterator[str]:
     """Stream an assistant reply token by token, executing tools when asked.
 
@@ -124,11 +126,12 @@ def stream_chat(
     ``None`` falls back to ``llm`` for backwards compatibility.
 
     ``tools`` is the list bound to the model and therefore the allowlist for
-    execution. ``specs`` is the registry mapping used to resolve a call and
-    resolve timeouts/formatting; ``None`` lets the engine load the registry
-    itself. A call for a tool that is not bound in ``tools`` (e.g. a
-    hallucinated ``create_ticket`` on the legacy page) is answered with an
-    error string and never executed.
+    execution: only specs for those names are handed to the engine, so a call
+    for an unbound tool (e.g. a hallucinated ``create_ticket`` on the legacy
+    page) resolves to ``未知工具`` through the normal path and gets audited, but
+    never executes. ``specs`` is the registry mapping; ``None`` lets the engine
+    load the registry itself. ``settings`` is forwarded to the engine so the
+    caller's retry/timeout configuration is used.
     """
     conversation = get_or_create_conversation(session, user_id)
     cid = conversation.id
@@ -206,6 +209,16 @@ def stream_chat(
     # session free of uncommitted writes while a tool (e.g. create_ticket)
     # opens its own session, and lets the whole round commit atomically below.
     bound_names = {getattr(tool, "name", None) for tool in tools}
+    # Only bindings of the tools actually exposed to the model may execute.
+    # Unbound/hallucinated names (e.g. create_ticket on the legacy page) are
+    # still sent to the engine, which returns "未知工具" and writes an audit
+    # row; they can never write business data. The filtered mapping also keeps
+    # legacy from running control or MCP tools.
+    call_specs = (
+        {name: spec for name, spec in specs.items() if name in bound_names}
+        if specs is not None
+        else None
+    )
     results: list[tuple[dict, str]] = []
     for tc in ai_msg.tool_calls:
         spec = specs.get(tc["name"]) if specs is not None else None
@@ -219,16 +232,17 @@ def stream_chat(
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        if tc["name"] not in bound_names:
-            # The model can hallucinate a tool that this page never bound
-            # (legacy has no write tools); never execute it.
-            results.append((tc, f"未知工具：{tc['name']}"))
-            continue
         current_citation_collector.set(collector)
-        if specs is not None:
-            run = execute_tool_call(tc, cid, specs=specs)
-        else:
-            run = execute_tool_call(tc, cid)
+        # Preserve the legacy budget: faq gets one attempt with its historical
+        # 25s timeout; other reads keep one retry.
+        run = execute_tool_call(
+            tc,
+            cid,
+            specs=call_specs,
+            settings=settings,
+            retries=0 if tc["name"] == "query_faq" else 1,
+            timeout=25.0 if tc["name"] == "query_faq" else None,
+        )
         results.append((tc, run.content))
 
     # Persist the assistant tool_calls row and its result rows atomically, so

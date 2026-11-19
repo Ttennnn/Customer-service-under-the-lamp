@@ -2,7 +2,7 @@ from langchain_core.messages import AIMessage
 
 from app.agent.tools import legacy_tools
 from app.config import Settings
-from app.models import Message, Ticket
+from app.models import Message, Ticket, ToolAuditLog
 from app.services.chat import stream_chat
 from app.tools.registry import get_all_specs
 from app.tools.spec import ToolRun
@@ -77,14 +77,28 @@ class FakeFaqLLM:
     def stream(self, messages):
         yield FakeChunk("直接"); yield FakeChunk("回答")
 
-def test_query_faq_tool_uses_extended_timeout(session, monkeypatch):
+def test_query_faq_engine_call_pins_legacy_retry_budget(session, monkeypatch):
     calls = []
+
     def fake_execute_tool_call(tool_call, cid, **kwargs):
-        calls.append((tool_call["name"], tool_call["args"], kwargs["specs"]["query_faq"].timeout))
+        calls.append(
+            (
+                tool_call["name"],
+                tool_call["args"],
+                kwargs["retries"],
+                kwargs["timeout"],
+            )
+        )
         return ToolRun(status="ok", content="问:邮费怎么算?\n答:满 99 元包邮")
+
     monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
-    events = list(stream_chat(FakeFaqLLM(), session, LEGACY_TOOLS, "SYS", "u1", "邮费", 1000, specs=SPECS))
-    assert calls == [("query_faq", {"keyword": "邮费"}, 30.0)]
+    events = list(
+        stream_chat(
+            FakeFaqLLM(), session, LEGACY_TOOLS, "SYS", "u1", "邮费", 1000, specs=SPECS
+        )
+    )
+    # One attempt at the historical 25s budget — not spec 30s x 3 retries.
+    assert calls == [("query_faq", {"keyword": "邮费"}, 0, 25.0)]
     assert events[-1] == "查到"
 
 
@@ -92,7 +106,7 @@ def test_legacy_tool_call_goes_through_engine(session, monkeypatch):
     calls = []
 
     def fake_execute_tool_call(tool_call, cid, **kwargs):
-        calls.append((tool_call["name"], tool_call["args"]))
+        calls.append((tool_call["name"], tool_call["args"], set(kwargs["specs"])))
         return ToolRun(status="ok", content="订单已签收")
 
     monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
@@ -108,27 +122,28 @@ def test_legacy_tool_call_goes_through_engine(session, monkeypatch):
             specs=SPECS,
         )
     )
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [
+        (
+            "query_order",
+            {"order_id": "1001"},
+            {"query_order", "query_product", "query_faq"},
+        )
+    ]
     assert events[-1] == "查到"
 
 
-def test_legacy_chat_does_not_bind_or_execute_create_ticket(session, monkeypatch):
-    calls = []
-
-    def fake_execute_tool_call(tool_call, cid, **kwargs):
-        calls.append(tool_call["name"])
-        return ToolRun(status="ok", content="不应执行")
-
-    monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
+def test_legacy_chat_does_not_bind_or_execute_create_ticket(session):
     llm = FakeTicketLLM()
     events = list(
         stream_chat(llm, session, LEGACY_TOOLS, "SYS", "u1", "投诉", 1000, specs=SPECS)
     )
-    # Legacy binds exactly the three read tools; create_ticket is neither
-    # bound nor executed, so a hallucinated call cannot write a ticket.
+    # Legacy binds exactly the three read tools; a hallucinated create_ticket
+    # reaches the engine as an unknown tool (audited) and cannot write.
     assert llm.bound_names == ["query_order", "query_product", "query_faq"]
-    assert calls == []
     assert session.query(Ticket).count() == 0
+    audit = session.query(ToolAuditLog).filter_by(tool_name="create_ticket").one()
+    assert audit.status == "失败"
+    assert audit.tool_source == "builtin"
     tool_rows = [row for row in session.query(Message).all() if row.role == "tool"]
     assert len(tool_rows) == 1
     assert "未知工具" in tool_rows[0].content

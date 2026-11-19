@@ -131,6 +131,7 @@ def chat(
             settings.max_context_tokens,
             self_check_llm=self_check_llm,
             specs=specs,
+            settings=settings,
         ):
             yield ServerSentEvent(raw_data=token)
     except Exception:  # noqa: BLE001 - stream already in flight, must end cleanly

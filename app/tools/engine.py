@@ -170,8 +170,13 @@ def execute(
     confirmed: bool = False,
     settings: Settings | None = None,
     retries: int | None = None,
+    timeout: float | None = None,
 ) -> ToolRun:
-    """Execute *spec* through the unified pipeline."""
+    """Execute *spec* through the unified pipeline.
+
+    ``timeout`` overrides the timeout resolved from the spec/settings; it lets
+    a caller (e.g. legacy ``/chat``) keep its historical per-tool budget.
+    """
     settings = settings or get_settings()
     started = time.monotonic()
 
@@ -232,11 +237,12 @@ def execute(
     else:
         max_retries = max(0, settings.tool_max_retries)
 
-    timeout = spec.timeout or (
-        settings.mcp_tool_timeout_s
-        if spec.source == "mcp"
-        else settings.tool_default_timeout_s
-    )
+    if timeout is None:
+        timeout = spec.timeout or (
+            settings.mcp_tool_timeout_s
+            if spec.source == "mcp"
+            else settings.tool_default_timeout_s
+        )
 
     token = current_conversation_id.set(conversation_id)
     try:
@@ -374,8 +380,14 @@ def execute_tool_call(
     confirmed: bool = False,
     specs: dict[str, ToolSpec] | None = None,
     settings: Settings | None = None,
+    retries: int | None = None,
+    timeout: float | None = None,
 ) -> ToolRun:
-    """Execute a model-emitted tool call dict through the unified pipeline."""
+    """Execute a model-emitted tool call dict through the unified pipeline.
+
+    ``retries`` and ``timeout`` override the spec/settings defaults and are
+    forwarded to :func:`execute`, so callers can pin a per-call budget.
+    """
     settings = settings or get_settings()
     started = time.monotonic()
 
@@ -420,6 +432,8 @@ def execute_tool_call(
         tool_call_id=tool_call_id,
         confirmed=confirmed,
         settings=settings,
+        retries=retries,
+        timeout=timeout,
     )
 
 
