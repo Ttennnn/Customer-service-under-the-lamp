@@ -2,7 +2,7 @@
 
 These tests exercise ``stream_chat`` end-to-end with fake LLMs and a
 monkeypatched ``retrieve_hybrid`` so no live LLM/Milvus/MySQL is touched.
-The real ``execute_tool`` is used for ``query_faq`` cases so the citation
+The real engine path is used for ``query_faq`` cases so the citation
 collector is populated through the same contextvar path as production.
 """
 
@@ -12,6 +12,8 @@ import logging
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage
 
+from app.agent.tools import legacy_tools
+from app.config import Settings
 from app.models import LowConfidenceQuestion, Message
 from app.rag.retrieval import (
     RetrievalResult,
@@ -22,7 +24,17 @@ from app.rag.self_check import EvidenceAssessment
 from app.services.chat import stream_chat
 from app.tools.context import current_citation_collector
 from app.tools.faq import ERROR_TEXT
-from app.tools.registry import ALL_TOOLS
+from app.tools.registry import get_all_specs
+from app.tools.spec import ToolRun
+
+
+def _legacy_binding():
+    settings = Settings(_env_file=None, openai_api_key="test")
+    specs = get_all_specs(settings)
+    return specs, legacy_tools(specs)
+
+
+SPECS, LEGACY_TOOLS = _legacy_binding()
 
 
 class FakeChunk:
@@ -124,7 +136,7 @@ def _reset_collector():
 
 def test_query_faq_emits_sources_frame(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("回答见[1]",))
@@ -134,12 +146,13 @@ def test_query_faq_emits_sources_frame(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "邮费怎么算",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -163,7 +176,7 @@ def test_pure_knowledge_question_forces_query_faq_tool_choice(
     session, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("回答见[1]",))
@@ -173,12 +186,13 @@ def test_pure_knowledge_question_forces_query_faq_tool_choice(
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "LX-A100 的色温是多少",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -195,26 +209,27 @@ def test_pure_knowledge_question_forces_query_faq_tool_choice(
 def test_order_only_question_uses_automatic_tool_choice(session, monkeypatch):
     calls = []
 
-    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
-        calls.append((tool.name, timeout_s, retries))
-        return '{"order_id":"1001","status":"运输中"}'
+    def fake_execute_tool_call(tool_call, cid, **kwargs):
+        calls.append(tool_call["name"])
+        return ToolRun(status="ok", content='{"order_id":"1001","status":"运输中"}')
 
-    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
     llm = FakeLLM([order_call()], final_tokens=("订单", "运输中"))
 
     frames = list(
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "我的订单到哪了",
             1000,
+            specs=SPECS,
         )
     )
 
-    assert calls == [("query_order", 5.0, 1)]
+    assert calls == ["query_order"]
     assert llm.bind_calls == [{}]
     assert not source_frames(frames)
     assert frames[-2:] == ["订单", "运输中"]
@@ -223,26 +238,27 @@ def test_order_only_question_uses_automatic_tool_choice(session, monkeypatch):
 def test_mixed_question_uses_automatic_tool_choice(session, monkeypatch):
     calls = []
 
-    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
-        calls.append((tool.name, timeout_s, retries))
-        return '{"order_id":"1001","status":"运输中"}'
+    def fake_execute_tool_call(tool_call, cid, **kwargs):
+        calls.append(tool_call["name"])
+        return ToolRun(status="ok", content='{"order_id":"1001","status":"运输中"}')
 
-    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
     llm = FakeLLM([order_call()], final_tokens=("订单已查到",))
 
     frames = list(
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "LX-Z900 的色温是多少，另外我的订单1001到哪了",
             1000,
+            specs=SPECS,
         )
     )
 
-    assert calls == [("query_order", 5.0, 1)]
+    assert calls == ["query_order"]
     assert llm.bind_calls == [{}]
     assert not source_frames(frames)
     assert frames[-1] == "订单已查到"
@@ -250,7 +266,7 @@ def test_mixed_question_uses_automatic_tool_choice(session, monkeypatch):
 
 def test_query_faq_useful_false_records_pool_and_refuses(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
@@ -262,12 +278,13 @@ def test_query_faq_useful_false_records_pool_and_refuses(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "支持以旧换新吗",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -290,7 +307,7 @@ def test_query_faq_infra_error_refuses_without_pool(session, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("milvus down")
 
-    monkeypatch.setattr("app.tools.faq.retrieve_hybrid", boom)
+    monkeypatch.setattr("app.tools.builtin.faq.retrieve_hybrid", boom)
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
     assessment = FakeAssessmentLLM(EvidenceAssessment(useful=True))
 
@@ -298,12 +315,13 @@ def test_query_faq_infra_error_refuses_without_pool(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "邮费怎么算",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -321,11 +339,11 @@ def test_query_faq_infra_error_refuses_without_pool(session, monkeypatch):
 def test_query_order_only_skips_sources_and_self_check(session, monkeypatch):
     calls = []
 
-    def fake_execute_tool(tool, args, timeout_s=5, retries=1):
-        calls.append((tool.name, timeout_s, retries))
-        return '{"order_id":"1001","status":"运输中"}'
+    def fake_execute_tool_call(tool_call, cid, **kwargs):
+        calls.append(tool_call["name"])
+        return ToolRun(status="ok", content='{"order_id":"1001","status":"运输中"}')
 
-    monkeypatch.setattr("app.services.chat.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.services.chat.execute_tool_call", fake_execute_tool_call)
     llm = FakeLLM([order_call()], final_tokens=("订单", "运输中"))
     assessment = FakeAssessmentLLM(error=RuntimeError("must not be called"))
 
@@ -333,16 +351,17 @@ def test_query_order_only_skips_sources_and_self_check(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "订单1001到哪了",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
-    assert calls == [("query_order", 5.0, 1)]
+    assert calls == ["query_order"]
     assert not source_frames(frames)
     assert assessment.calls == 0
     assert frames[-2:] == ["订单", "运输中"]
@@ -351,7 +370,7 @@ def test_query_order_only_skips_sources_and_self_check(session, monkeypatch):
 
 def test_mixed_intent_keeps_other_tool_answer(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM(
@@ -366,12 +385,13 @@ def test_mixed_intent_keeps_other_tool_answer(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "订单1001到哪了,支持以旧换新吗",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -395,7 +415,7 @@ def test_mixed_intent_keeps_other_tool_answer(session, monkeypatch):
 
 def test_self_check_failure_refuses_without_pool(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
@@ -405,12 +425,13 @@ def test_self_check_failure_refuses_without_pool(session, monkeypatch):
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "邮费怎么算",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -429,7 +450,7 @@ def test_mixed_intent_self_check_failure_keeps_answer_without_pool(
     session, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM(
@@ -442,12 +463,13 @@ def test_mixed_intent_self_check_failure_keeps_answer_without_pool(
         stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            LEGACY_TOOLS,
             "SYS",
             "u1",
             "订单1001到哪了,支持以旧换新吗",
             1000,
             self_check_llm=assessment,
+            specs=SPECS,
         )
     )
 
@@ -468,7 +490,7 @@ def test_mixed_intent_self_check_failure_keeps_answer_without_pool(
 
 def test_unknown_citation_is_logged_not_blocking(session, monkeypatch, caplog):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("结论见[1]和[9]",))
@@ -479,12 +501,13 @@ def test_unknown_citation_is_logged_not_blocking(session, monkeypatch, caplog):
             stream_chat(
                 llm,
                 session,
-                ALL_TOOLS,
+                LEGACY_TOOLS,
                 "SYS",
                 "u1",
                 "邮费怎么算",
                 1000,
                 self_check_llm=assessment,
+                specs=SPECS,
             )
         )
 

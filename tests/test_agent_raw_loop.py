@@ -68,7 +68,7 @@ def test_raw_loop_supports_two_tool_steps(monkeypatch):
     result = run_react_loop(
         ScriptedLLM([
             tool_chunk("query_order", '{"order_id":"1001"}', "c1"),
-            tool_chunk("query_logistics", '{"tracking_no":"SF1234567890"}', "c2"),
+            tool_chunk("query_product", '{"product_name":"无线蓝牙耳机"}', "c2"),
             text_chunk("已查到订单和物流"),
         ]),
         ALL_TOOLS,

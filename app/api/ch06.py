@@ -44,10 +44,10 @@ from app.services.history import (
     get_or_create_conversation,
     resolve_conversation,
 )
+from app.tools.builtin.tickets import TICKET_NO_PATTERN
 from app.tools.business import list_user_orders
-from app.tools.context import current_conversation_id
-from app.tools.executor import execute_tool
-from app.tools.ticket import TICKET_NO_PATTERN, create_ticket
+from app.tools.engine import execute
+from app.tools.registry import builtin_specs
 
 logger = logging.getLogger(__name__)
 
@@ -243,13 +243,21 @@ def ch06_chat_resume(
     generator owns its DB session because the request-scoped dependency
     session is not guaranteed to outlive the streamed response.
     """
+    # The model validator guarantees exactly one of the two was supplied:
+    # an order picker resumes with the chosen id string, a ticket dialog
+    # resumes with the confirmation decision dict.
+    if req.order_id is not None:
+        resume_value: str | dict = req.order_id
+    else:
+        resume_value = {"confirmed": bool(req.confirmed)}
+
     session = db_session.get_session_factory()()
     try:
         for payload in resume_chat_agent(
             graph,
             session,
             req.session_id,
-            req.order_id,
+            resume_value,
             settings=settings,
             conversation_id=req.conversation_id,
         ):
@@ -280,9 +288,11 @@ def ch06_refund(req: RefundRequest, session: Session = Depends(get_db)):
     """Create a refund ticket for an order in the user's demo catalogue.
 
     The order id and reason are validated before any DB write so an invalid
-    form never leaves a dirty ticket.  ``retries=0`` is deliberate: ticket
-    creation is not idempotent, so a timeout surfaces as 502 for a manual
-    retry instead of silently creating a duplicate refund.
+    form never leaves a dirty ticket.  The form submission is the trusted
+    confirmation for the engine's write gate.  ``retries=0`` is passed
+    explicitly (the engine already forces 0 for writes) because ticket
+    creation is not idempotent: a timeout surfaces as 502 for a manual retry
+    instead of silently creating a duplicate refund.
     """
     orders = list_user_orders(req.session_id)
     if req.order_id not in {order.get("order_id") for order in orders}:
@@ -291,22 +301,19 @@ def ch06_refund(req: RefundRequest, session: Session = Depends(get_db)):
     conversation = resolve_request_conversation(
         session, req.session_id, req.conversation_id
     )
-    token = current_conversation_id.set(conversation.id)
-    try:
-        result = execute_tool(
-            create_ticket,
-            {
-                "description": f"订单 {req.order_id} 退款申请，原因：{req.reason}",
-                "ticket_type": "退款",
-            },
-            timeout_s=5,
-            retries=0,
-        )
-    finally:
-        current_conversation_id.reset(token)
+    run = execute(
+        builtin_specs()["create_ticket"],
+        {
+            "description": f"订单 {req.order_id} 退款申请，原因：{req.reason}",
+            "ticket_type": "退款",
+        },
+        conversation_id=conversation.id,
+        confirmed=True,
+        retries=0,
+    )
 
-    if not TICKET_NO_PATTERN.match(result or ""):
-        logger.warning("ch06 refund ticket creation failed: %r", result)
+    if run.status != "ok" or not TICKET_NO_PATTERN.match(str(run.data or "")):
+        logger.warning("ch06 refund ticket creation failed: %r", run.content)
         raise HTTPException(status_code=502, detail=REFUND_CREATE_FAILED)
 
-    return {"ticket_no": result, "message": "退款单已创建"}
+    return {"ticket_no": run.data, "message": "退款单已创建"}

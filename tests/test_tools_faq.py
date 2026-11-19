@@ -37,7 +37,7 @@ def _reset_collector():
 
 def test_query_faq_returns_cited_evidence(monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: _result([make_chunk(1), make_chunk(2)]),
     )
     out = query_faq.func("完全不相关的问题")
@@ -48,7 +48,7 @@ def test_query_faq_returns_cited_evidence(monkeypatch):
 def test_query_faq_passes_filters(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda q, **k: calls.append(k) or _result([]),
     )
     query_faq.func("色温", category="商品", content_type="manual")
@@ -59,7 +59,7 @@ def test_query_faq_miss_sets_faq_called(monkeypatch):
     collector = CitationCollector()
     current_citation_collector.set(collector)
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid", lambda *a, **k: _result([])
+        "app.tools.builtin.faq.retrieve_hybrid", lambda *a, **k: _result([])
     )
     assert query_faq.func("不存在") == MISS_TEXT
     assert collector.faq_called is True and collector.payload() == []
@@ -72,7 +72,7 @@ def test_query_faq_infrastructure_error_returns_error_text(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("milvus down")
 
-    monkeypatch.setattr("app.tools.faq.retrieve_hybrid", boom)
+    monkeypatch.setattr("app.tools.builtin.faq.retrieve_hybrid", boom)
     assert query_faq.func("邮费") == ERROR_TEXT
     assert collector.faq_called is True and collector.payload() == []
 
@@ -82,7 +82,7 @@ def test_query_faq_does_not_reset_numbering_per_call(monkeypatch):
     current_citation_collector.set(collector)
     results = iter([_result([make_chunk(1)]), _result([make_chunk(2)])])
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid", lambda *a, **k: next(results)
+        "app.tools.builtin.faq.retrieve_hybrid", lambda *a, **k: next(results)
     )
 
     assert "[1] 章节:" in query_faq.func("第一次")
@@ -95,7 +95,7 @@ def test_query_faq_orders_and_numbers_through_collector(monkeypatch):
     current_citation_collector.set(collector)
     chunks = [make_chunk(i) for i in range(5)]
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid", lambda *a, **k: _result(chunks)
+        "app.tools.builtin.faq.retrieve_hybrid", lambda *a, **k: _result(chunks)
     )
 
     out = query_faq.func("灯")

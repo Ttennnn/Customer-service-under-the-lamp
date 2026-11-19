@@ -1,9 +1,8 @@
 import json
 import re
 
-import pytest
-
-from app.tools.business import query_order, query_product, query_logistics, list_user_orders
+from app.tools.builtin.orders import query_order, query_product
+from app.tools.business import DEMO_ORDERS, list_user_orders, order_snapshot
 
 
 def test_list_user_orders_returns_three_demo_orders():
@@ -52,28 +51,82 @@ def test_query_order_returns_tracking_no():
     assert re.fullmatch(r"SF\d{10}", data["tracking_no"])
 
 
-def test_query_logistics_uses_tracking_no():
-    data = json.loads(query_logistics.invoke({"tracking_no": "SF1234567890"}))
-    assert data["tracking_no"] == "SF1234567890"
-    assert set(data) >= {"tracking_no", "carrier", "current_node", "traces"}
+def test_query_product_keeps_contract():
+    data = json.loads(query_product.invoke({"product_name": "无线蓝牙耳机"}))
+    assert data["product_name"] == "无线蓝牙耳机"
+    assert set(data) == {"product_name", "price", "stock", "specs"}
 
 
-def test_order_tracking_no_flows_into_logistics():
-    order = json.loads(query_order.invoke({"order_id": "1001"}))
-    logistics = json.loads(query_logistics.invoke({"tracking_no": order["tracking_no"]}))
-    assert logistics["tracking_no"] == order["tracking_no"]
+def test_order_snapshot_matches_demo_order():
+    snapshot = order_snapshot("1001")
+    assert snapshot == DEMO_ORDERS["1001"]
+    assert snapshot is not DEMO_ORDERS["1001"]
 
 
-def test_query_logistics_rejects_order_id_argument():
-    with pytest.raises(Exception) as excinfo:
-        query_logistics.invoke({"order_id": "1001"})
-    assert "tracking_no" in str(excinfo.value)
+def test_order_snapshot_unknown_id_generates_same_shape():
+    payload = order_snapshot("9999")
+    assert payload["order_id"] == "9999"
+    for key in ("items", "amount", "status", "tracking_no", "created_at", "signed_at"):
+        assert key in payload
+    assert re.fullmatch(r"SF\d{10}", payload["tracking_no"])
 
-def test_registry_has_five_tools_and_five_labels():
+
+def test_order_snapshot_is_stable_for_same_unknown_id():
+    assert order_snapshot("5678") == order_snapshot("5678")
+
+
+def test_order_snapshot_returns_none_for_empty_id():
+    assert order_snapshot("") is None
+
+
+def test_query_logistics_is_removed_from_builtin():
+    import app.tools.business as business
+    assert not hasattr(business, "query_logistics")
+
+
+def test_builtin_specs_include_all_builtin_tools_but_not_logistics():
+    from app.tools.registry import builtin_specs
+
+    assert set(builtin_specs()) == {
+        "query_order",
+        "query_product",
+        "query_faq",
+        "create_ticket",
+        "submit_refund",
+        "suggest_handoff",
+        "query_promotions",
+    }
+
+
+def test_builtin_specs_metadata_for_migrated_tools():
+    from app.tools.registry import builtin_specs
+
+    specs = builtin_specs()
+    faq = specs["query_faq"]
+    assert faq.permission == "read"
+    assert faq.timeout == 30.0
+    assert faq.exposed_to_agent is False
+    assert faq.label == "查常见问题"
+
+    ticket = specs["create_ticket"]
+    assert ticket.permission == "write"
+    assert ticket.inject_conversation is True
+    assert ticket.label == "创建工单"
+
+    refund = specs["submit_refund"]
+    assert refund.permission == "read"
+    assert refund.routes == frozenset({"refund_flow"})
+
+    handoff = specs["suggest_handoff"]
+    assert handoff.permission == "read"
+    assert handoff.routes is None
+
+
+def test_registry_keeps_legacy_exports_without_logistics():
     from app.tools.registry import ALL_TOOLS, TOOLS_BY_NAME, TOOL_LABELS
-    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
+    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_faq", "create_ticket"]
     assert set(TOOLS_BY_NAME) == {t.name for t in ALL_TOOLS}
-    assert set(TOOL_LABELS) == {"query_order", "query_product", "query_logistics", "query_faq", "create_ticket"}
+    assert set(TOOL_LABELS) == {"query_order", "query_product", "query_faq", "create_ticket"}
 
 def test_tool_timeout_override():
     from app.tools.registry import tool_timeout

@@ -15,8 +15,8 @@ class FakeStructured:
         return self.result
 
 
-def test_prompt_has_eight_labels_and_json_fields():
-    for label in ["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"]:
+def test_prompt_has_nine_labels_and_json_fields():
+    for label in ["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "人工", "闲聊", "其他"]:
         assert label in INTENT_SYSTEM_PROMPT
     assert "confidence" in INTENT_SYSTEM_PROMPT
     assert "只输出" in INTENT_SYSTEM_PROMPT and "JSON" in INTENT_SYSTEM_PROMPT

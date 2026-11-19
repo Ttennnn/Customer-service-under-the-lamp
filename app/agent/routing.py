@@ -13,6 +13,7 @@ INTENT_ROUTES: dict[Intent, Route] = {
     "物流": "business",
     "订单": "business",
     "投诉": "escalate",
+    "人工": "business",
     "闲聊": "fallback_script",
     "其他": "fallback_script",
 }

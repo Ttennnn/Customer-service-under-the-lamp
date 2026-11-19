@@ -18,7 +18,7 @@ from app.models import LowConfidenceQuestion, Message
 from app.services.history import get_or_create_conversation
 from tests.agent_fakes import FakeGraph
 
-TOOL_FRAME = {"type": "tool", "tool": "query_logistics", "label": "查物流"}
+TOOL_FRAME = {"type": "tool", "tool": "query_order", "label": "查订单"}
 SOURCES_FRAME = {
     "type": "sources",
     "sources": [
@@ -109,6 +109,7 @@ def test_service_resets_transient_state(session):
     assert inputs["order_data"] is None
     assert inputs["expanded_queries"] == []
     assert inputs["answer"] == ""
+    assert inputs["created_ticket_no"] == ""
     assert inputs["suggested_actions"] == []
     assert inputs["exhausted"] is False
     assert inputs["conversation_id"] is not None
@@ -129,6 +130,19 @@ def test_service_resets_transient_state(session):
     assert inputs["messages"][0].id.startswith("db-")
 
 
+def test_service_resets_stale_ticket_number_between_turns(session):
+    # A previous turn created T20261119001 and the checkpoint thread still
+    # carries ``created_ticket_no``. The next turn (e.g. a cancel or an
+    # unrelated question) must not inherit that stale number.
+    graph = FakeGraph(
+        [], {"answer": "答", "created_ticket_no": "T20261119001"}
+    )
+
+    list(stream_chat_agent(graph, session, "u1", "第二问", settings=_settings()))
+
+    assert graph.inputs[-1]["created_ticket_no"] == ""
+
+
 def test_service_persists_assistant_answer(session):
     _run(session, frames=[{"type": "token", "text": "已"}], final={"answer": "已答复"})
 
@@ -137,6 +151,41 @@ def test_service_persists_assistant_answer(session):
         ("user", "你好"),
         ("assistant", "已答复"),
     ]
+
+
+def test_finish_turn_appends_ticket_number(session):
+    suffix = "\n\n工单已创建，工单号：T20261119001"
+    graph, events = _run(
+        session,
+        frames=[{"type": "token", "text": "已为您处理"}],
+        final={
+            "answer": "已为您处理",
+            "created_ticket_no": "T20261119001",
+            "suggested_actions": [TRANSFER_ACTION],
+        },
+    )
+
+    # The suffix is a plain-text token frame sent before the options frame so
+    # the browser receives it even though the model never wrote the number.
+    assert events[-2:] == [
+        suffix,
+        _dumps({"type": "options", "options": [TRANSFER_ACTION]}),
+    ]
+    row = session.query(Message).filter(Message.role == "assistant").one()
+    assert row.content == "已为您处理" + suffix
+
+
+def test_finish_turn_does_not_duplicate_ticket_number(session):
+    answer = "已为您处理，工单号：T20261119001"
+    graph, events = _run(
+        session,
+        frames=[],
+        final={"answer": answer, "created_ticket_no": "T20261119001"},
+    )
+
+    assert all("工单已创建" not in event for event in events)
+    row = session.query(Message).filter(Message.role == "assistant").one()
+    assert row.content == answer
 
 
 def test_service_records_low_confidence_for_gate_gap(session):
@@ -249,6 +298,53 @@ def test_resume_chat_uses_command_and_writes_answer(session):
         ("user", "[订单选择] 订单 1001"),
         ("assistant", "可以退,已为您准备退款表单。"),
     ]
+
+
+def test_resume_chat_agent_passes_dict_to_command(session):
+    graph = FakeGraph(
+        [],
+        {},
+        snapshots=[_pending_snapshot({"kind": "confirm_ticket"})],
+    )
+
+    list(
+        resume_chat_agent(
+            graph, session, "u1", {"confirmed": True}, settings=_settings()
+        )
+    )
+
+    assert isinstance(graph.inputs[-1], Command)
+    assert graph.inputs[-1].resume == {"confirmed": True}
+    rows = (
+        session.query(Message)
+        .filter(Message.role == "user")
+        .order_by(Message.id.asc())
+        .all()
+    )
+    assert [row.content for row in rows] == ["[工单确认] 确认提交"]
+
+
+def test_resume_chat_agent_audits_ticket_cancel(session):
+    graph = FakeGraph(
+        [],
+        {},
+        snapshots=[_pending_snapshot({"kind": "confirm_ticket"})],
+    )
+
+    list(
+        resume_chat_agent(
+            graph, session, "u1", {"confirmed": False}, settings=_settings()
+        )
+    )
+
+    assert graph.inputs[-1].resume == {"confirmed": False}
+    rows = (
+        session.query(Message)
+        .filter(Message.role == "user")
+        .order_by(Message.id.asc())
+        .all()
+    )
+    assert [row.content for row in rows] == ["[工单确认] 取消"]
 
 
 def test_resume_chat_raises_without_pending(session):

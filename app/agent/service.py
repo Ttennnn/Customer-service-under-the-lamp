@@ -29,9 +29,11 @@
 ``resume_chat_agent`` continues the resolved conversation's paused thread with
 ``Command(resume=...)``. The resume value is *not* sent as a ``HumanMessage``:
 ``fetch_order`` already appends the ``【订单选择器】`` ``HumanMessage`` on
-resume.  MySQL still gets an audit-only user row ``[订单选择] 订单 <id>`` and
-``prepare_context`` runs for logging/summary triggering only, because the
-paused turn's plan fields already live in the checkpoint.
+resume and the ticket confirmation is a control decision, not user text.
+MySQL still gets an audit-only user row (``[订单选择] 订单 <id>`` or
+``[工单确认] 确认提交`` / ``[工单确认] 取消``) and ``prepare_context`` runs for
+logging/summary triggering only, because the paused turn's plan fields already
+live in the checkpoint.
 
 Graph exceptions are converted into a single ``{"error": ...}`` frame; the
 generator never re-raises.
@@ -126,6 +128,8 @@ def _reset_inputs(
     reducer-backed channel, so a stale ``True`` would leak into the next turn.
     The ch06 slots (``order_id`` / ``order_data``) and routing fields are reset
     for the same reason: a new turn must re-derive them from its own message.
+    ``created_ticket_no`` is reset too, otherwise a ticket number from an
+    earlier turn would survive a later cancel/unrelated turn (Task 10 reads it).
 
     The user message carries the MySQL ``db-{id}`` identity so the layered
     window and the summary job can anchor on persisted rows. The context plan
@@ -149,6 +153,7 @@ def _reset_inputs(
         "gate_reason": "",
         "rerank_failed": False,
         "answer": "",
+        "created_ticket_no": "",
         "suggested_actions": [],
         "step_count": 0,
         "token_estimate": 0,
@@ -206,12 +211,25 @@ def _finish_turn(
     state_values: dict,
     question: str,
 ) -> Iterator[str]:
-    """Emit trailing options, persist the answer and record a knowledge gap."""
+    """Emit the ticket fallback and options, persist the answer, pool gaps.
+
+    A write turn can succeed in the tool while the model's final answer omits
+    the created ticket number. When the graph recorded ``created_ticket_no``
+    and the answer does not already contain it, the number is appended as a
+    plain-text token frame (before ``options``, so the browser receives it)
+    and the augmented answer — not the original — is persisted.
+    """
+    answer = state_values.get("answer") or ""
+    ticket_no = state_values.get("created_ticket_no") or ""
+    if ticket_no and ticket_no not in answer:
+        suffix = f"\n\n工单已创建，工单号：{ticket_no}"
+        answer += suffix
+        yield suffix
+
     actions = state_values.get("suggested_actions") or []
     if actions:
         yield _dumps({"type": "options", "options": list(actions)})
 
-    answer = state_values.get("answer") or ""
     append_message(session, conversation_id, "assistant", answer)
     session.commit()
 
@@ -364,22 +382,33 @@ def stream_chat_agent(
     yield from _finish_turn(session, cid, state_values, message)
 
 
+def _resume_audit_text(resume_value: str | dict) -> str:
+    """Describe the resume value for the MySQL audit-only user row."""
+    if isinstance(resume_value, str):
+        return f"[订单选择] 订单 {resume_value}"
+    if isinstance(resume_value, dict) and resume_value.get("confirmed") is True:
+        return "[工单确认] 确认提交"
+    return "[工单确认] 取消"
+
+
 def resume_chat_agent(
     graph,
     session: Session,
     user_id: str,
-    order_id: str,
+    resume_value: str | dict,
     *,
     settings: Settings,
     conversation_id: int | None = None,
 ) -> Iterator[str]:
-    """Resume the resolved conversation's paused thread with the order pick.
+    """Resume the resolved conversation's paused thread.
 
+    ``resume_value`` is either the order id picked in the order-picker
+    (``str``) or the ticket confirmation decision (``{"confirmed": bool}``).
     Raises ``NoPendingInterrupt`` when the thread is not paused, so the API
     layer can answer 409 instead of sending a stray ``Command(resume=...)``.
-    The pick is audit-only in MySQL (``[订单选择] 订单 <id>``); the graph
-    receives ``Command`` and keeps the ``【订单选择器】`` ``HumanMessage`` it
-    appends itself, so no duplicate ``HumanMessage`` enters the checkpoint.
+    The value is audit-only in MySQL; the graph receives ``Command`` and keeps
+    the ``【订单选择器】`` ``HumanMessage`` it appends itself, so no duplicate
+    ``HumanMessage`` enters the checkpoint.
 
     ``prepare_context`` runs for logging and summary triggering only: the
     resumed turn reuses the plan fields already stored in the checkpoint, so
@@ -405,7 +434,7 @@ def resume_chat_agent(
     if pending is None:
         raise NoPendingInterrupt(f"conversation {cid} has no pending interrupt")
 
-    audit_text = f"[订单选择] 订单 {order_id}"
+    audit_text = _resume_audit_text(resume_value)
     audit_message = append_message(session, cid, "user", audit_text)
     session.commit()
 
@@ -422,7 +451,9 @@ def resume_chat_agent(
     yield _conversation_frame(cid)
 
     try:
-        yield from _iter_forwarded_frames(graph, Command(resume=order_id), config)
+        yield from _iter_forwarded_frames(
+            graph, Command(resume=resume_value), config
+        )
         snapshot = graph.get_state(config)
     except Exception:  # noqa: BLE001 - stream errors become one SSE frame
         logger.exception("ch07 resume graph failed conversation_id=%s", cid)

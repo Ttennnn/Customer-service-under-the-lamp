@@ -182,6 +182,34 @@
   .order-sub { margin-top: 4px; color: var(--dim); font-size: 11.5px; line-height: 1.6; }
   .order-sub strong { color: var(--accent); font-weight: 600; }
 
+  /* Ticket preview (interrupt kind=confirm_ticket) */
+  .ticket-preview {
+    display: grid;
+    gap: 7px;
+    width: 100%;
+    padding: 12px 13px;
+    border: 1px solid rgba(240,183,106,.35);
+    border-radius: 10px;
+    background: rgba(240,183,106,.05);
+  }
+  .ticket-preview-title {
+    margin-bottom: 1px;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  .ticket-preview-field { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+  .ticket-preview-label { color: var(--dim); }
+  .ticket-preview-desc { white-space: pre-wrap; }
+  .ticket-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 3px; }
+  .option-btn.accent {
+    border-color: rgba(240,183,106,.55);
+    background: rgba(240,183,106,.12);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
   /* Refund form (options action=refund_form) */
   .refund-form {
     display: grid;
@@ -761,7 +789,8 @@
   }
 
   function handleInterrupt(ctx, payload) {
-    if (payload.kind !== "select_order") return;
+    var kind = payload && payload.kind;
+    if (kind !== "select_order" && kind !== "confirm_ticket") return;
     ctx.interrupted = true;
     if (ctx.typing) {
       if (ctx.typing.parentNode) ctx.typing.parentNode.removeChild(ctx.typing);
@@ -769,7 +798,8 @@
     }
     pickerPending = true;
     syncComposer();
-    appendOrderPicker(payload);
+    if (kind === "select_order") appendOrderPicker(payload);
+    else appendTicketPreview(payload);
   }
 
   function selectOrder(orderId, cards) {
@@ -828,6 +858,125 @@
           if (ctx.errored) {
             // The resume failed: let the user retry the same order cards.
             cards.forEach(function (card) { card.disabled = false; });
+          }
+        }
+        syncComposer();
+        loadConversations();
+        if (!streaming && !pickerPending) input.focus();
+      });
+  }
+
+  /* ---------- ticket preview (interrupt kind=confirm_ticket) ---------- */
+
+  // Render the pending tool call as a read-only preview. The user either
+  // confirms (the backend creates the ticket) or cancels; both paths resume
+  // the paused graph through /ch07/chat/resume and stream the next turn.
+  function appendTicketPreview(payload) {
+    var preview = (payload && payload.preview && typeof payload.preview === "object")
+      ? payload.preview
+      : {};
+    var ticketType = preview.ticket_type ? String(preview.ticket_type) : "咨询";
+    var description = preview.description ? String(preview.description) : "未提供问题描述";
+
+    hideEmptyHint();
+    var row = el("div", "msg assistant picker-msg");
+    var avatar = el("span", "avatar", "灯下");
+    var body = el("div", "body");
+    var card = el("div", "ticket-preview");
+
+    card.append(el("div", "ticket-preview-title", "工单预览"));
+
+    var typeLine = el("div", "ticket-preview-field");
+    typeLine.append(el("span", "ticket-preview-label", "工单类型："));
+    typeLine.append(el("span", null, ticketType));
+    card.append(typeLine);
+
+    var descLine = el("div", "ticket-preview-field");
+    descLine.append(el("span", "ticket-preview-label", "问题描述："));
+    descLine.append(el("span", "ticket-preview-desc", description));
+    card.append(descLine);
+
+    var confirmButton = el("button", "option-btn accent", "确认提交");
+    confirmButton.type = "button";
+    var cancelButton = el("button", "option-btn", "取消");
+    cancelButton.type = "button";
+    var controls = [confirmButton, cancelButton];
+
+    confirmButton.addEventListener("click", function () {
+      resumeTicket(true, controls);
+    });
+    cancelButton.addEventListener("click", function () {
+      resumeTicket(false, controls);
+    });
+
+    var actions = el("div", "ticket-actions");
+    actions.append(confirmButton, cancelButton);
+    card.append(actions);
+
+    body.append(card);
+    row.append(avatar, body);
+    messages.append(row);
+    scrollToBottom();
+    return controls;
+  }
+
+  function resumeTicket(confirmed, controls) {
+    if (streaming) return;
+    controls.forEach(function (button) { button.disabled = true; });
+    appendSystemMessage(confirmed ? "已提交工单" : "已取消建单");
+
+    var ctx = startAssistantMessage();
+    streaming = true;
+    syncComposer();
+
+    var controller = new AbortController();
+    var timedOut = false;
+    var watchdog = startWatchdog(controller, function () {
+      timedOut = true;
+      showError(ctx, TIMEOUT_TEXT);
+    });
+
+    fetch("/ch07/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        conversation_id: activeConversationId,
+        confirmed: confirmed
+      }),
+      signal: controller.signal
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          return readErrorDetail(response).then(function (detail) {
+            showError(ctx, detail);
+          });
+        }
+        return readSSE(response, function (payload) {
+          watchdog.touch();
+          handlePayload(ctx, payload);
+        }, watchdog.touch);
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          if (!timedOut) showError(ctx, TIMEOUT_TEXT);
+          return;
+        }
+        showError(ctx, "请求失败：" + (err && err.message ? err.message : String(err)));
+      })
+      .finally(function () {
+        watchdog.clear();
+        finishAssistantMessage(ctx);
+        streaming = false;
+        if (ctx.interrupted) {
+          // The resumed turn paused on another interrupt: keep the composer
+          // locked and leave the new picker/preview in charge.
+          pickerPending = true;
+        } else {
+          pickerPending = false;
+          if (ctx.errored) {
+            // The resume failed: let the user retry this confirmation.
+            controls.forEach(function (button) { button.disabled = false; });
           }
         }
         syncComposer();

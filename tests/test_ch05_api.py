@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.main import app
 from app.models import Conversation, Ticket
 from app.services.history import create_conversation, get_or_create_conversation
+from app.tools.spec import ToolRun
 from app.tools.ticket import TICKET_NO_PATTERN
 
 
@@ -154,14 +155,65 @@ def test_ch05_ticket_invalid_type_422(client):
     assert r.status_code == 422
 
 
-def test_ch05_ticket_failure_502(client, session, monkeypatch):
-    calls = []
+def test_ch05_ticket_uses_confirmed_engine(client, session, monkeypatch):
+    seen = {}
 
-    def fake_execute_tool(*args, **kwargs):
-        calls.append(kwargs)
-        return "工具执行失败"
+    def fake_execute(spec, args, **kwargs):
+        seen["spec"] = spec.name
+        seen["args"] = args
+        seen.update(kwargs)
+        return ToolRun(
+            status="ok",
+            content='{"ticket_no":"T20261119001"}',
+            data="T20261119001",
+        )
 
-    monkeypatch.setattr("app.api.ch05.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.api.ch05.execute", fake_execute)
+    conversation = get_or_create_conversation(session, "s1")
+
+    r = client.post(
+        "/ch05/tickets",
+        json={
+            "session_id": "s1",
+            "description": "我要投诉",
+            "ticket_type": "投诉",
+            # The button click is the confirmation; a body field must not
+            # override it.
+            "confirmed": False,
+        },
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {"ticket_no": "T20261119001", "message": "工单已创建"}
+    assert seen["spec"] == "create_ticket"
+    assert seen["args"] == {"description": "我要投诉", "ticket_type": "投诉"}
+    assert seen["confirmed"] is True
+    assert seen["conversation_id"] == conversation.id
+
+
+def test_ch05_ticket_engine_failure_502(client, session, monkeypatch):
+    def fake_execute(spec, args, **kwargs):
+        return ToolRun(
+            status="error",
+            content="工具暂时不可用：create_ticket（TimeoutError）",
+        )
+
+    monkeypatch.setattr("app.api.ch05.execute", fake_execute)
+
+    r = client.post(
+        "/ch05/tickets", json={"session_id": "s1", "description": "描述"}
+    )
+
+    assert r.status_code == 502
+    assert r.json()["detail"] == "工单创建失败,请稍后重试"
+    assert session.query(Ticket).count() == 0
+
+
+def test_ch05_ticket_missing_number_502(client, session, monkeypatch):
+    def fake_execute(spec, args, **kwargs):
+        return ToolRun(status="ok", content="{}", data=None)
+
+    monkeypatch.setattr("app.api.ch05.execute", fake_execute)
 
     r = client.post(
         "/ch05/tickets", json={"session_id": "s1", "description": "描述"}
@@ -169,5 +221,3 @@ def test_ch05_ticket_failure_502(client, session, monkeypatch):
 
     assert r.status_code == 502
     assert session.query(Ticket).count() == 0
-    # 工单写入非幂等:必须禁用自动重试,超时宁可 502 让用户手动确认重试。
-    assert calls == [{"timeout_s": 5, "retries": 0}]

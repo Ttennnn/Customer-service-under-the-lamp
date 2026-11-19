@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session
 from app.api.ch06 import CH06_PAGE, resolve_request_conversation
 from app.db.session import get_db
 from app.schemas import TicketRequest
-from app.tools.context import current_conversation_id
-from app.tools.executor import execute_tool
-from app.tools.ticket import TICKET_NO_PATTERN, create_ticket
+from app.tools.builtin.tickets import TICKET_NO_PATTERN
+from app.tools.engine import execute
+from app.tools.registry import builtin_specs
 
 logger = logging.getLogger(__name__)
 
@@ -52,29 +52,28 @@ def ch05_chat() -> RedirectResponse:
 
 @api_router.post("/tickets")
 def ch05_ticket(req: TicketRequest, session: Session = Depends(get_db)):
-    """Create a ticket for the current conversation via the ch02 tool.
+    """Create a ticket for the current conversation through the engine.
 
-    ``retries=0`` is deliberate: ticket creation is not idempotent, so a
-    timeout must surface as a 502 for a manual retry instead of silently
-    creating a duplicate ticket.  The conversation status is never changed;
-    human transfer is a frontend-only simulation.
+    The button click is the trusted confirmation, so ``confirmed=True`` is
+    passed to the write permission gate; no request field can override it.
+    The engine sets the conversation contextvar itself, writes the audit row,
+    and forces zero retries for writes (ticket creation is not idempotent, so
+    a timeout must surface as a 502 for a manual retry instead of silently
+    creating a duplicate). The conversation status is never changed; human
+    transfer is a frontend-only simulation.
     """
     conversation = resolve_request_conversation(
         session, req.session_id, req.conversation_id
     )
-    token = current_conversation_id.set(conversation.id)
-    try:
-        result = execute_tool(
-            create_ticket,
-            {"description": req.description, "ticket_type": req.ticket_type},
-            timeout_s=5,
-            retries=0,
-        )
-    finally:
-        current_conversation_id.reset(token)
+    run = execute(
+        builtin_specs()["create_ticket"],
+        {"description": req.description, "ticket_type": req.ticket_type},
+        conversation_id=conversation.id,
+        confirmed=True,
+    )
 
-    if not TICKET_NO_PATTERN.match(result or ""):
-        logger.warning("ch05 ticket creation failed: %r", result)
+    if run.status != "ok" or not TICKET_NO_PATTERN.match(str(run.data or "")):
+        logger.warning("ch05 ticket creation failed: %r", run.content)
         raise HTTPException(status_code=502, detail=TICKET_CREATE_FAILED)
 
-    return {"ticket_no": result, "message": "工单已创建"}
+    return {"ticket_no": run.data, "message": "工单已创建"}

@@ -1,4 +1,6 @@
 # tests/test_tools_ticket.py
+from types import SimpleNamespace
+
 import pytest
 
 from app.db.seed import seed_faq
@@ -37,6 +39,67 @@ def test_create_ticket_accepts_refund(session, ticket_type):
     assert TICKET_NO_PATTERN.match(out)
     assert session.query(Ticket).one().ticket_type == "退款"
 
-def test_registry_has_five_tools():
+def test_create_ticket_sleeps_after_commit(session, monkeypatch):
+    import app.tools.builtin.tickets as tickets
+
+    calls = []
+    visible_at_sleep = []
+
+    def fake_sleep(seconds):
+        calls.append(seconds)
+        # The ticket must already be committed when the demo delay runs.
+        visible_at_sleep.append(session.query(Ticket).count())
+
+    monkeypatch.setattr(tickets.time, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        tickets,
+        "get_settings",
+        lambda: SimpleNamespace(demo_ticket_delay_seconds=0.5),
+    )
+    token = current_conversation_id.set(1)
+    try:
+        out = tickets.create_ticket.invoke(
+            {"description": "屏幕碎了", "ticket_type": "售后"}
+        )
+    finally:
+        current_conversation_id.reset(token)
+
+    assert TICKET_NO_PATTERN.match(out)
+    assert calls == [0.5]
+    assert visible_at_sleep == [1]
+    assert session.query(Ticket).count() == 1
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_description_is_a_validation_error_and_writes_nothing(session, blank):
+    from app.tools.engine import execute_tool_call
+    from app.tools.registry import builtin_specs
+
+    cid = _make_conversation(session)
+    spec = builtin_specs()["create_ticket"]
+    assert spec.json_schema["properties"]["description"]["minLength"] == 1
+
+    run = execute_tool_call(
+        {
+            "name": "create_ticket",
+            "args": {"description": blank, "ticket_type": "售后"},
+            "id": "c1",
+        },
+        cid,
+        confirmed=True,
+        specs={"create_ticket": spec},
+    )
+
+    assert run.status == "validation_error"
+    session.expire_all()
+    assert session.query(Ticket).count() == 0
+
+
+def test_create_ticket_body_guards_blank_description():
+    out = create_ticket.func("   ", "售后")
+    assert "不能为空" in out
+
+
+def test_registry_keeps_legacy_exports_without_logistics():
     from app.tools.registry import ALL_TOOLS
-    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
+    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_faq", "create_ticket"]

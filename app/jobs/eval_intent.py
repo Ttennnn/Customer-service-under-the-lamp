@@ -1,4 +1,4 @@
-"""第 6 章意图分类评估:62 条标注样例 + 真实 LLM 验证。
+"""第 6 章意图分类评估:64 条标注样例 + 真实 LLM 验证。
 
 数据集见 ``tests/eval/ch06_intent_cases.json``,每条为
 ``{"id": str, "text": str, "intent": Intent, "history": list | 无}``;``history``
@@ -28,7 +28,7 @@ from app.config import build_llm, get_settings
 _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CASES = _ROOT / "tests" / "eval" / "ch06_intent_cases.json"
 _REPORT_PATH = (
-    _ROOT / "docs" / "superpowers" / "reports" / "2026-11-18-ch06-intent-eval.md"
+    _ROOT / "docs" / "superpowers" / "reports" / "2026-11-19-ch08-intent-eval.md"
 )
 
 PASS_OVERALL = 0.90
@@ -36,11 +36,24 @@ PASS_PER_CLASS = 0.80
 
 #: 生成报告时写入的 prompt 调整记录;若本轮调整了 prompt,在运行前改这里。
 PROMPT_NOTE = (
-    "无。本次验证未修改 `app/agent/intent.py` 的 prompt 或 few-shot 示例。"
+    "新增第九类「人工」:明确要求创建工单、转人工客服、人工跟进;"
+    "不包括仅表达不满的投诉。prompt 增加两条边界 few-shot"
+    "(要求开工单 / 要求真人客服),均未复用评估集文本;"
+    "`INTENT_ROUTES[\"人工\"] = \"business\"`,评估集新增 M1/M2 两条,共 64 条。"
 )
 
 #: 报告展示顺序,与 ``app.agent.state.Intent`` 一致。
-_LABEL_ORDER = ["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"]
+_LABEL_ORDER = [
+    "物流",
+    "订单",
+    "商品咨询",
+    "退款退货",
+    "售后",
+    "投诉",
+    "人工",
+    "闲聊",
+    "其他",
+]
 
 
 def compute_metrics(expected: list[str], predicted: list[str]) -> dict:
@@ -215,7 +228,7 @@ def render_report(
     encoding = os.environ.get("PYTHONIOENCODING") or "(unset)"
 
     lines = [
-        "# ch06 意图分类评估报告",
+        "# ch08 意图分类评估报告",
         "",
         "## 运行参数",
         "",

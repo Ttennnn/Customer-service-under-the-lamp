@@ -1,71 +1,9 @@
-"""工单创建工具。
+"""兼容 shim:工单工具已迁移到 :mod:`app.tools.builtin.tickets`。
 
-根据当前会话上下文(``app.tools.context.current_conversation_id``)创建工单:
-生成当日递增的工单号,写入 ``Ticket``(status 默认「待处理」),返回生成的
-工单号。只写 tickets 表,不改会话状态;转人工由前端独立模拟。
-
-工具内部自行通过 ``get_session_factory()()`` 开启新会话(工具可能在子线程
-执行,不能复用调用方的会话),提交后关闭;对工单号主键冲突做少量重试。
+保留本模块是为了让 ``app.api.ch05``、``app.api.ch06``、
+``app.tools.registry`` 以及既有测试的导入路径继续可用。
 """
 
-import re
-from datetime import datetime
-from typing import Literal
+from app.tools.builtin.tickets import TICKET_NO_PATTERN, create_ticket
 
-from sqlalchemy.exc import IntegrityError
-
-from langchain.tools import tool
-
-from app.db import session as db_session
-from app.models import Ticket
-from app.tools.context import current_conversation_id
-
-TICKET_NO_PATTERN = re.compile(r"^T\d{11}$")
-
-
-@tool
-def create_ticket(
-    description: str, ticket_type: Literal["售后", "投诉", "咨询", "退款"]
-) -> str:
-    """创建工单。
-
-    为当前会话创建一张工单:工单号按「T + 当日日期(YYYYMMDD) + 三位递增
-    序号」生成;工单状态默认「待处理」。只写 tickets 表,不改会话状态;
-    转人工由前端独立模拟。
-
-    Args:
-        description: 工单描述(问题详情)
-        ticket_type: 工单类型,取值「售后」「投诉」「咨询」「退款」之一
-    """
-    cid = current_conversation_id.get()
-    if cid is None:
-        return "创建工单失败:缺少会话上下文。"
-
-    date = datetime.now().strftime("%Y%m%d")
-    prefix = f"T{date}"
-
-    s = db_session.get_session_factory()()
-    try:
-        ticket_no = None
-        for _ in range(5):
-            count = s.query(Ticket).filter(Ticket.ticket_no.startswith(prefix)).count()
-            ticket_no = f"{prefix}{count + 1:03d}"
-            s.add(
-                Ticket(
-                    ticket_no=ticket_no,
-                    conversation_id=cid,
-                    description=description,
-                    ticket_type=ticket_type,
-                )
-            )
-            try:
-                s.commit()
-                break
-            except IntegrityError:
-                s.rollback()
-        else:
-            return "创建工单失败:工单号生成冲突,请重试。"
-    finally:
-        s.close()
-
-    return ticket_no
+__all__ = ["TICKET_NO_PATTERN", "create_ticket"]

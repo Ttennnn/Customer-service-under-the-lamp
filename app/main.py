@@ -11,6 +11,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.agent.tools import legacy_tools
 from app.api.ch05 import api_router as ch05_api_router
 from app.api.ch05 import page_router as ch05_page_router
 from app.api.ch06 import api_router as ch06_api_router
@@ -33,25 +34,30 @@ from app.services.chat import stream_chat
 from app.services.context_budget import validate_budget
 from app.services.extract import extract_after_sale
 from app.services.summary_job import shutdown_summary_executor
-from app.tools.registry import ALL_TOOLS
+from app.tools.async_bridge import shutdown_async_bridge
+from app.tools.registry import get_all_specs, load_builtin_tools
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Wire logging, self-check the context budget, release on shutdown.
+    """Wire logging, load plugins, self-check the budget, release on shutdown.
 
-    The ch06 graph is still built lazily on the first request (and the ch07
-    graph is never built here), so startup stays cheap and offline-safe.
+    Builtin tools are scanned once here so a broken plugin/import surfaces at
+    startup instead of failing the first chat turn. The ch06 graph is still
+    built lazily on the first request (and the ch07 graph is never built
+    here), so startup stays cheap and offline-safe.
     """
     configure_file_logging()
+    load_builtin_tools()
     validate_budget(get_settings())
     try:
         yield
     finally:
         close_ch06_graph(app)
         shutdown_summary_executor()
+        shutdown_async_bridge()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -115,15 +121,22 @@ def chat(
     hangs waiting for the stream to close.
     """
     try:
+        # Legacy page: exactly the three read tools, resolved from the
+        # registry. It intentionally has no write/control/MCP tools (no
+        # confirmation UI here; logistics is MCP-only in ch07).
+        specs = get_all_specs(settings)
+        tools = legacy_tools(specs)
         for token in stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            tools,
             render_system_prompt(),
             req.session_id,
             req.message,
             settings.max_context_tokens,
             self_check_llm=self_check_llm,
+            specs=specs,
+            settings=settings,
         ):
             yield ServerSentEvent(raw_data=token)
     except Exception:  # noqa: BLE001 - stream already in flight, must end cleanly

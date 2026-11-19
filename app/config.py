@@ -74,6 +74,17 @@ class Settings(BaseSettings):
     context_log_preview_chars: int = 40
     log_to_file: bool = True
 
+    # --- ch08 tool system ---
+    mcp_enabled: bool = False
+    mcp_logistics_url: str = "http://127.0.0.1:8101/mcp"
+    mcp_aftersales_url: str = "http://127.0.0.1:8102/mcp"
+    mcp_discovery_timeout_s: float = 2
+    mcp_tool_timeout_s: float = 10
+    tool_default_timeout_s: float = 5
+    tool_max_retries: int = 2
+    tool_audit_result_max_chars: int = 500
+    demo_ticket_delay_seconds: float = 0
+
     @property
     def effective_max_agent_steps(self) -> int:
         return self.max_agent_steps if self.max_agent_steps is not None else self.agent_max_steps

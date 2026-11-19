@@ -7,12 +7,18 @@ from app.agent.routing import INTENT_ROUTES
 
 CASES = Path(__file__).parent / "eval" / "ch06_intent_cases.json"
 
-EIGHT_CLASSES = {"物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"}
+EXPECTED_CLASSES = {
+    "物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "人工", "闲聊", "其他"
+}
+
+#: 第九类「人工」本轮只从标注样例新增两条,其余类别沿用每类至少 6 条。
+MIN_CASES_PER_CLASS = {label: 6 for label in EXPECTED_CLASSES}
+MIN_CASES_PER_CLASS["人工"] = 2
 
 PROMPT_EXAMPLES = re.findall(r"「([^」]+)」", INTENT_SYSTEM_PROMPT)
 
 
-def test_intent_cases_cover_eight_classes():
+def test_intent_cases_cover_all_classes():
     rows = json.loads(CASES.read_text(encoding="utf-8"))
     assert len(rows) >= 56
     ids = [row["id"] for row in rows]
@@ -22,8 +28,9 @@ def test_intent_cases_cover_eight_classes():
         assert row["text"].strip()
         assert row["intent"] in INTENT_ROUTES
         by_intent[row["intent"]] = by_intent.get(row["intent"], 0) + 1
-    assert set(by_intent) == EIGHT_CLASSES
-    assert all(count >= 6 for count in by_intent.values())
+    assert set(by_intent) == EXPECTED_CLASSES
+    for label, count in by_intent.items():
+        assert count >= MIN_CASES_PER_CLASS[label]
 
 
 def test_intent_cases_do_not_reuse_prompt_examples():
