@@ -1,6 +1,6 @@
 """第六章客服分流工作流的共享 State 定义。
 
-八类意图、五个出口,以及父图(``CustomerServiceState``)与 Agent 子图
+九类意图、五个出口,以及父图(``CustomerServiceState``)与 Agent 子图
 (``AgentState``)的 TypedDict。字段与设计文档 §9.1 一致,子图与父图
 共享同名键。
 """
@@ -10,7 +10,7 @@ from typing import Annotated, Literal, TypedDict
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
-Intent = Literal["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"]
+Intent = Literal["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "人工", "闲聊", "其他"]
 Route = Literal["escalate", "fallback_script", "knowledge", "refund_flow", "business"]
 
 
