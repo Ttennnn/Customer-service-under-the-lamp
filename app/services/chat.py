@@ -75,6 +75,24 @@ _CITATION_RE = re.compile(r"\[(\d+)\]")
 _FORCED_FAQ_TOOL_CHOICE = {"type": "function", "function": {"name": "query_faq"}}
 
 
+def _pool_snapshot(sources: list[dict], top_k: int = 3) -> list[dict]:
+    """Normalise legacy citations to the main-graph snapshot shape.
+
+    The review page renders both pool sources uniformly, so ``score`` becomes
+    ``rerank_score`` and the answer is capped like the graph snapshot.
+    """
+    return [
+        {
+            "question": source.get("question") or "",
+            "answer": (source.get("answer") or "")[:500],
+            "rerank_score": source.get("score"),
+            "section_path": source.get("section_path"),
+            "is_key_clause": bool(source.get("is_key_clause", False)),
+        }
+        for source in sources[:top_k]
+    ]
+
+
 def _persist_assistant(session: Session, conversation_id: int, text: str) -> None:
     """Persist an assistant turn and commit before the generator returns."""
     append_message(session, conversation_id, "assistant", text)
@@ -306,7 +324,7 @@ def stream_chat(
                         message,
                         assessment.reason,
                         source="self_check",
-                        retrieved_chunks=collector.payload()[:3],
+                        retrieved_chunks=_pool_snapshot(collector.payload()),
                     )
                 except Exception:  # noqa: BLE001 - a pool write must not break chat
                     logger.exception("failed to record low-confidence question")

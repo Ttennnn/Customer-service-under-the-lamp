@@ -40,7 +40,6 @@ from langgraph.types import interrupt
 
 from app.agent.confidence import (
     EvidenceConfidence,
-    assess_confidence,
     compute_evidence_confidence,
 )
 from app.agent.coref import resolve_query
@@ -399,31 +398,29 @@ def build_graph(
             }
             for source in sources
         ]
-        verdict = assess_confidence(
-            result.chunks,
-            settings.confidence_min_score,
-            rerank_failed=result.rerank_failed,
-        )
         confidence = compute_evidence_confidence(
             result.chunks,
             valid_floor=settings.evidence_valid_floor,
             valid_cap=settings.evidence_valid_cap,
             margin_scale=settings.evidence_margin_scale,
         )
-        passed = (
-            verdict.passed
-            and confidence.score >= settings.evidence_confidence_threshold
-        )
+        # The calibrated evidence score is the only formal gate. Empty
+        # retrieval is checked explicitly because a 0.0 score would otherwise
+        # pass a still-uncalibrated threshold of 0.0.
+        if not result.chunks:
+            passed = False
+            gate_reason = "empty"
+        else:
+            passed = confidence.score >= settings.evidence_confidence_threshold
+            gate_reason = "ok" if passed else "below_threshold"
         return {
             "evidence": evidence,
             "sources": sources,
-            "confidence": verdict.top_score,
-            "gate_passed": passed,
-            "gate_reason": (
-                verdict.reason
-                if not verdict.passed
-                else ("below_threshold" if not passed else "ok")
+            "confidence": max(
+                (chunk.score for chunk in result.chunks), default=None
             ),
+            "gate_passed": passed,
+            "gate_reason": gate_reason,
             "rerank_failed": False,
             "evidence_confidence": confidence.score,
             "evidence_signals": confidence.signals,
@@ -488,6 +485,7 @@ def build_graph(
                 "answer": SELF_CHECK_FAILURE_TEXT,
                 "messages": [AIMessage(content=SELF_CHECK_FAILURE_TEXT)],
                 "gate_passed": False,
+                "gate_reason": "self_check_failure",
                 "fallback_source": "",
                 "fallback_reason": "",
             }
@@ -502,6 +500,7 @@ def build_graph(
                 "answer": KNOWLEDGE_GAP_TEXT,
                 "messages": [AIMessage(content=KNOWLEDGE_GAP_TEXT)],
                 "gate_passed": False,
+                "gate_reason": "self_check",
                 "fallback_source": "self_check",
                 "fallback_reason": assessment.reason or "",
             }
@@ -609,39 +608,34 @@ def build_graph(
             }
             for source in sources
         ]
-        verdict = assess_confidence(
-            merged_chunks,
-            settings.confidence_min_score,
-            rerank_failed=False,
-        )
         confidence = compute_evidence_confidence(
             merged_chunks,
             valid_floor=settings.evidence_valid_floor,
             valid_cap=settings.evidence_valid_cap,
             margin_scale=settings.evidence_margin_scale,
         )
-        passed = (
-            verdict.passed
-            and confidence.score >= settings.evidence_confidence_threshold
-        )
+        if not merged_chunks:
+            passed = False
+            gate_reason = "empty"
+        else:
+            passed = confidence.score >= settings.evidence_confidence_threshold
+            gate_reason = "ok" if passed else "below_threshold"
         logger.info(
             "ch06 retrieve_policy order_id=%s queries=%s hits=%d top_score=%s",
             order_id,
             queries,
             len(merged_chunks),
-            verdict.top_score,
+            max((chunk.score for chunk in merged_chunks), default=None),
         )
         return {
             "expanded_queries": queries,
             "evidence": evidence,
             "sources": sources,
-            "confidence": verdict.top_score,
-            "gate_passed": passed,
-            "gate_reason": (
-                verdict.reason
-                if not verdict.passed
-                else ("below_threshold" if not passed else "ok")
+            "confidence": max(
+                (chunk.score for chunk in merged_chunks), default=None
             ),
+            "gate_passed": passed,
+            "gate_reason": gate_reason,
             "rerank_failed": False,
             "evidence_confidence": confidence.score,
             "evidence_signals": confidence.signals,

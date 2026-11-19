@@ -297,6 +297,17 @@ def test_query_faq_useful_false_records_pool_and_refuses(session, monkeypatch):
     assert row.raw_question == "支持以旧换新吗"
     assert row.reason == "证据不足"
     assert row.source == "self_check"
+    # Legacy citations are normalised to the main-graph snapshot shape so the
+    # review page can show a rerank score for both pool sources.
+    assert row.retrieved_chunks == [
+        {
+            "question": "邮费怎么算",
+            "answer": "满 99 元包邮",
+            "rerank_score": 0.9,
+            "section_path": "配送政策 > 邮费",
+            "is_key_clause": False,
+        }
+    ]
 
     rows = session.query(Message).order_by(Message.id).all()
     assert rows[-1].role == "assistant"

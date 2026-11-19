@@ -67,6 +67,16 @@ def _build(llm, intent, resolved=None, queries=None, **kwargs):
         IntentResult(intent=intent, confidence=0.9),
         queries=queries,
     )
+    # The evidence score is the sole formal gate; pin an explicit threshold so
+    # low-score tests do not depend on the old confidence_min_score floor.
+    kwargs.setdefault(
+        "settings",
+        Settings(
+            _env_file=None,
+            openai_api_key="test",
+            evidence_confidence_threshold=0.5,
+        ),
+    )
     return build_graph(llm, intent_llm, checkpointer=InMemorySaver(), **kwargs)
 
 
@@ -204,6 +214,7 @@ def test_selfcheck_failure_sets_self_check_and_skips_agent(monkeypatch):
     result = graph.invoke(_state("耳机降噪吗"), CONFIG)
 
     assert result["gate_passed"] is False
+    assert result["gate_reason"] == "self_check"
     assert result["fallback_source"] == "self_check"
     assert result["fallback_reason"] == "只沾边"
     assert result["answer"] == KNOWLEDGE_GAP_TEXT
@@ -227,10 +238,88 @@ def test_selfcheck_exception_uses_failure_text_without_pool_source(monkeypatch):
     result = graph.invoke(_state("耳机降噪吗"), CONFIG)
 
     assert result["gate_passed"] is False
+    assert result["gate_reason"] == "self_check_failure"
     assert result["fallback_source"] == ""
     assert result["fallback_reason"] == ""
     assert result["answer"] == SELF_CHECK_FAILURE_TEXT
     assert result["step_count"] == 0
+
+
+def test_threshold_only_failure_applies_even_when_top1_is_above_legacy_floor(
+    monkeypatch,
+):
+    # Top1 0.2 clears the old 0.1 confidence_min_score, but the evidence score
+    # (~0.37) is below the explicit 0.5 threshold, so the formal gate must fail.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.2)]),
+    )
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="test",
+        evidence_confidence_threshold=0.5,
+    )
+    graph = _build(ExplodingLLM(), "商品咨询", settings=settings)
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["evidence_confidence"] < 0.5
+    assert result["gate_passed"] is False
+    assert result["gate_reason"] == "below_threshold"
+    assert result["fallback_source"] == "retrieval_low_conf"
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
+
+
+def test_threshold_only_pass_ignores_legacy_floor(monkeypatch):
+    # Top1 0.09 is below the old confidence_min_score floor, but the evidence
+    # score (key clause + margin, ~0.235) clears the explicit 0.1 threshold.
+    # This test fails if the deprecated legacy gate is still ANDed in.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result(
+            [make_chunk(0.09, is_key_clause=True)]
+        ),
+    )
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="test",
+        evidence_confidence_threshold=0.1,
+    )
+    graph = _build(
+        ScriptedLLM([text_chunk("支持降噪")]),
+        "商品咨询",
+        settings=settings,
+    )
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["evidence_confidence"] >= 0.1
+    assert result["gate_passed"] is True
+    assert result["gate_reason"] == "ok"
+    assert result["fallback_source"] == ""
+    assert result["answer"] == "支持降噪"
+
+
+def test_empty_retrieval_fails_even_with_zero_threshold(monkeypatch):
+    # score 0.0 >= threshold 0.0, so the explicit empty guard is what fails it.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([]),
+    )
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="test",
+        evidence_confidence_threshold=0.0,
+    )
+    graph = _build(ExplodingLLM(), "商品咨询", settings=settings)
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["evidence_confidence"] == 0.0
+    assert result["gate_passed"] is False
+    assert result["gate_reason"] == "empty"
+    assert result["fallback_source"] == "retrieval_low_conf"
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
 
 
 def test_retrieval_pass_stores_top3_snapshot(monkeypatch):

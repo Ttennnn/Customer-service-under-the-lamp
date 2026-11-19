@@ -67,11 +67,12 @@ def tool_chunk(name, args, call_id="c1"):
     )
 
 
-def make_chunk(score=0.9):
+def make_chunk(score=0.9, is_key_clause=False):
     from app.rag.retrieval import RetrievedChunk
     return RetrievedChunk(
         chunk_id=1, score=score, questions="q", answer="a",
         section_path="s", category="商品", content_type="faq",
+        is_key_clause=is_key_clause,
     )
 
 

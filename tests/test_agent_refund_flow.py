@@ -83,6 +83,16 @@ def _build(llm=None, *, intent="退款退货", resolved=None, queries=None, **kw
         IntentResult(intent=intent, confidence=0.9),
         queries=queries,
     )
+    # The evidence score is the sole formal gate; pin an explicit threshold so
+    # low-score tests do not depend on the old confidence_min_score floor.
+    kwargs.setdefault(
+        "settings",
+        Settings(
+            _env_file=None,
+            openai_api_key="test",
+            evidence_confidence_threshold=0.5,
+        ),
+    )
     return build_graph(
         llm if llm is not None else ExplodingLLM(),
         intent_llm,
