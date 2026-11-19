@@ -1,7 +1,7 @@
 PYTHON ?= .venv/Scripts/python.exe
 LANGFUSE_COMPOSE ?= docker compose -f docker-compose.langfuse.yml
 
-.PHONY: langfuse-up langfuse-down cost-report calibrate-confidence test
+.PHONY: langfuse-up langfuse-down cost-report calibrate-confidence flywheel test
 
 langfuse-up:
 	$(LANGFUSE_COMPOSE) up -d
@@ -14,6 +14,9 @@ cost-report:
 
 calibrate-confidence:
 	$(PYTHON) -m app.jobs.calibrate_confidence
+
+flywheel:
+	$(PYTHON) -m app.jobs.flywheel_pipeline
 
 test:
 	$(PYTHON) -m pytest -q

@@ -133,7 +133,13 @@ def build_llm(
     temperature: float = 0.7,
     model: str | None = None,
     max_tokens: int | None = None,
+    request_timeout: float | None = None,
 ) -> ChatOpenAI:
+    kwargs = {}
+    if request_timeout is not None:
+        # langchain-openai stores this as ``request_timeout``; the alias keeps
+        # the per-request timeout on the model itself rather than per call.
+        kwargs["timeout"] = request_timeout
     return ChatOpenAI(
         model=model or settings.model_name,
         api_key=settings.openai_api_key,
@@ -142,6 +148,7 @@ def build_llm(
         stream_usage=settings.stream_usage,
         temperature=temperature,
         max_tokens=max_tokens or settings.max_output_tokens,
+        **kwargs,
     )
 
 
