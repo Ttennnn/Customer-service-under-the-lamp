@@ -11,6 +11,7 @@ from app.models.knowledge import (
 )
 from app.models.message import Message
 from app.models.ticket import Ticket
+from app.models.tool_audit import ToolAuditLog
 
 __all__ = [
     "Conversation",
@@ -22,4 +23,5 @@ __all__ = [
     "QaExtractionStaging",
     "LowConfidenceQuestion",
     "FaithCase",
+    "ToolAuditLog",
 ]
