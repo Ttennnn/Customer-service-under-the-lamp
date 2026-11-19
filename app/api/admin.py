@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.models import ReviewQueue
 
 PAGE = Path(__file__).resolve().parents[1] / "static" / "admin.html"
+ADMIN_JS = Path(__file__).resolve().parents[1] / "static" / "admin.js"
 
 REVIEW_STATUSES = ("待审", "通过", "驳回")
 
@@ -51,6 +52,18 @@ def _conclusion(counts: dict[str, int], highest: ReviewQueue | None) -> str:
     return (
         f"{counts['待审']} 条待审,最高频问题出现 "
         f"{highest.occurrence_count} 次。"
+    )
+
+
+@page_router.get("/static/admin.js", response_class=FileResponse)
+def admin_js() -> FileResponse:
+    """Serve the shared back-office navigation script."""
+    if not ADMIN_JS.is_file():
+        raise HTTPException(status_code=404, detail="admin.js is missing")
+    return FileResponse(
+        ADMIN_JS,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
     )
 
 
