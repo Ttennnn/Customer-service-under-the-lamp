@@ -78,12 +78,20 @@ MODEL_CONTEXT_WINDOW=65536 MAX_OUTPUT_TOKENS=2000 MAX_USER_INPUT_TOKENS=2000 \
 - 写超时后 `tickets` 只有一条，未重复执行。
 - 另：MySQL 未启动时审计写入失败只记日志，工具结果仍返回成功，验证「审计失败不反拦执行」。
 
-## 环境限制与待用户确认
+## 真实 MySQL 验收（2026-11-19 补充）
 
-- 本机 MySQL 服务未运行，且 `net start MySQL` 返回「拒绝访问」（系统错误 5），因此：
-  - `sql/ch08-ddl.sql` 未在本机 MySQL 实际 apply。
-  - 验收 4/5 的实时 HTTP 流程使用 SQLite 应用实例验证；生产 MySQL 需用户启动服务后执行 DDL。
-- 浏览器工单预览卡的视觉效果未做自动化截图验收；后端 SSE 契约与前端代码已就绪，需用户在 `http://localhost:8000/` 手工点一遍。
+- 用户停掉占用 3306 的 Windows MySQL 服务后，Docker 容器 `cs_customer_mysql` 启动；前几章数据卷完整。
+- `sql/ch08-ddl.sql` 已 apply 到 `cs_customer`；`tool_audit_logs` 的 `status` ENUM 回查为
+  `enum('成功','失败','超时','校验拦下','权限拒绝')`，`tool_source` 为 `enum('builtin','mcp')`。
+- 客服服务以真实 MySQL + `MCP_ENABLED=true` 运行在 `http://localhost:8000/`。
+- 实测「订单 1001 的物流到哪了」：
+  - SSE 工具帧 `query_order` → `query_logistics`。
+  - 回答使用 MCP 返回的顺丰运单与轨迹。
+  - MySQL `tool_audit_logs` 回查：
+    `query_logistics / mcp / logistics / 成功 / retry_count=0 / duration_ms=407`；
+    `query_order / builtin / NULL / 成功 / retry_count=0 / duration_ms=1`。
+- 验收 4/5 的实时 HTTP 流程此前用 SQLite 实例验证；现在真实 MySQL 栈已就绪，浏览器可继续手工点验。
+- 浏览器工单预览卡的视觉效果仍需人工确认。
 - 已知有意回归：legacy `/chat` 不再提供物流与建单，只保留 `query_order`/`query_product`/`query_faq`。
 
 ## 演示命令
