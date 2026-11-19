@@ -95,3 +95,25 @@ def test_chat_upstream_error_not_hang(client):
     with client.stream("POST", "/chat", json={"session_id": "s1", "message": "hi"}) as r:
         body = "".join(r.iter_text())
     assert "error" in body and "data: [DONE]" in body
+
+
+def test_legacy_chat_binds_only_three_read_tools(client, monkeypatch):
+    seen = {}
+
+    def fake_stream_chat(llm, session, tools, prompt, *args, **kwargs):
+        seen["names"] = [t.name for t in tools]
+        seen["specs"] = kwargs.get("specs")
+        yield "ok"
+
+    monkeypatch.setattr("app.main.stream_chat", fake_stream_chat)
+    with client.stream(
+        "POST", "/chat", json={"session_id": "s1", "message": "在吗"}
+    ) as r:
+        body = "".join(r.iter_text())
+
+    assert "data: ok" in body
+    assert seen["names"] == ["query_order", "query_product", "query_faq"]
+    assert seen["specs"] is not None
+    assert {"query_order", "query_product", "query_faq"} <= set(seen["specs"])
+    assert "create_ticket" not in seen["names"]
+

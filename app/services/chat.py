@@ -18,14 +18,19 @@
 
 ``current_conversation_id`` is a thread-local ``ContextVar``. Starlette's
 ``EventSourceResponse`` iterates this generator via ``iterate_in_threadpool``,
-which may call ``next()`` on a different thread each time, so the contextvar
-must be set on the SAME thread that calls ``execute_tool`` (immediately before
-it, with no ``yield`` in between) rather than once at the top of the
-generator. It is intentionally not reset: each tool call re-sets it, and a
-cross-thread ``reset`` would raise ``ValueError``. The citation collector
-follows the same rule: it is created once per turn, but re-set immediately
-before each ``execute_tool`` call so the copied context always points at the
-same mutable collector.
+which may call ``next()`` on a different thread each time, so the citation
+collector must be set on the SAME thread that calls ``execute_tool_call``
+(immediately before it, with no ``yield`` in between) rather than once at the
+top of the generator. The engine copies that context into the tool thread and
+sets ``current_conversation_id`` itself. The citation collector is created
+once per turn, but re-set immediately before each call so the copied context
+always points at the same mutable collector.
+
+Every tool call is dispatched through :func:`app.tools.engine.execute_tool_call`
+so legacy ``/chat`` shares validation, permission, timeout/retry, formatting
+and audit with the agent paths. Only tools bound in ``tools`` are executable:
+a hallucinated ``create_ticket`` (or any unbound tool) resolves to an error
+string and never touches the database.
 """
 
 import json
@@ -41,14 +46,11 @@ from app.rag.self_check import assess_evidence
 from app.services.context import build_messages
 from app.services.history import append_message, get_or_create_conversation, load_history
 from app.services.low_confidence import record_low_confidence
-from app.tools.context import (
-    CitationCollector,
-    current_citation_collector,
-    current_conversation_id,
-)
-from app.tools.executor import execute_tool
+from app.tools.context import CitationCollector, current_citation_collector
+from app.tools.engine import execute_tool_call
 from app.tools.faq import ERROR_TEXT
-from app.tools.registry import TOOLS_BY_NAME, TOOL_LABELS, tool_timeout
+from app.tools.registry import TOOL_LABELS
+from app.tools.spec import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ _EVIDENCE_GAP_CONSTRAINT = (
 _MIXED_INTENT_CONSTRAINT = (
     _EVIDENCE_GAP_CONSTRAINT + "原问题已记入低置信度问题池。"
 )
-_TOOL_FAILURE_TEXT = "工具执行失败"
+_FAQ_FAILURE_PREFIXES = ("工具执行失败", "工具执行超时", "工具暂时不可用")
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 _FORCED_FAQ_TOOL_CHOICE = {"type": "function", "function": {"name": "query_faq"}}
 
@@ -79,9 +81,14 @@ def _persist_assistant(session: Session, conversation_id: int, text: str) -> Non
 
 
 def _faq_failed(results: list[tuple[dict, str]]) -> bool:
-    """True if a ``query_faq`` call hit an infrastructure error."""
+    """True if a ``query_faq`` call hit an infrastructure error.
+
+    A genuine miss is formatted by the engine as
+    ``未查询到相关结果：query_faq`` and must not be treated as an outage.
+    """
     return any(
-        call["name"] == "query_faq" and result in (ERROR_TEXT, _TOOL_FAILURE_TEXT)
+        call["name"] == "query_faq"
+        and (ERROR_TEXT in result or result.startswith(_FAQ_FAILURE_PREFIXES))
         for call, result in results
     )
 
@@ -100,6 +107,8 @@ def stream_chat(
     message: str,
     max_tokens: int,
     self_check_llm=None,
+    *,
+    specs: dict[str, ToolSpec] | None = None,
 ) -> Iterator[str]:
     """Stream an assistant reply token by token, executing tools when asked.
 
@@ -113,6 +122,13 @@ def stream_chat(
     objects whose ``.content`` attribute holds the text delta.
     ``self_check_llm`` is a temperature-0 model used for the evidence gate;
     ``None`` falls back to ``llm`` for backwards compatibility.
+
+    ``tools`` is the list bound to the model and therefore the allowlist for
+    execution. ``specs`` is the registry mapping used to resolve a call and
+    resolve timeouts/formatting; ``None`` lets the engine load the registry
+    itself. A call for a tool that is not bound in ``tools`` (e.g. a
+    hallucinated ``create_ticket`` on the legacy page) is answered with an
+    error string and never executed.
     """
     conversation = get_or_create_conversation(session, user_id)
     cid = conversation.id
@@ -189,30 +205,31 @@ def stream_chat(
     # Execute every tool first, persisting nothing yet. This keeps the caller
     # session free of uncommitted writes while a tool (e.g. create_ticket)
     # opens its own session, and lets the whole round commit atomically below.
+    bound_names = {getattr(tool, "name", None) for tool in tools}
     results: list[tuple[dict, str]] = []
     for tc in ai_msg.tool_calls:
+        spec = specs.get(tc["name"]) if specs is not None else None
+        label = (
+            spec.label
+            if spec is not None and spec.label
+            else TOOL_LABELS.get(tc["name"], tc["name"])
+        )
         yield json.dumps(
-            {"type": "tool", "tool": tc["name"], "label": TOOL_LABELS.get(tc["name"], tc["name"])},
+            {"type": "tool", "tool": tc["name"], "label": label},
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        tool = TOOLS_BY_NAME.get(tc["name"])
-        if tool is None:
-            results.append((tc, f"工具 {tc['name']} 不存在,请告知用户改用人工客服。"))
+        if tc["name"] not in bound_names:
+            # The model can hallucinate a tool that this page never bound
+            # (legacy has no write tools); never execute it.
+            results.append((tc, f"未知工具：{tc['name']}"))
             continue
-        current_conversation_id.set(cid)
         current_citation_collector.set(collector)
-        results.append(
-            (
-                tc,
-                execute_tool(
-                    tool,
-                    tc["args"],
-                    timeout_s=tool_timeout(tc["name"]),
-                    retries=0 if tc["name"] == "query_faq" else 1,
-                ),
-            )
-        )
+        if specs is not None:
+            run = execute_tool_call(tc, cid, specs=specs)
+        else:
+            run = execute_tool_call(tc, cid)
+        results.append((tc, run.content))
 
     # Persist the assistant tool_calls row and its result rows atomically, so
     # an interruption can never leave a dangling tool_calls with no results.

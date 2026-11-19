@@ -11,6 +11,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.agent.tools import legacy_tools
 from app.api.ch05 import api_router as ch05_api_router
 from app.api.ch05 import page_router as ch05_page_router
 from app.api.ch06 import api_router as ch06_api_router
@@ -33,7 +34,7 @@ from app.services.chat import stream_chat
 from app.services.context_budget import validate_budget
 from app.services.extract import extract_after_sale
 from app.services.summary_job import shutdown_summary_executor
-from app.tools.registry import ALL_TOOLS
+from app.tools.registry import get_all_specs
 
 logger = logging.getLogger(__name__)
 
@@ -115,15 +116,21 @@ def chat(
     hangs waiting for the stream to close.
     """
     try:
+        # Legacy page: exactly the three read tools, resolved from the
+        # registry. It intentionally has no write/control/MCP tools (no
+        # confirmation UI here; logistics is MCP-only in ch07).
+        specs = get_all_specs(settings)
+        tools = legacy_tools(specs)
         for token in stream_chat(
             llm,
             session,
-            ALL_TOOLS,
+            tools,
             render_system_prompt(),
             req.session_id,
             req.message,
             settings.max_context_tokens,
             self_check_llm=self_check_llm,
+            specs=specs,
         ):
             yield ServerSentEvent(raw_data=token)
     except Exception:  # noqa: BLE001 - stream already in flight, must end cleanly
