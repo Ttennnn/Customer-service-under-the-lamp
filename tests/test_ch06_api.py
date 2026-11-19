@@ -371,7 +371,9 @@ def test_ch06_lazy_graph_builds_once_and_closes(monkeypatch):
 
     monkeypatch.setattr(ch06_api, "build_llm", fake_build_llm)
 
-    def fake_build_graph(llm, intent_llm, *, checkpointer=None, settings=None):
+    def fake_build_graph(
+        llm, intent_llm, *, checkpointer=None, settings=None, self_check_llm=None
+    ):
         built.append(checkpointer)
         return object()
 

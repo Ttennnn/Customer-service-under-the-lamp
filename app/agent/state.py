@@ -33,6 +33,11 @@ class CustomerServiceState(TypedDict, total=False):
     gate_passed: bool
     gate_reason: str
     rerank_failed: bool
+    evidence_confidence: float | None
+    evidence_signals: dict
+    fallback_source: str
+    fallback_reason: str
+    retrieved_snapshot: list[dict]
     answer: str
     created_ticket_no: str
     suggested_actions: list[dict]

@@ -38,7 +38,11 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from app.agent.confidence import assess_confidence
+from app.agent.confidence import (
+    EvidenceConfidence,
+    assess_confidence,
+    compute_evidence_confidence,
+)
 from app.agent.coref import resolve_query
 from app.agent.intent import classify_intent
 from app.agent.routing import route_for_intent
@@ -52,6 +56,7 @@ from app.rag.query_understanding import (
     expand_synonyms,
 )
 from app.rag.retrieval import RetrievedChunk, retrieve_hybrid
+from app.rag.self_check import assess_evidence
 from app.tools.business import list_user_orders, order_snapshot
 from app.tools.context import CitationCollector
 from app.tools.faq import order_for_prompt
@@ -64,6 +69,9 @@ KNOWLEDGE_GAP_TEXT = (
 )
 INFRA_TEXT = "知识库暂时不可用,请稍后重试或联系人工客服。"
 RERANK_FAILED_TEXT = "知识库暂时无法完成可靠性校验,请稍后重试或联系人工客服。"
+SELF_CHECK_FAILURE_TEXT = (
+    "抱歉,知识库暂时无法确认这个问题,建议您联系人工客服进一步处理。"
+)
 COMPLAINT_TEXT = (
     "非常抱歉给您带来不好的体验，您的感受我们很重视。"
     "您可以选择转接人工客服进一步处理，或创建一个工单，我们会尽快跟进。"
@@ -229,15 +237,48 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
     return {"order_id": order_id, "order_data": order_data, "messages": messages}
 
 
+def _retrieved_snapshot(
+    chunks: list[RetrievedChunk], top_k: int = 3
+) -> list[dict]:
+    """Top-``top_k`` retrieval snapshot kept in State for the ch09 flywheel."""
+    ordered = sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
+    return [
+        {
+            "question": chunk.questions,
+            "answer": (chunk.answer or "")[:500],
+            "rerank_score": chunk.score,
+            "section_path": chunk.section_path,
+            "is_key_clause": chunk.is_key_clause,
+        }
+        for chunk in ordered
+    ]
+
+
+def _evidence_failure_reason(confidence: EvidenceConfidence) -> str:
+    """Explain a confidence-gate failure with the score and raw signals."""
+    return (
+        f"evidence_confidence={confidence.score:.3f} "
+        f"signals={json.dumps(confidence.signals, ensure_ascii=False)}"
+    )
+
+
 def build_graph(
     llm,
     intent_llm,
     *,
     checkpointer=None,
     settings: Settings | None = None,
+    self_check_llm=None,
 ):
-    """Build and compile the parent workflow graph."""
+    """Build and compile the parent workflow graph.
+
+    ``self_check_llm`` runs the evidence sufficiency gate; it defaults to the
+    temperature-0 ``intent_llm`` so callers that do not pass one keep the old
+    behaviour without a second model.
+    """
     settings = settings or get_settings()
+    if self_check_llm is None:
+        self_check_llm = intent_llm
     if settings.intent_mode == "cost":
         # §9.2: only the configuration seed exists; runtime always classifies
         # with the accuracy model, so make the ignored setting visible.
@@ -308,6 +349,11 @@ def build_graph(
                 "confidence": None,
                 "gate_passed": False,
                 "gate_reason": "infra_error",
+                "evidence_confidence": None,
+                "evidence_signals": {},
+                "fallback_source": "",
+                "fallback_reason": "",
+                "retrieved_snapshot": [],
                 "answer": INFRA_TEXT,
             }
 
@@ -331,6 +377,11 @@ def build_graph(
                 "gate_passed": False,
                 "gate_reason": "rerank_failed",
                 "rerank_failed": True,
+                "evidence_confidence": None,
+                "evidence_signals": {},
+                "fallback_source": "",
+                "fallback_reason": "",
+                "retrieved_snapshot": [],
                 "answer": RERANK_FAILED_TEXT,
             }
 
@@ -353,13 +404,36 @@ def build_graph(
             settings.confidence_min_score,
             rerank_failed=result.rerank_failed,
         )
+        confidence = compute_evidence_confidence(
+            result.chunks,
+            valid_floor=settings.evidence_valid_floor,
+            valid_cap=settings.evidence_valid_cap,
+            margin_scale=settings.evidence_margin_scale,
+        )
+        passed = (
+            verdict.passed
+            and confidence.score >= settings.evidence_confidence_threshold
+        )
         return {
             "evidence": evidence,
             "sources": sources,
             "confidence": verdict.top_score,
-            "gate_passed": verdict.passed,
-            "gate_reason": verdict.reason,
+            "gate_passed": passed,
+            "gate_reason": (
+                verdict.reason
+                if not verdict.passed
+                else ("below_threshold" if not passed else "ok")
+            ),
             "rerank_failed": False,
+            "evidence_confidence": confidence.score,
+            "evidence_signals": confidence.signals,
+            "fallback_source": "" if passed else "retrieval_low_conf",
+            "fallback_reason": (
+                "" if passed else _evidence_failure_reason(confidence)
+            ),
+            "retrieved_snapshot": _retrieved_snapshot(
+                result.chunks, settings.low_confidence_snapshot_top_k
+            ),
         }
 
     def confidence_gate_node(state: CustomerServiceState) -> dict[str, Any]:
@@ -383,6 +457,55 @@ def build_graph(
             "answer": KNOWLEDGE_GAP_TEXT,
             "messages": [AIMessage(content=KNOWLEDGE_GAP_TEXT)],
         }
+
+    def self_check_gate_node(
+        state: CustomerServiceState, config: RunnableConfig
+    ) -> dict[str, Any]:
+        """Semantic evidence gate after the mechanical confidence gate.
+
+        Runs only when the confidence gate passed. ``useful=False`` is a
+        genuine knowledge gap and enters the pool (``fallback_source=
+        "self_check"``); an exception/timeout is an infrastructure failure that
+        must not pollute the pool, so it answers conservatively with an empty
+        ``fallback_source``.
+        """
+        if not state.get("gate_passed"):
+            return {}
+        try:
+            assessment = assess_evidence(
+                self_check_llm,
+                state.get("user_message", ""),
+                list(state.get("sources") or []),
+            )
+        except Exception:  # noqa: BLE001 - selfcheck outage is a conservative refusal
+            logger.exception(
+                "ch09 self_check_gate failed intent=%s route=%s",
+                state.get("intent"),
+                state.get("route"),
+            )
+            _emit(SELF_CHECK_FAILURE_TEXT)
+            return {
+                "answer": SELF_CHECK_FAILURE_TEXT,
+                "messages": [AIMessage(content=SELF_CHECK_FAILURE_TEXT)],
+                "gate_passed": False,
+                "fallback_source": "",
+                "fallback_reason": "",
+            }
+        if not assessment.useful:
+            logger.info(
+                "ch09 self_check_gate knowledge_gap intent=%s reason=%r",
+                state.get("intent"),
+                assessment.reason,
+            )
+            _emit(KNOWLEDGE_GAP_TEXT)
+            return {
+                "answer": KNOWLEDGE_GAP_TEXT,
+                "messages": [AIMessage(content=KNOWLEDGE_GAP_TEXT)],
+                "gate_passed": False,
+                "fallback_source": "self_check",
+                "fallback_reason": assessment.reason or "",
+            }
+        return {"gate_passed": True}
 
     def complaint_reply_node(state: CustomerServiceState) -> dict[str, Any]:
         _emit(COMPLAINT_TEXT)
@@ -438,6 +561,11 @@ def build_graph(
                     "confidence": None,
                     "gate_passed": False,
                     "gate_reason": "infra_error",
+                    "evidence_confidence": None,
+                    "evidence_signals": {},
+                    "fallback_source": "",
+                    "fallback_reason": "",
+                    "retrieved_snapshot": [],
                 }
             if result.rerank_failed:
                 logger.warning(
@@ -453,6 +581,11 @@ def build_graph(
                     "gate_passed": False,
                     "gate_reason": "rerank_failed",
                     "rerank_failed": True,
+                    "evidence_confidence": None,
+                    "evidence_signals": {},
+                    "fallback_source": "",
+                    "fallback_reason": "",
+                    "retrieved_snapshot": [],
                 }
             for chunk in result.chunks:
                 current = merged.get(chunk.chunk_id)
@@ -481,6 +614,16 @@ def build_graph(
             settings.confidence_min_score,
             rerank_failed=False,
         )
+        confidence = compute_evidence_confidence(
+            merged_chunks,
+            valid_floor=settings.evidence_valid_floor,
+            valid_cap=settings.evidence_valid_cap,
+            margin_scale=settings.evidence_margin_scale,
+        )
+        passed = (
+            verdict.passed
+            and confidence.score >= settings.evidence_confidence_threshold
+        )
         logger.info(
             "ch06 retrieve_policy order_id=%s queries=%s hits=%d top_score=%s",
             order_id,
@@ -493,9 +636,22 @@ def build_graph(
             "evidence": evidence,
             "sources": sources,
             "confidence": verdict.top_score,
-            "gate_passed": verdict.passed,
-            "gate_reason": verdict.reason,
+            "gate_passed": passed,
+            "gate_reason": (
+                verdict.reason
+                if not verdict.passed
+                else ("below_threshold" if not passed else "ok")
+            ),
             "rerank_failed": False,
+            "evidence_confidence": confidence.score,
+            "evidence_signals": confidence.signals,
+            "fallback_source": "" if passed else "retrieval_low_conf",
+            "fallback_reason": (
+                "" if passed else _evidence_failure_reason(confidence)
+            ),
+            "retrieved_snapshot": _retrieved_snapshot(
+                merged_chunks, settings.low_confidence_snapshot_top_k
+            ),
         }
 
     def record_log_node(
@@ -519,6 +675,10 @@ def build_graph(
             "gate_passed": state.get("gate_passed", False),
             "gate_reason": state.get("gate_reason"),
             "confidence": state.get("confidence"),
+            "evidence_confidence": state.get("evidence_confidence"),
+            "evidence_signals": state.get("evidence_signals") or {},
+            "fallback_source": state.get("fallback_source") or "",
+            "snapshot_count": len(state.get("retrieved_snapshot") or []),
             "retrieval_hits": len(state.get("evidence") or []),
             "rerank_failed": state.get("rerank_failed", False),
             "tool_steps": state.get("step_count", 0),
@@ -541,8 +701,14 @@ def build_graph(
         return "retrieve_policy"
 
     def gate_edge(state: CustomerServiceState) -> str:
-        # A failed gate (knowledge gap, infra or rerank failure) is answered by
-        # ``confidence_gate`` and skips the Agent; a passing gate enters it.
+        # A failed confidence gate (knowledge gap, infra or rerank failure) is
+        # answered by ``confidence_gate`` and skips the Agent; a passing gate
+        # still has to clear the semantic self-check before the Agent.
+        if not state.get("gate_passed"):
+            return "record_log"
+        return "self_check_gate"
+
+    def self_check_edge(state: CustomerServiceState) -> str:
         if not state.get("gate_passed"):
             return "record_log"
         return "main_agent"
@@ -557,6 +723,7 @@ def build_graph(
     graph.add_node("script_reply", script_reply_node)
     graph.add_node("fetch_order", fetch_order_node)
     graph.add_node("retrieve_policy", retrieve_policy_node)
+    graph.add_node("self_check_gate", self_check_gate_node)
     graph.add_node("main_agent", agent_subgraph)
     graph.add_node("record_log", record_log_node)
 
@@ -586,6 +753,11 @@ def build_graph(
     graph.add_conditional_edges(
         "confidence_gate",
         gate_edge,
+        {"self_check_gate": "self_check_gate", "record_log": "record_log"},
+    )
+    graph.add_conditional_edges(
+        "self_check_gate",
+        self_check_edge,
         {"main_agent": "main_agent", "record_log": "record_log"},
     )
     graph.add_edge("complaint_reply", "record_log")

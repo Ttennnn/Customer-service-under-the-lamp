@@ -306,6 +306,7 @@ def stream_chat(
                         message,
                         assessment.reason,
                         source="self_check",
+                        retrieved_chunks=collector.payload()[:3],
                     )
                 except Exception:  # noqa: BLE001 - a pool write must not break chat
                     logger.exception("failed to record low-confidence question")

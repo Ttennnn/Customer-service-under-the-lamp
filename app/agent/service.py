@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 ERROR_TEXT = "客服服务暂时不可用,请稍后重试"
 CONVERSATION_NOT_FOUND_TEXT = "会话不存在"
-_GATE_GAP_REASONS = frozenset({"empty", "below_threshold"})
+_POOL_FALLBACK_SOURCES = frozenset({"retrieval_low_conf", "self_check"})
 _FORWARDED_FRAME_TYPES = frozenset({"token", "tool", "sources"})
 
 
@@ -175,6 +175,11 @@ def _reset_inputs(
         "gate_passed": False,
         "gate_reason": "",
         "rerank_failed": False,
+        "evidence_confidence": None,
+        "evidence_signals": {},
+        "fallback_source": "",
+        "fallback_reason": "",
+        "retrieved_snapshot": [],
         "answer": "",
         "created_ticket_no": "",
         "suggested_actions": [],
@@ -228,6 +233,21 @@ def _interrupt_frame(payload: dict) -> str:
     return _dumps({"type": "interrupt", **payload})
 
 
+def _pool_reason(state_values: dict, fallback_source: str) -> str:
+    """Build the low-confidence ``reason`` from the gate's evidence signals."""
+    reason = state_values.get("fallback_reason") or ""
+    if reason:
+        return reason
+    confidence = state_values.get("evidence_confidence")
+    if confidence is not None:
+        reason = f"evidence_confidence={float(confidence):.3f}"
+        signals = state_values.get("evidence_signals") or {}
+        if signals:
+            reason += f" signals={json.dumps(signals, ensure_ascii=False)}"
+        return reason
+    return state_values.get("gate_reason") or fallback_source
+
+
 def _finish_turn(
     session: Session,
     conversation_id: int,
@@ -241,6 +261,12 @@ def _finish_turn(
     and the answer does not already contain it, the number is appended as a
     plain-text token frame (before ``options``, so the browser receives it)
     and the augmented answer — not the original — is persisted.
+
+    Only the two genuine knowledge-gap fallbacks (``retrieval_low_conf`` and
+    ``self_check``) enter the low-confidence pool; infra/rerank/order failures
+    leave ``fallback_source`` empty and never pollute it. Pooled rows carry the
+    turn's ``retrieved_snapshot`` so reviewers see the evidence that was
+    actually retrieved.
     """
     answer = state_values.get("answer") or ""
     ticket_no = state_values.get("created_ticket_no") or ""
@@ -256,15 +282,19 @@ def _finish_turn(
     append_message(session, conversation_id, "assistant", answer)
     session.commit()
 
-    gate_reason = state_values.get("gate_reason")
-    if gate_reason in _GATE_GAP_REASONS:
+    fallback_source = state_values.get("fallback_source") or ""
+    if fallback_source in _POOL_FALLBACK_SOURCES:
         try:
             record_low_confidence(
                 session,
                 conversation_id,
                 question,
-                gate_reason,
-                source="confidence_gate",
+                _pool_reason(state_values, fallback_source),
+                source=fallback_source,
+                retrieved_chunks=list(
+                    state_values.get("retrieved_snapshot") or []
+                )
+                or None,
             )
             session.commit()
         except Exception:  # noqa: BLE001 - a pool write must not break chat

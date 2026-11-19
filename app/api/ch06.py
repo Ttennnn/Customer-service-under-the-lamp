@@ -80,6 +80,8 @@ def _build_and_cache_graph(app, settings: Settings):
             intent_llm,
             checkpointer=handle.saver,
             settings=settings,
+            # §9: the semantic evidence gate reuses the temperature-0 model.
+            self_check_llm=intent_llm,
         )
         # Bind the shared Langfuse callback once per compiled graph. Returns
         # the original graph when tracing is disabled/unavailable.

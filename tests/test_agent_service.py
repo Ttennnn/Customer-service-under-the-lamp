@@ -103,6 +103,11 @@ def test_service_resets_transient_state(session):
     assert inputs["gate_passed"] is False
     assert inputs["gate_reason"] == ""
     assert inputs["rerank_failed"] is False
+    assert inputs["evidence_confidence"] is None
+    assert inputs["evidence_signals"] == {}
+    assert inputs["fallback_source"] == ""
+    assert inputs["fallback_reason"] == ""
+    assert inputs["retrieved_snapshot"] == []
     assert inputs["resolved_query"] == ""
     assert inputs["intent_confidence"] is None
     assert inputs["session_id"] == "u1"
@@ -198,6 +203,7 @@ def test_service_records_low_confidence_for_gate_gap(session):
             "route": "knowledge",
             "gate_passed": False,
             "gate_reason": "below_threshold",
+            "fallback_source": "retrieval_low_conf",
             "answer": "抱歉,知识库暂未收录足够的信息。",
         },
     )
@@ -205,10 +211,71 @@ def test_service_records_low_confidence_for_gate_gap(session):
     rows = session.query(LowConfidenceQuestion).all()
     assert len(rows) == 1
     row = rows[0]
-    assert row.source == "confidence_gate"
+    assert row.source == "retrieval_low_conf"
     assert row.conversation_id == cid
     assert row.raw_question == "你好"
     assert row.reason == "below_threshold"
+
+
+def test_gate_gap_records_retrieval_low_conf_with_snapshot(session):
+    _run(
+        session,
+        final={
+            "route": "knowledge",
+            "gate_passed": False,
+            "gate_reason": "low_confidence",
+            "fallback_source": "retrieval_low_conf",
+            "evidence_confidence": 0.21,
+            "retrieved_snapshot": [
+                {
+                    "question": "q",
+                    "answer": "a",
+                    "rerank_score": 0.2,
+                    "section_path": "s",
+                    "is_key_clause": False,
+                }
+            ],
+            "answer": "兜底",
+        },
+    )
+
+    rows = session.query(LowConfidenceQuestion).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.source == "retrieval_low_conf"
+    assert row.retrieved_chunks[0]["rerank_score"] == 0.2
+    assert "evidence_confidence" in row.reason
+
+
+def test_selfcheck_gap_records_self_check(session):
+    _run(
+        session,
+        final={
+            "route": "knowledge",
+            "gate_passed": False,
+            "fallback_source": "self_check",
+            "fallback_reason": "证据只沾边",
+            "answer": "兜底",
+        },
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert row.source == "self_check"
+    assert row.reason == "证据只沾边"
+
+
+@pytest.mark.parametrize("source", ["", "infra_error", "rerank_failed"])
+def test_infra_does_not_pool(session, source):
+    _run(
+        session,
+        final={
+            "gate_passed": False,
+            "fallback_source": source,
+            "answer": "兜底",
+        },
+    )
+
+    assert session.query(LowConfidenceQuestion).count() == 0
 
 
 @pytest.mark.parametrize("gate_reason", ["infra_error", "rerank_failed"])

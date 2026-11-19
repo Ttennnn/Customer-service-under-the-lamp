@@ -13,11 +13,13 @@ from app.agent.graph import (
     KNOWLEDGE_GAP_TEXT,
     OTHER_TEXT,
     RERANK_FAILED_TEXT,
+    SELF_CHECK_FAILURE_TEXT,
     build_graph,
     sqlite_checkpointer,
 )
 from app.agent.intent import IntentResult
 from app.config import Settings
+from app.rag.self_check import EvidenceAssessment
 from tests.agent_fakes import (
     ScriptedLLM,
     ScriptedStructuredLLM,
@@ -153,8 +155,108 @@ def test_gate_failure_skips_agent(monkeypatch):
     result = graph.invoke(_state("耳机降噪吗"), CONFIG)
 
     assert result["gate_passed"] is False
+    assert result["fallback_source"] == "retrieval_low_conf"
     assert result["answer"] == KNOWLEDGE_GAP_TEXT
     assert result["step_count"] == 0
+
+
+def test_confidence_failure_sets_retrieval_low_conf_with_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.02)]),
+    )
+    graph = _build(ScriptedLLM([]), "商品咨询")
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["gate_passed"] is False
+    assert result["fallback_source"] == "retrieval_low_conf"
+    assert result["evidence_confidence"] is not None
+    assert result["evidence_signals"]["top1"] == 0.02
+    assert "evidence_confidence" in result["fallback_reason"]
+    assert result["retrieved_snapshot"] == [
+        {
+            "question": "q",
+            "answer": "a",
+            "rerank_score": 0.02,
+            "section_path": "s",
+            "is_key_clause": False,
+        }
+    ]
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
+    assert result["step_count"] == 0
+
+
+def test_selfcheck_failure_sets_self_check_and_skips_agent(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.9)]),
+    )
+    intent_llm = ScriptedStructuredLLM(
+        "",
+        IntentResult(intent="商品咨询", confidence=0.9),
+        evidence_assessment=EvidenceAssessment(useful=False, reason="只沾边"),
+    )
+    graph = build_graph(
+        ExplodingLLM(), intent_llm, checkpointer=InMemorySaver()
+    )
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["gate_passed"] is False
+    assert result["fallback_source"] == "self_check"
+    assert result["fallback_reason"] == "只沾边"
+    assert result["answer"] == KNOWLEDGE_GAP_TEXT
+    assert result["step_count"] == 0
+
+
+def test_selfcheck_exception_uses_failure_text_without_pool_source(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result([make_chunk(0.9)]),
+    )
+    intent_llm = ScriptedStructuredLLM(
+        "",
+        IntentResult(intent="商品咨询", confidence=0.9),
+        evidence_error=RuntimeError("self-check timeout"),
+    )
+    graph = build_graph(
+        ExplodingLLM(), intent_llm, checkpointer=InMemorySaver()
+    )
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["gate_passed"] is False
+    assert result["fallback_source"] == ""
+    assert result["fallback_reason"] == ""
+    assert result["answer"] == SELF_CHECK_FAILURE_TEXT
+    assert result["step_count"] == 0
+
+
+def test_retrieval_pass_stores_top3_snapshot(monkeypatch):
+    chunks = [make_chunk(score) for score in (0.6, 0.9, 0.7, 0.8)]
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_hybrid",
+        lambda query, **kwargs: make_retrieval_result(chunks),
+    )
+    graph = _build(ScriptedLLM([text_chunk("支持降噪")]), "商品咨询")
+
+    result = graph.invoke(_state("耳机降噪吗"), CONFIG)
+
+    assert result["gate_passed"] is True
+    assert result["fallback_source"] == ""
+    assert [row["rerank_score"] for row in result["retrieved_snapshot"]] == [
+        0.9,
+        0.8,
+        0.7,
+    ]
+    assert set(result["retrieved_snapshot"][0]) == {
+        "question",
+        "answer",
+        "rerank_score",
+        "section_path",
+        "is_key_clause",
+    }
 
 
 def test_rerank_failure_skips_agent_and_uses_infra_text(monkeypatch):

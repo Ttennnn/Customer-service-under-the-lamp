@@ -15,17 +15,22 @@ def record_low_confidence(
     raw_question: str,
     reason: str | None,
     source: str = "self_check",
+    retrieved_chunks: list[dict] | None = None,
 ) -> LowConfidenceQuestion:
     """Insert one low-confidence question and flush it.
 
     The caller owns the transaction and must commit. ``flush`` assigns the row
     id so callers can log or link it before committing.
+
+    ``retrieved_chunks`` is the top-N retrieval snapshot at pool time (ch09);
+    knowledge/refund turns pass it, non-retrieval turns leave it ``None``.
     """
     row = LowConfidenceQuestion(
         conversation_id=conversation_id,
         raw_question=raw_question,
         reason=reason,
         source=source,
+        retrieved_chunks=retrieved_chunks,
     )
     session.add(row)
     session.flush()

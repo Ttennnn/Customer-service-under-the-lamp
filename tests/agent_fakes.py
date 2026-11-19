@@ -15,12 +15,22 @@ class ScriptedLLM:
 
 
 class ScriptedStructuredLLM:
-    """Schema-aware fake for coref, intent and query-expansion calls."""
+    """Schema-aware fake for coref, intent, query-expansion and self-check."""
 
-    def __init__(self, resolved: str, intent, queries=None):
+    def __init__(
+        self,
+        resolved: str,
+        intent,
+        queries=None,
+        *,
+        evidence_assessment=None,
+        evidence_error: Exception | None = None,
+    ):
         self.resolved = resolved
         self.intent = intent
         self.queries = queries or ["q1", "q2", "q3"]
+        self.evidence_assessment = evidence_assessment
+        self.evidence_error = evidence_error
         self.schema = None
         self.messages = []
 
@@ -31,11 +41,18 @@ class ScriptedStructuredLLM:
     def invoke(self, messages):
         from app.agent.coref import CorefRewrite
         from app.rag.query_understanding import QueryExpansion
+        from app.rag.self_check import EvidenceAssessment
         self.messages.extend(messages)
         if self.schema is CorefRewrite:
             return CorefRewrite(resolved_query=self.resolved)
         if self.schema is QueryExpansion:
             return QueryExpansion(queries=self.queries)
+        if self.schema is EvidenceAssessment:
+            if self.evidence_error is not None:
+                raise self.evidence_error
+            if self.evidence_assessment is not None:
+                return self.evidence_assessment
+            return EvidenceAssessment(useful=True)
         return self.intent
 
 

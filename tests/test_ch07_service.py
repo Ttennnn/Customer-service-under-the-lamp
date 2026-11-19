@@ -92,6 +92,7 @@ def test_long_user_input_is_truncated_for_graph_but_kept_in_db(session, caplog):
             session,
             final={
                 "gate_reason": "below_threshold",
+                "fallback_source": "retrieval_low_conf",
                 "answer": "抱歉,知识库暂未收录足够的信息。",
             },
             message=long_message,
