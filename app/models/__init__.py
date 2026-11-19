@@ -10,6 +10,7 @@ from app.models.knowledge import (
     QaExtractionStaging,
 )
 from app.models.message import Message
+from app.models.review import EvalRun, ReviewQueue
 from app.models.ticket import Ticket
 from app.models.tool_audit import ToolAuditLog
 
@@ -24,4 +25,6 @@ __all__ = [
     "LowConfidenceQuestion",
     "FaithCase",
     "ToolAuditLog",
+    "ReviewQueue",
+    "EvalRun",
 ]

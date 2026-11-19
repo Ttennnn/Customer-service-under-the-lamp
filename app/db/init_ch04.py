@@ -14,54 +14,16 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from app.db.session import get_engine
+from app.db.sql_utils import load_statements
+from app.db.sql_utils import split_statements as _split_statements
 
 SQL_PATH = Path(__file__).resolve().parents[2] / "sql" / "ch04_rag_advanced.sql"
 TABLES = ("low_confidence_questions", "faith_cases")
 
 
-def _split_statements(sql: str) -> list[str]:
-    """Split on ``;`` boundaries that are not inside single-quoted strings.
-
-    The ch04 DDL comments contain literal ``;`` (e.g. ``如 A43;一题一行``), so a
-    naive ``str.split(";")`` would cut CREATE statements in half.
-    """
-    statements: list[str] = []
-    start = 0
-    in_quote = False
-    i = 0
-    while i < len(sql):
-        char = sql[i]
-        if in_quote:
-            if char == "\\":
-                i += 2
-                continue
-            if char == "'":
-                if i + 1 < len(sql) and sql[i + 1] == "'":
-                    i += 2
-                    continue
-                in_quote = False
-        elif char == "'":
-            in_quote = True
-        elif char == ";":
-            statement = sql[start:i].strip()
-            if statement:
-                statements.append(statement)
-            start = i + 1
-        i += 1
-
-    tail = sql[start:].strip()
-    if tail:
-        statements.append(tail)
-    return statements
-
-
 def _load_statements(path: Path = SQL_PATH) -> list[str]:
     """Read ``path``, drop ``--`` comment lines, and split into statements."""
-    raw = path.read_text(encoding="utf-8")
-    sql = "\n".join(
-        line for line in raw.splitlines() if not line.strip().startswith("--")
-    )
-    return _split_statements(sql)
+    return load_statements(path)
 
 
 def _existing_tables(conn: Connection) -> set[str]:

@@ -46,3 +46,43 @@ def test_build_llm_accepts_temperature():
     s = Settings(_env_file=None, openai_api_key="sk-test")
     assert build_llm(s).temperature == 0.7
     assert build_llm(s, temperature=0.0).temperature == 0.0
+
+
+def test_ch09_langfuse_defaults():
+    s = Settings(_env_file=None, openai_api_key="x")
+    assert s.langfuse_public_key == ""
+    assert s.langfuse_secret_key == ""
+    assert s.langfuse_base_url == "http://localhost:3000"
+    assert s.langfuse_environment == "development"
+    assert s.langfuse_trace_name == "cs-chat"
+    assert s.stream_usage is True
+
+
+def test_ch09_confidence_flywheel_and_report_defaults():
+    s = Settings(_env_file=None, openai_api_key="x")
+    assert s.evidence_confidence_threshold == 0.0
+    assert s.evidence_valid_floor == 0.1
+    assert s.evidence_valid_cap == 3
+    assert s.evidence_margin_scale == 0.2
+    assert s.low_confidence_snapshot_top_k == 3
+    assert s.flywheel_candidate_limit == 200
+    assert s.flywheel_llm_max_tokens == 800
+    assert s.flywheel_timeout_s == 20
+    assert s.ch09_report_dir == "data/ch09/reports"
+
+
+def test_ch09_settings_env_overrides(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://langfuse.local:3000")
+    monkeypatch.setenv("STREAM_USAGE", "false")
+    monkeypatch.setenv("EVIDENCE_CONFIDENCE_THRESHOLD", "0.42")
+    monkeypatch.setenv("CH09_REPORT_DIR", "/tmp/ch09")
+    s = Settings(_env_file=None, openai_api_key="x")
+    assert s.langfuse_base_url == "http://langfuse.local:3000"
+    assert s.stream_usage is False
+    assert s.evidence_confidence_threshold == 0.42
+    assert s.ch09_report_dir == "/tmp/ch09"
+
+
+def test_build_llm_enables_stream_usage():
+    s = Settings(_env_file=None, openai_api_key="sk-test")
+    assert build_llm(s).stream_usage is True
