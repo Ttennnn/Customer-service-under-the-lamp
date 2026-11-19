@@ -109,6 +109,7 @@ def test_service_resets_transient_state(session):
     assert inputs["order_data"] is None
     assert inputs["expanded_queries"] == []
     assert inputs["answer"] == ""
+    assert inputs["created_ticket_no"] == ""
     assert inputs["suggested_actions"] == []
     assert inputs["exhausted"] is False
     assert inputs["conversation_id"] is not None
@@ -127,6 +128,19 @@ def test_service_resets_transient_state(session):
     assert isinstance(inputs["messages"][0], HumanMessage)
     assert inputs["messages"][0].content == "退款政策是什么?"
     assert inputs["messages"][0].id.startswith("db-")
+
+
+def test_service_resets_stale_ticket_number_between_turns(session):
+    # A previous turn created T20261119001 and the checkpoint thread still
+    # carries ``created_ticket_no``. The next turn (e.g. a cancel or an
+    # unrelated question) must not inherit that stale number.
+    graph = FakeGraph(
+        [], {"answer": "答", "created_ticket_no": "T20261119001"}
+    )
+
+    list(stream_chat_agent(graph, session, "u1", "第二问", settings=_settings()))
+
+    assert graph.inputs[-1]["created_ticket_no"] == ""
 
 
 def test_service_persists_assistant_answer(session):

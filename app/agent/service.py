@@ -128,6 +128,8 @@ def _reset_inputs(
     reducer-backed channel, so a stale ``True`` would leak into the next turn.
     The ch06 slots (``order_id`` / ``order_data``) and routing fields are reset
     for the same reason: a new turn must re-derive them from its own message.
+    ``created_ticket_no`` is reset too, otherwise a ticket number from an
+    earlier turn would survive a later cancel/unrelated turn (Task 10 reads it).
 
     The user message carries the MySQL ``db-{id}`` identity so the layered
     window and the summary job can anchor on persisted rows. The context plan
@@ -151,6 +153,7 @@ def _reset_inputs(
         "gate_reason": "",
         "rerank_failed": False,
         "answer": "",
+        "created_ticket_no": "",
         "suggested_actions": [],
         "step_count": 0,
         "token_estimate": 0,
