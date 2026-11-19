@@ -153,6 +153,41 @@ def test_service_persists_assistant_answer(session):
     ]
 
 
+def test_finish_turn_appends_ticket_number(session):
+    suffix = "\n\n工单已创建，工单号：T20261119001"
+    graph, events = _run(
+        session,
+        frames=[{"type": "token", "text": "已为您处理"}],
+        final={
+            "answer": "已为您处理",
+            "created_ticket_no": "T20261119001",
+            "suggested_actions": [TRANSFER_ACTION],
+        },
+    )
+
+    # The suffix is a plain-text token frame sent before the options frame so
+    # the browser receives it even though the model never wrote the number.
+    assert events[-2:] == [
+        suffix,
+        _dumps({"type": "options", "options": [TRANSFER_ACTION]}),
+    ]
+    row = session.query(Message).filter(Message.role == "assistant").one()
+    assert row.content == "已为您处理" + suffix
+
+
+def test_finish_turn_does_not_duplicate_ticket_number(session):
+    answer = "已为您处理，工单号：T20261119001"
+    graph, events = _run(
+        session,
+        frames=[],
+        final={"answer": answer, "created_ticket_no": "T20261119001"},
+    )
+
+    assert all("工单已创建" not in event for event in events)
+    row = session.query(Message).filter(Message.role == "assistant").one()
+    assert row.content == answer
+
+
 def test_service_records_low_confidence_for_gate_gap(session):
     cid = get_or_create_conversation(session, "u1").id
     _run(

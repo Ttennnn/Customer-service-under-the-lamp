@@ -211,12 +211,25 @@ def _finish_turn(
     state_values: dict,
     question: str,
 ) -> Iterator[str]:
-    """Emit trailing options, persist the answer and record a knowledge gap."""
+    """Emit the ticket fallback and options, persist the answer, pool gaps.
+
+    A write turn can succeed in the tool while the model's final answer omits
+    the created ticket number. When the graph recorded ``created_ticket_no``
+    and the answer does not already contain it, the number is appended as a
+    plain-text token frame (before ``options``, so the browser receives it)
+    and the augmented answer — not the original — is persisted.
+    """
+    answer = state_values.get("answer") or ""
+    ticket_no = state_values.get("created_ticket_no") or ""
+    if ticket_no and ticket_no not in answer:
+        suffix = f"\n\n工单已创建，工单号：{ticket_no}"
+        answer += suffix
+        yield suffix
+
     actions = state_values.get("suggested_actions") or []
     if actions:
         yield _dumps({"type": "options", "options": list(actions)})
 
-    answer = state_values.get("answer") or ""
     append_message(session, conversation_id, "assistant", answer)
     session.commit()
 

@@ -12,6 +12,7 @@ from app.api.ch06 import get_ch06_graph_dep
 from app.config import Settings, get_settings
 from app.main import app
 from app.models import Conversation, Message, Ticket
+from app.tools.spec import ToolRun
 from app.tools.ticket import TICKET_NO_PATTERN
 from tests.agent_fakes import FakeGraph
 
@@ -262,14 +263,71 @@ def test_ch06_refund_unknown_order_422(client, session):
     assert session.query(Conversation).count() == 0
 
 
-def test_ch06_refund_failure_502(client, session, monkeypatch):
-    calls = []
+def test_ch06_refund_uses_confirmed_engine_retries_zero(
+    client, session, monkeypatch
+):
+    seen = {}
 
-    def fake_execute_tool(*args, **kwargs):
-        calls.append(kwargs)
-        return "工具执行失败"
+    def fake_execute(spec, args, **kwargs):
+        seen["spec"] = spec.name
+        seen["args"] = args
+        seen.update(kwargs)
+        return ToolRun(
+            status="ok",
+            content='{"ticket_no":"T20261119001"}',
+            data="T20261119001",
+        )
 
-    monkeypatch.setattr("app.api.ch06.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.api.ch06.execute", fake_execute)
+
+    r = client.post(
+        "/ch06/refunds",
+        json={
+            "session_id": "s",
+            "order_id": "1001",
+            "reason": "质量问题",
+            # The refund form submission is the confirmation; a body field
+            # must not override it.
+            "confirmed": False,
+        },
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {"ticket_no": "T20261119001", "message": "退款单已创建"}
+    assert seen["spec"] == "create_ticket"
+    assert seen["args"]["ticket_type"] == "退款"
+    assert "订单 1001" in seen["args"]["description"]
+    assert "质量问题" in seen["args"]["description"]
+    assert seen["confirmed"] is True
+    # Refund tickets are non-idempotent: the write must never retry.
+    assert seen["retries"] == 0
+    assert seen["conversation_id"] is not None
+
+
+def test_ch06_refund_engine_failure_502(client, session, monkeypatch):
+    def fake_execute(spec, args, **kwargs):
+        return ToolRun(
+            status="error",
+            content="工具暂时不可用：create_ticket（TimeoutError）",
+        )
+
+    monkeypatch.setattr("app.api.ch06.execute", fake_execute)
+
+    r = client.post(
+        "/ch06/refunds",
+        json={"session_id": "s", "order_id": "1001", "reason": "质量问题"},
+    )
+
+    assert r.status_code == 502
+    assert r.json()["detail"] == "退款单创建失败,请稍后重试"
+    assert session.query(Ticket).count() == 0
+
+
+def test_ch06_refund_missing_number_502(client, session, monkeypatch):
+    def fake_execute(spec, args, **kwargs):
+        return ToolRun(status="ok", content="{}", data=None)
+
+    monkeypatch.setattr("app.api.ch06.execute", fake_execute)
 
     r = client.post(
         "/ch06/refunds",
@@ -278,8 +336,6 @@ def test_ch06_refund_failure_502(client, session, monkeypatch):
 
     assert r.status_code == 502
     assert session.query(Ticket).count() == 0
-    # 退款单写入非幂等:必须禁用自动重试,超时宁可 502 让用户手动确认重试。
-    assert calls == [{"timeout_s": 5, "retries": 0}]
 
 
 def _fake_request_state():
