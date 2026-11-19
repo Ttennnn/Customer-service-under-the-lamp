@@ -19,7 +19,7 @@ flywheel:
 	$(PYTHON) -m app.jobs.flywheel_pipeline
 
 eval-flywheel:
-	$(PYTHON) -m app.jobs.eval_flywheel
+	$(PYTHON) -m app.jobs.eval_flywheel --triggered-by 手动
 
 test:
 	$(PYTHON) -m pytest -q
