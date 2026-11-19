@@ -66,6 +66,7 @@ def test_collector_payload_has_exact_keys():
         "category",
         "content_type",
         "score",
+        "is_key_clause",
     }
 
 

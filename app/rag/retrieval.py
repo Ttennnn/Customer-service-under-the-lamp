@@ -59,6 +59,8 @@ class RetrievedChunk:
     section_path: str | None
     category: str
     content_type: str | None
+    # Placed last so existing positional constructors keep working.
+    is_key_clause: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,7 @@ def _as_chunk(row: KnowledgeChunk, score: float) -> RetrievedChunk:
         section_path=row.section_path,
         category=row.category,
         content_type=row.content_type,
+        is_key_clause=bool(row.is_key_clause),
     )
 
 
