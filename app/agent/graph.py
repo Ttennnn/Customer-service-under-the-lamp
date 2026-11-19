@@ -45,6 +45,7 @@ from app.agent.routing import route_for_intent
 from app.agent.state import CustomerServiceState
 from app.agent.subgraph import build_agent_subgraph
 from app.config import Settings, get_settings
+from app.observability import update_intent_trace
 from app.rag.query_understanding import (
     QueryAnalysis,
     expand_queries,
@@ -271,6 +272,12 @@ def build_graph(
             history,
             summary=state.get("summary") or "",
         )
+        # Tracing is optional: the helper itself no-ops when disabled and the
+        # guard here also covers a monkeypatched/replaced implementation.
+        try:
+            update_intent_trace(settings, result.intent, result.confidence)
+        except Exception:  # noqa: BLE001 - observability must not break the turn
+            logger.warning("ch06 intent trace update failed", exc_info=True)
         return {"intent": result.intent, "intent_confidence": result.confidence}
 
     def route_by_intent(state: CustomerServiceState) -> dict[str, Any]:

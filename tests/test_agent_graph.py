@@ -331,3 +331,49 @@ def test_sqlite_checkpointer_creates_file(tmp_path):
         assert path.exists()
         # setup() is idempotent; a second call must not raise either.
         saver.setup()
+
+
+def test_classify_intent_reports_to_langfuse(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.agent.graph.update_intent_trace",
+        lambda settings, intent, confidence: calls.append(
+            (settings, intent, confidence)
+        ),
+    )
+    graph = _build(ScriptedLLM([]), "投诉", resolved="我要投诉")
+
+    result = graph.invoke(_state("我要投诉"), CONFIG)
+
+    assert result["intent"] == "投诉"
+    assert len(calls) == 1
+    _, intent, confidence = calls[0]
+    assert intent == "投诉"
+    assert confidence == 0.9
+
+
+def test_classify_intent_trace_failure_does_not_break_graph(monkeypatch):
+    def exploding_trace(*args, **kwargs):
+        raise RuntimeError("langfuse down")
+
+    monkeypatch.setattr(
+        "app.agent.graph.update_intent_trace", exploding_trace
+    )
+    graph = _build(ScriptedLLM([]), "投诉", resolved="我要投诉")
+
+    result = graph.invoke(_state("我要投诉"), CONFIG)
+
+    assert result["intent"] == "投诉"
+    assert result["route"] == "escalate"
+
+
+def test_compiled_graph_with_config_keeps_streaming_and_state_reads():
+    from app.observability import _state_graph
+
+    graph = _build(ScriptedLLM([]), "投诉", resolved="我要投诉")
+    binding = graph.with_config({"callbacks": []})
+
+    result = binding.invoke(_state("我要投诉"), CONFIG)
+
+    assert result["intent"] == "投诉"
+    assert _state_graph(binding).get_state(CONFIG).values["intent"] == "投诉"

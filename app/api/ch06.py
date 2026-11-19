@@ -37,6 +37,7 @@ from app.agent.service import (
 from app.config import Settings, build_llm, get_settings
 from app.db import session as db_session
 from app.db.session import get_db
+from app.observability import attach_tracing
 from app.schemas import ChatRequest, RefundRequest, ResumeRequest
 from app.services.history import (
     ConversationNotFound,
@@ -80,6 +81,9 @@ def _build_and_cache_graph(app, settings: Settings):
             checkpointer=handle.saver,
             settings=settings,
         )
+        # Bind the shared Langfuse callback once per compiled graph. Returns
+        # the original graph when tracing is disabled/unavailable.
+        graph = attach_tracing(graph, settings)
     except Exception:  # noqa: BLE001 - construction failure surfaced as 503
         if handle is not None:
             try:

@@ -49,6 +49,7 @@ from langgraph.types import Command
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.observability import _state_graph, tracing_enabled
 from app.services.history import (
     ConversationNotFound,
     append_message,
@@ -74,9 +75,31 @@ def _dumps(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _thread_config(conversation_id: int) -> dict:
-    """Config pinning the checkpointer thread to one conversation."""
-    return {"configurable": {"thread_id": f"conv:{conversation_id}"}}
+def _thread_config(
+    conversation_id: int,
+    *,
+    user_id: str | None = None,
+    settings: Settings | None = None,
+) -> dict:
+    """Config pinning the checkpointer thread to one conversation.
+
+    When both ``user_id`` and ``settings`` are supplied *and* tracing is
+    enabled, the Langfuse LangChain metadata keys are added so the trace is
+    grouped by conversation session and attributed to the user.  Callers that
+    only need to read a snapshot (``has_pending_interrupt``) keep the legacy
+    two-argument path.
+    """
+    config: dict = {"configurable": {"thread_id": f"conv:{conversation_id}"}}
+    if (
+        user_id is not None
+        and settings is not None
+        and tracing_enabled(settings)
+    ):
+        config["metadata"] = {
+            "langfuse_session_id": f"conv:{conversation_id}",
+            "langfuse_user_id": user_id,
+        }
+    return config
 
 
 def _conversation_frame(conversation_id: int) -> str:
@@ -192,7 +215,7 @@ def _interrupt_payload(snapshot) -> dict | None:
 
 def _pending_interrupt(graph, config: dict) -> dict | None:
     """Read the thread snapshot and return its pending interrupt payload."""
-    return _interrupt_payload(graph.get_state(config))
+    return _interrupt_payload(_state_graph(graph).get_state(config))
 
 
 def has_pending_interrupt(graph, conversation_id: int) -> bool:
@@ -318,10 +341,10 @@ def stream_chat_agent(
         return
 
     cid = conversation.id
-    config = _thread_config(cid)
+    config = _thread_config(cid, user_id=user_id, settings=settings)
 
     try:
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - pending check failure becomes one frame
         logger.exception("ch07 chat pending check failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})
@@ -362,7 +385,7 @@ def stream_chat_agent(
 
     try:
         yield from _iter_forwarded_frames(graph, inputs, config)
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - stream errors become one SSE frame
         logger.exception("ch07 chat graph failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})
@@ -428,8 +451,8 @@ def resume_chat_agent(
         return
 
     cid = conversation.id
-    config = _thread_config(cid)
-    snapshot = graph.get_state(config)
+    config = _thread_config(cid, user_id=user_id, settings=settings)
+    snapshot = _state_graph(graph).get_state(config)
     pending = _interrupt_payload(snapshot)
     if pending is None:
         raise NoPendingInterrupt(f"conversation {cid} has no pending interrupt")
@@ -454,7 +477,7 @@ def resume_chat_agent(
         yield from _iter_forwarded_frames(
             graph, Command(resume=resume_value), config
         )
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - stream errors become one SSE frame
         logger.exception("ch07 resume graph failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})

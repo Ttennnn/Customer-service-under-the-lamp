@@ -9,6 +9,7 @@ from langgraph.types import Command
 
 from app.agent.service import (
     NoPendingInterrupt,
+    _thread_config,
     has_pending_interrupt,
     resume_chat_agent,
     stream_chat_agent,
@@ -389,3 +390,126 @@ def test_service_graph_error_yields_error_frame(session):
     assert len(events) == 2
     assert json.loads(events[-1]) == {"error": "客服服务暂时不可用,请稍后重试"}
     assert session.query(Message).filter(Message.role == "assistant").count() == 0
+
+
+def _tracing_settings():
+    return Settings(
+        _env_file=None,
+        openai_api_key="test",
+        langfuse_public_key="pk-lf-test",
+        langfuse_secret_key="sk-lf-test",
+        langfuse_base_url="http://localhost:3000",
+    )
+
+
+def test_thread_config_keeps_legacy_shape_without_user_or_settings():
+    assert _thread_config(7) == {"configurable": {"thread_id": "conv:7"}}
+
+
+def test_thread_config_adds_langfuse_metadata_when_tracing_enabled():
+    config = _thread_config(1, user_id="u1", settings=_tracing_settings())
+
+    assert config == {
+        "configurable": {"thread_id": "conv:1"},
+        "metadata": {
+            "langfuse_session_id": "conv:1",
+            "langfuse_user_id": "u1",
+        },
+    }
+    # The callback handler is attached at compile time, not per call.
+    assert "callbacks" not in config
+
+
+def test_thread_config_omits_metadata_when_tracing_disabled():
+    config = _thread_config(1, user_id="u1", settings=_settings())
+
+    assert config == {"configurable": {"thread_id": "conv:1"}}
+    assert "metadata" not in config
+    assert "callbacks" not in config
+
+
+def test_thread_config_omits_metadata_without_user_id():
+    config = _thread_config(1, settings=_tracing_settings())
+
+    assert "metadata" not in config
+
+
+def test_stream_chat_passes_langfuse_metadata_to_graph(session):
+    graph = FakeGraph(frames=[], final={"answer": "答"})
+
+    list(
+        stream_chat_agent(
+            graph,
+            session,
+            "u1",
+            "你好",
+            settings=_tracing_settings(),
+        )
+    )
+
+    assert graph.config["metadata"] == {
+        "langfuse_session_id": "conv:1",
+        "langfuse_user_id": "u1",
+    }
+
+
+class _BoundGraph:
+    """Mimics ``RunnableBinding`` from ``compile().with_config(...)``.
+
+    It only forwards ``stream``; ``get_state`` lives on ``bound`` so a missed
+    ``_state_graph`` unwrap surfaces immediately.
+    """
+
+    def __init__(self, bound):
+        self.bound = bound
+
+    def stream(self, *args, **kwargs):
+        return self.bound.stream(*args, **kwargs)
+
+
+def test_service_reads_state_through_bound_graph(session):
+    inner = FakeGraph(frames=[], final={"answer": "答"})
+    graph = _BoundGraph(inner)
+
+    events = list(
+        stream_chat_agent(graph, session, "u1", "你好", settings=_settings())
+    )
+
+    assert not any('"error"' in event for event in events)
+    assert inner.stream_calls
+    answers = [
+        row.content
+        for row in session.query(Message).filter(Message.role == "assistant")
+    ]
+    assert answers == ["答"]
+
+
+def test_has_pending_interrupt_accepts_bound_graph(session):
+    inner = FakeGraph(frames=[], final={}, snapshots=[_pending_snapshot()])
+    graph = _BoundGraph(inner)
+
+    assert has_pending_interrupt(graph, 7) is True
+    assert inner.config == {"configurable": {"thread_id": "conv:7"}}
+
+
+def test_resume_chat_reads_state_through_bound_graph(session):
+    inner = FakeGraph(
+        frames=[],
+        final={"answer": "已处理"},
+        snapshots=[_pending_snapshot()],
+    )
+    graph = _BoundGraph(inner)
+
+    events = list(
+        resume_chat_agent(
+            graph,
+            session,
+            "u1",
+            "1001",
+            settings=_settings(),
+            conversation_id=None,
+        )
+    )
+
+    assert not any('"error"' in event for event in events)
+    assert inner.stream_calls

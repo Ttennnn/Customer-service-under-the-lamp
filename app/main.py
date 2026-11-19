@@ -28,6 +28,7 @@ from app.api.rag_eval import page_router as rag_eval_page_router
 from app.config import Settings, build_llm, get_settings
 from app.db.session import get_db
 from app.logging_config import configure_file_logging
+from app.observability import flush_tracing
 from app.prompts.customer_service import render_system_prompt
 from app.schemas import ChatRequest, ExtractRequest
 from app.services.chat import stream_chat
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        flush_tracing()
         close_ch06_graph(app)
         shutdown_summary_executor()
         shutdown_async_bridge()
