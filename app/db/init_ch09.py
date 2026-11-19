@@ -79,7 +79,10 @@ def apply_ch09(engine: Engine) -> None:
             return
         if not present_tables and not present_columns:
             for statement in statements:
-                conn.execute(text(statement))
+                # Use the driver SQL path: the user DDL contains JSON examples
+                # such as {"recall_at_k":0.82}, which SQLAlchemy's text()
+                # parser would misread as a bind parameter named "0".
+                conn.exec_driver_sql(statement)
         else:
             missing_tables = sorted(expected_tables - present_tables)
             missing_columns = sorted(expected_columns - present_columns)

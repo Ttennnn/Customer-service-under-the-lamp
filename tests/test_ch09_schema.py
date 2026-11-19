@@ -65,9 +65,14 @@ def test_eval_run_json_and_enum(session):
 class _FakeConn:
     def __init__(self):
         self.executed = []
+        self.driver_executed = []
 
     def execute(self, statement):
         self.executed.append(str(statement))
+
+    def exec_driver_sql(self, statement):
+        self.driver_executed.append(statement)
+        self.executed.append(statement)
 
 
 class _FakeEngine:
@@ -95,7 +100,12 @@ def test_apply_ch09_creates_everything_when_absent(monkeypatch):
     conn = _FakeConn()
     init_ch09.apply_ch09(_FakeEngine(conn))
 
-    assert len(conn.executed) == len(init_ch09._load_statements())
+    statements = init_ch09._load_statements()
+    assert len(conn.executed) == len(statements)
+    assert len(conn.driver_executed) == len(statements)
+    # The JSON example in eval_runs.metrics must reach the driver as raw SQL,
+    # not through text() (which would treat ":0.82" as a bind parameter).
+    assert any("0.82" in statement for statement in conn.driver_executed)
     joined = "\n".join(conn.executed)
     assert "CREATE TABLE review_queue" in joined
     assert "CREATE TABLE eval_runs" in joined
