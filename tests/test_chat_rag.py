@@ -124,7 +124,7 @@ def _reset_collector():
 
 def test_query_faq_emits_sources_frame(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("回答见[1]",))
@@ -163,7 +163,7 @@ def test_pure_knowledge_question_forces_query_faq_tool_choice(
     session, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("回答见[1]",))
@@ -250,7 +250,7 @@ def test_mixed_question_uses_automatic_tool_choice(session, monkeypatch):
 
 def test_query_faq_useful_false_records_pool_and_refuses(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
@@ -290,7 +290,7 @@ def test_query_faq_infra_error_refuses_without_pool(session, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("milvus down")
 
-    monkeypatch.setattr("app.tools.faq.retrieve_hybrid", boom)
+    monkeypatch.setattr("app.tools.builtin.faq.retrieve_hybrid", boom)
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
     assessment = FakeAssessmentLLM(EvidenceAssessment(useful=True))
 
@@ -351,7 +351,7 @@ def test_query_order_only_skips_sources_and_self_check(session, monkeypatch):
 
 def test_mixed_intent_keeps_other_tool_answer(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM(
@@ -395,7 +395,7 @@ def test_mixed_intent_keeps_other_tool_answer(session, monkeypatch):
 
 def test_self_check_failure_refuses_without_pool(session, monkeypatch):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("不应出现",))
@@ -429,7 +429,7 @@ def test_mixed_intent_self_check_failure_keeps_answer_without_pool(
     session, monkeypatch
 ):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM(
@@ -468,7 +468,7 @@ def test_mixed_intent_self_check_failure_keeps_answer_without_pool(
 
 def test_unknown_citation_is_logged_not_blocking(session, monkeypatch, caplog):
     monkeypatch.setattr(
-        "app.tools.faq.retrieve_hybrid",
+        "app.tools.builtin.faq.retrieve_hybrid",
         lambda *a, **k: make_result([make_chunk(1)]),
     )
     llm = FakeLLM([faq_call()], final_tokens=("结论见[1]和[9]",))

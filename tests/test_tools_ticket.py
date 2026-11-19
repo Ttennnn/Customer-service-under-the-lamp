@@ -1,4 +1,6 @@
 # tests/test_tools_ticket.py
+from types import SimpleNamespace
+
 import pytest
 
 from app.db.seed import seed_faq
@@ -36,6 +38,37 @@ def test_create_ticket_accepts_refund(session, ticket_type):
     session.expire_all()
     assert TICKET_NO_PATTERN.match(out)
     assert session.query(Ticket).one().ticket_type == "退款"
+
+def test_create_ticket_sleeps_after_commit(session, monkeypatch):
+    import app.tools.builtin.tickets as tickets
+
+    calls = []
+    visible_at_sleep = []
+
+    def fake_sleep(seconds):
+        calls.append(seconds)
+        # The ticket must already be committed when the demo delay runs.
+        visible_at_sleep.append(session.query(Ticket).count())
+
+    monkeypatch.setattr(tickets.time, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        tickets,
+        "get_settings",
+        lambda: SimpleNamespace(demo_ticket_delay_seconds=0.5),
+    )
+    token = current_conversation_id.set(1)
+    try:
+        out = tickets.create_ticket.invoke(
+            {"description": "屏幕碎了", "ticket_type": "售后"}
+        )
+    finally:
+        current_conversation_id.reset(token)
+
+    assert TICKET_NO_PATTERN.match(out)
+    assert calls == [0.5]
+    assert visible_at_sleep == [1]
+    assert session.query(Ticket).count() == 1
+
 
 def test_registry_keeps_legacy_exports_without_logistics():
     from app.tools.registry import ALL_TOOLS

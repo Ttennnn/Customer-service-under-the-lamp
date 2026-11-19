@@ -84,12 +84,42 @@ def test_query_logistics_is_removed_from_builtin():
     assert not hasattr(business, "query_logistics")
 
 
-def test_builtin_specs_include_order_tools_but_not_logistics():
+def test_builtin_specs_include_all_builtin_tools_but_not_logistics():
     from app.tools.registry import builtin_specs
 
-    names = set(builtin_specs())
-    assert {"query_order", "query_product", "query_promotions"} <= names
-    assert "query_logistics" not in names
+    assert set(builtin_specs()) == {
+        "query_order",
+        "query_product",
+        "query_faq",
+        "create_ticket",
+        "submit_refund",
+        "suggest_handoff",
+        "query_promotions",
+    }
+
+
+def test_builtin_specs_metadata_for_migrated_tools():
+    from app.tools.registry import builtin_specs
+
+    specs = builtin_specs()
+    faq = specs["query_faq"]
+    assert faq.permission == "read"
+    assert faq.timeout == 30.0
+    assert faq.exposed_to_agent is False
+    assert faq.label == "查常见问题"
+
+    ticket = specs["create_ticket"]
+    assert ticket.permission == "write"
+    assert ticket.inject_conversation is True
+    assert ticket.label == "创建工单"
+
+    refund = specs["submit_refund"]
+    assert refund.permission == "read"
+    assert refund.routes == frozenset({"refund_flow"})
+
+    handoff = specs["suggest_handoff"]
+    assert handoff.permission == "read"
+    assert handoff.routes is None
 
 
 def test_registry_keeps_legacy_exports_without_logistics():
