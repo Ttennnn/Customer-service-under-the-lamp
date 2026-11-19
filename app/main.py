@@ -25,6 +25,8 @@ from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
 from app.api.rag_eval import api_router as rag_eval_api_router
 from app.api.rag_eval import page_router as rag_eval_page_router
+from app.api.review import api_router as review_api_router
+from app.api.review import page_router as review_page_router
 from app.config import Settings, build_llm, get_settings
 from app.db.session import get_db
 from app.logging_config import configure_file_logging
@@ -88,6 +90,8 @@ app.include_router(kb_page_router)
 app.include_router(kb_api_router)
 app.include_router(rag_eval_page_router)
 app.include_router(rag_eval_api_router)
+app.include_router(review_page_router)
+app.include_router(review_api_router)
 app.include_router(ch06_page_router)
 app.include_router(ch06_api_router)
 app.include_router(ch07_page_router)
