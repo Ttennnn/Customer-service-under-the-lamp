@@ -79,3 +79,23 @@ def test_conversation_id_must_be_positive(request_model, payload):
 def test_extract_request_rejects_blank_text():
     with pytest.raises(ValidationError):
         ExtractRequest(text=" \t ")
+
+
+def test_resume_request_requires_exactly_one_of_order_or_ticket():
+    with pytest.raises(ValidationError):
+        ResumeRequest(session_id="s", order_id=None, confirmed=None)
+    with pytest.raises(ValidationError):
+        ResumeRequest(session_id="s", order_id="1001", confirmed=True)
+
+    assert ResumeRequest(session_id="s", confirmed=True).confirmed is True
+    assert ResumeRequest(session_id="s", confirmed=False).confirmed is False
+    assert ResumeRequest(session_id="s", order_id="1001").order_id == "1001"
+
+
+def test_resume_request_strips_provided_strings():
+    req = ResumeRequest(session_id=" s ", order_id=" 1001 ")
+    assert req.session_id == "s"
+    assert req.order_id == "1001"
+
+    with pytest.raises(ValidationError):
+        ResumeRequest(session_id="s", order_id="   ")

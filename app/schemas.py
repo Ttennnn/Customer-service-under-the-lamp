@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AppealType(str, Enum):
@@ -85,7 +85,12 @@ REFUND_REASONS: tuple[str, ...] = (
 
 class ResumeRequest(BaseModel):
     session_id: str = Field(min_length=1, description="会话 ID")
-    order_id: str = Field(min_length=1, description="用户选择的订单号")
+    order_id: str | None = Field(
+        default=None, description="用户选择的订单号(订单选择器)"
+    )
+    confirmed: bool | None = Field(
+        default=None, description="建工单确认结果(工单确认框)"
+    )
     conversation_id: int | None = Field(
         default=None, gt=0, description="待恢复会话 ID,省略时用最近一个进行中的会话"
     )
@@ -98,6 +103,12 @@ class ResumeRequest(BaseModel):
             if not v:
                 raise ValueError("must not be blank")
         return v
+
+    @model_validator(mode="after")
+    def _exactly_one_resume_value(self) -> "ResumeRequest":
+        if (self.order_id is None) == (self.confirmed is None):
+            raise ValueError("order_id 与 confirmed 必须且只能提供一个")
+        return self
 
 
 class RefundRequest(BaseModel):

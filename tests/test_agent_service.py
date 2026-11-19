@@ -251,6 +251,53 @@ def test_resume_chat_uses_command_and_writes_answer(session):
     ]
 
 
+def test_resume_chat_agent_passes_dict_to_command(session):
+    graph = FakeGraph(
+        [],
+        {},
+        snapshots=[_pending_snapshot({"kind": "confirm_ticket"})],
+    )
+
+    list(
+        resume_chat_agent(
+            graph, session, "u1", {"confirmed": True}, settings=_settings()
+        )
+    )
+
+    assert isinstance(graph.inputs[-1], Command)
+    assert graph.inputs[-1].resume == {"confirmed": True}
+    rows = (
+        session.query(Message)
+        .filter(Message.role == "user")
+        .order_by(Message.id.asc())
+        .all()
+    )
+    assert [row.content for row in rows] == ["[工单确认] 确认提交"]
+
+
+def test_resume_chat_agent_audits_ticket_cancel(session):
+    graph = FakeGraph(
+        [],
+        {},
+        snapshots=[_pending_snapshot({"kind": "confirm_ticket"})],
+    )
+
+    list(
+        resume_chat_agent(
+            graph, session, "u1", {"confirmed": False}, settings=_settings()
+        )
+    )
+
+    assert graph.inputs[-1].resume == {"confirmed": False}
+    rows = (
+        session.query(Message)
+        .filter(Message.role == "user")
+        .order_by(Message.id.asc())
+        .all()
+    )
+    assert [row.content for row in rows] == ["[工单确认] 取消"]
+
+
 def test_resume_chat_raises_without_pending(session):
     graph = FakeGraph(frames=[], final={}, snapshots=[_snapshot()])
 

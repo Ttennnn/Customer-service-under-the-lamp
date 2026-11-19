@@ -34,6 +34,7 @@ class CustomerServiceState(TypedDict, total=False):
     gate_reason: str
     rerank_failed: bool
     answer: str
+    created_ticket_no: str
     suggested_actions: list[dict]
     step_count: int
     token_estimate: int
@@ -66,6 +67,7 @@ class AgentState(TypedDict, total=False):
     token_budget: int
     max_steps: int
     answer: str
+    created_ticket_no: str
     suggested_actions: list[dict]
     exhausted: bool
     conversation_id: int

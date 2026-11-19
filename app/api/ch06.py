@@ -243,13 +243,21 @@ def ch06_chat_resume(
     generator owns its DB session because the request-scoped dependency
     session is not guaranteed to outlive the streamed response.
     """
+    # The model validator guarantees exactly one of the two was supplied:
+    # an order picker resumes with the chosen id string, a ticket dialog
+    # resumes with the confirmation decision dict.
+    if req.order_id is not None:
+        resume_value: str | dict = req.order_id
+    else:
+        resume_value = {"confirmed": bool(req.confirmed)}
+
     session = db_session.get_session_factory()()
     try:
         for payload in resume_chat_agent(
             graph,
             session,
             req.session_id,
-            req.order_id,
+            resume_value,
             settings=settings,
             conversation_id=req.conversation_id,
         ):

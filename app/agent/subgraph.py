@@ -7,7 +7,8 @@
   工具的模型,累加 ``AIMessageChunk`` 并把完整回复写回 ``messages``;
 - ``tools``:所有工具调用统一走 :mod:`app.tools.engine`;``suggest_handoff``
   与 ``submit_refund`` 先做参数/订单校验,再把建议合并进
-  ``suggested_actions``;
+  ``suggested_actions``;``create_ticket`` 在执行前先 ``interrupt`` 等待
+  前端确认,未确认前不执行任何工具(本节点 resume 后会从头重跑);
 - ``finalize``:步数/token 预算耗尽或答案为空时,发出固定兜底话术、
   追加 ``AIMessage``,并在没有选项时补一个「转人工」。
 
@@ -31,6 +32,7 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from app.agent.state import AgentState
 from app.agent.tools import (
@@ -50,9 +52,15 @@ from app.services.context import (
     log_context,
     message_tokens,
 )
-from app.tools.engine import deny_validation, execute, execute_tool_call
+from app.tools.engine import (
+    deny_permission,
+    deny_validation,
+    execute,
+    execute_tool_call,
+)
 from app.tools.registry import TOOL_LABELS, get_all_specs
 from app.tools.spec import ToolSpec
+from app.tools.validation import validate_arguments
 
 _logger = logging.getLogger(__name__)
 
@@ -71,6 +79,9 @@ _INVALID_HANDOFF_OPTIONS = "参数无效: options 只能是 transfer/ticket。"
 _INVALID_REFUND_ORDER = "订单号与当前订单不一致,无法准备退款表单。"
 _VALID_HANDOFF_OPTIONS = frozenset({"transfer", "ticket"})
 _VALID_TICKET_TYPES = frozenset({"售后", "投诉", "咨询"})
+_TICKET_CANCEL_TEXT = "用户在前端取消建单"
+_TICKET_INVALID_CONFIRM_TEXT = "确认信息无效,已按取消处理"
+_TICKET_MULTIPLE_TEXT = "一轮只能处理一个建工单请求"
 
 
 def _tool_label(name: str, spec: ToolSpec | None = None) -> str:
@@ -131,8 +142,13 @@ def build_agent_subgraph(
     tool_result_max_tokens: int = 2000,
     settings: Settings | None = None,
     tools: Sequence[BaseTool] | None = None,
+    checkpointer=None,
 ):
-    """Return a compiled Agent subgraph (no checkpointer; parent propagates it).
+    """Return a compiled Agent subgraph.
+
+    ``checkpointer`` is ``None`` in production: the parent graph's compile
+    propagates its own checkpointer to this subgraph. Tests pass an explicit
+    ``InMemorySaver`` so the ``create_ticket`` interrupt can be resumed.
 
     The system prompt is constant per route, so it stays cacheable. The current
     turn is ``messages[turn_start_index:]``; the summary, evidence, order data
@@ -225,11 +241,50 @@ def build_agent_subgraph(
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {}
 
+        # Confirmation gate. LangGraph restarts this node from the top on
+        # resume, so the interrupt must run before ANY tool executes and
+        # before any side effect. Argument validation is read-only; an invalid
+        # first ticket call skips the interrupt and is denied below, so the
+        # model asks the user for the missing fields instead.
+        ticket_calls = [
+            tool_call
+            for tool_call in last.tool_calls
+            if tool_call["name"] == "create_ticket"
+        ]
+        first_ticket = ticket_calls[0] if ticket_calls else None
+        ticket_spec = (
+            specs.get("create_ticket") if first_ticket is not None else None
+        )
+        ticket_errors: list[str] = []
+        decision: object = None
+        if first_ticket is not None and ticket_spec is not None:
+            ticket_args = first_ticket.get("args") or {}
+            ticket_errors = validate_arguments(
+                ticket_spec.json_schema, ticket_args
+            )
+            if not ticket_errors:
+                decision = interrupt(
+                    {
+                        "kind": "confirm_ticket",
+                        "preview": {
+                            "ticket_type": ticket_args.get("ticket_type"),
+                            "description": ticket_args.get("description"),
+                        },
+                    }
+                )
+        # Fail closed: only the exact confirmation-dialog payload counts as a
+        # confirm. A bare string (e.g. a stale order-picker client), a missing
+        # key, or any other value is treated as a cancel.
+        confirmed = (
+            isinstance(decision, dict) and decision.get("confirmed") is True
+        )
+
         writer = get_stream_writer()
         conversation_id = state["conversation_id"]
         suggested_actions = list(state.get("suggested_actions") or [])
         token_delta = 0
         new_messages: list[AnyMessage] = []
+        created_ticket_no: str | None = None
 
         for tool_call in last.tool_calls:
             name = tool_call["name"]
@@ -244,7 +299,61 @@ def build_agent_subgraph(
                 }
             )
 
-            if name == "suggest_handoff" and spec is not None:
+            if name == "create_ticket":
+                if spec is None:
+                    # Registry mismatch: surface it like any unknown tool.
+                    run = execute_tool_call(
+                        tool_call,
+                        conversation_id,
+                        specs=specs,
+                        settings=settings,
+                    )
+                elif tool_call is first_ticket:
+                    if ticket_errors:
+                        run = deny_validation(
+                            spec,
+                            args,
+                            conversation_id=conversation_id,
+                            tool_call_id=tool_call_id,
+                            error_message="; ".join(ticket_errors),
+                        )
+                    elif confirmed:
+                        run = execute(
+                            spec,
+                            args,
+                            conversation_id=conversation_id,
+                            tool_call_id=tool_call_id,
+                            confirmed=True,
+                            settings=settings,
+                        )
+                        if run.status == "ok":
+                            created_ticket_no = str(run.data)
+                    else:
+                        cancelled = (
+                            isinstance(decision, dict)
+                            and decision.get("confirmed") is False
+                        )
+                        run = deny_permission(
+                            spec,
+                            args,
+                            conversation_id=conversation_id,
+                            tool_call_id=tool_call_id,
+                            error_message=(
+                                _TICKET_CANCEL_TEXT
+                                if cancelled
+                                else _TICKET_INVALID_CONFIRM_TEXT
+                            ),
+                        )
+                else:
+                    # One confirmation covers exactly one ticket per turn.
+                    run = deny_validation(
+                        spec,
+                        args,
+                        conversation_id=conversation_id,
+                        tool_call_id=tool_call_id,
+                        error_message=_TICKET_MULTIPLE_TEXT,
+                    )
+            elif name == "suggest_handoff" and spec is not None:
                 payload = _handoff_payload(args)
                 if payload is None:
                     run = deny_validation(
@@ -306,11 +415,14 @@ def build_agent_subgraph(
                 ToolMessage(content=result, tool_call_id=tool_call_id or "")
             )
 
-        return {
+        update: dict[str, Any] = {
             "messages": new_messages,
             "suggested_actions": suggested_actions,
             "token_estimate": state.get("token_estimate", 0) + token_delta,
         }
+        if created_ticket_no is not None:
+            update["created_ticket_no"] = created_ticket_no
+        return update
 
     def finalize_node(state: AgentState) -> dict[str, Any]:
         writer = get_stream_writer()
@@ -348,4 +460,4 @@ def build_agent_subgraph(
     )
     graph.add_edge("tools", "agent")
     graph.add_edge("finalize", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
