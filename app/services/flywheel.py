@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.config import get_settings
 from app.models import LowConfidenceQuestion, ReviewQueue
@@ -55,6 +55,21 @@ class FlywheelOutput(BaseModel):
     normalized_question: str
     matched_question_id: int | None = None
     ai_suggested_answer: str = ""
+
+    @field_validator("matched_question_id", mode="before")
+    @classmethod
+    def _reject_boolean_id(cls, value):
+        """Reject ``True``/``False`` instead of coercing them to 1/0.
+
+        pydantic accepts ``bool`` for ``int`` because ``bool`` subclasses
+        ``int``; a structured LLM emitting ``true`` must be treated as bad
+        output, not as a match against candidate id 1.
+        """
+        if isinstance(value, bool):
+            raise ValueError(
+                "matched_question_id must be an integer or null, not a boolean"
+            )
+        return value
 
     def __init__(
         self,
@@ -109,6 +124,11 @@ def _coerce_output(result) -> FlywheelOutput:
     normalized = data.get("normalized_question")
     normalized = normalized.strip() if isinstance(normalized, str) else ""
     matched = data.get("matched_question_id")
+    # ``bool`` is an ``int`` subclass; ``True`` must not silently become id 1.
+    if isinstance(matched, bool):
+        raise FlywheelError(
+            f"flywheel output has a boolean matched_question_id: {matched!r}"
+        )
     answer = data.get("ai_suggested_answer")
     answer = answer.strip() if isinstance(answer, str) else ""
     return FlywheelOutput(
@@ -194,6 +214,12 @@ def process_pending(
     for row in pending:
         try:
             candidates = list_review_candidates(session, candidate_limit)
+            if candidate_limit > 0 and len(candidates) == candidate_limit:
+                logger.info(
+                    "flywheel candidate list truncated at limit=%s; newest "
+                    "rows only were considered",
+                    candidate_limit,
+                )
             output = normalize_and_match(llm, row.raw_question, candidates)
 
             if output.matched_question_id is not None:

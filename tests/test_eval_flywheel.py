@@ -147,6 +147,66 @@ def test_missing_report_does_not_insert(session, monkeypatch, tmp_path):
     assert session.query(EvalRun).count() == 0
 
 
+def test_stale_sidecar_is_removed_before_a_failed_run(session, monkeypatch, tmp_path):
+    _settings(monkeypatch, tmp_path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True)
+    (report_dir / "eval_flywheel.md").write_text("# stale\n", encoding="utf-8")
+    (report_dir / "eval_flywheel.json").write_text(
+        json.dumps(_report()), encoding="utf-8"
+    )
+
+    out = job.run_once("手动", runner=lambda argv: 2)
+
+    assert out["ok"] is False
+    assert not (report_dir / "eval_flywheel.json").exists()
+    assert not (report_dir / "eval_flywheel.md").exists()
+    assert session.query(EvalRun).count() == 0
+
+
+def test_runner_that_writes_only_markdown_cannot_reuse_stale_sidecar(
+    session, monkeypatch, tmp_path
+):
+    _settings(monkeypatch, tmp_path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True)
+    (report_dir / "eval_flywheel.json").write_text(
+        json.dumps(_report()), encoding="utf-8"
+    )
+
+    def runner(argv):
+        out = Path(argv[argv.index("--out") + 1])
+        out.write_text("# fresh markdown only\n", encoding="utf-8")
+        return 0
+
+    out = job.run_once("手动", runner=runner)
+
+    assert out["ok"] is False
+    assert session.query(EvalRun).count() == 0
+
+
+def test_structurally_wrong_json_is_reported_not_raised(
+    session, monkeypatch, tmp_path
+):
+    _settings(monkeypatch, tmp_path)
+
+    def runner(argv):
+        out = Path(argv[argv.index("--out") + 1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("# report\n", encoding="utf-8")
+        # ``overall`` is a list: .get() on it raises AttributeError.
+        out.with_suffix(".json").write_text(
+            json.dumps({"cases_loaded": 1, "overall": ["bad"]}), encoding="utf-8"
+        )
+        return 0
+
+    out = job.run_once("手动", runner=runner)
+
+    assert out["ok"] is False
+    assert "AttributeError" in out["error"] or "cannot read" in out["error"]
+    assert session.query(EvalRun).count() == 0
+
+
 def test_unreadable_report_does_not_insert(session, monkeypatch, tmp_path):
     _settings(monkeypatch, tmp_path)
 

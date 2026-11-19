@@ -311,6 +311,39 @@ def test_fetch_observations_returns_empty_rows_on_successful_empty_query():
     assert source == "metrics_v2"
 
 
+def test_fetch_observations_skips_source_without_intent_tags():
+    # v2 succeeds but has no intent: tag; the next source is authoritative.
+    metrics_v2 = FakeMetrics(
+        FakeResponse([{"tags": ["other"], "traceId": "t0", "sum_totalTokens": 1}])
+    )
+    metrics_v1 = FakeMetrics(
+        FakeResponse([_metric_row(["intent:商品咨询"], "t1", 100)])
+    )
+    client = FakeClient(metrics_v_2=metrics_v2, metrics=metrics_v1)
+
+    rows, source = job.fetch_observations(client, _settings(), 7)
+
+    assert source == "metrics_v1"
+    assert rows[0]["traceId"] == "t1"
+    assert len(metrics_v2.calls) == 1
+    assert len(metrics_v1.calls) == 1
+
+
+def test_fetch_observations_returns_last_success_when_no_source_has_intent():
+    metrics_v2 = FakeMetrics(
+        FakeResponse([{"tags": ["other"], "traceId": "t0", "sum_totalTokens": 1}])
+    )
+    metrics_v1 = FakeMetrics(
+        FakeResponse([{"tags": [], "traceId": "t1", "sum_totalTokens": 2}])
+    )
+    client = FakeClient(metrics_v_2=metrics_v2, metrics=metrics_v1)
+
+    rows, source = job.fetch_observations(client, _settings(), 7)
+
+    assert source == "metrics_v1"
+    assert rows[0]["traceId"] == "t1"
+
+
 # --- main ------------------------------------------------------------------
 
 
@@ -378,13 +411,22 @@ def test_main_refuses_without_credentials_and_does_not_create_client(
 
     monkeypatch.setattr(job, "get_settings", lambda: settings)
     monkeypatch.setattr(job, "get_langfuse_client", fake_client)
+    (tmp_path / "cost_by_intent.json").write_text("{}", encoding="utf-8")
 
     assert job.main([]) == 1
     assert created == []
     assert "credentials" in capsys.readouterr().out.lower()
+    assert not (tmp_path / "cost_by_intent.json").exists()
 
 
-def test_main_reports_fetch_failure(tmp_path, monkeypatch, capsys):
+def test_main_reports_fetch_failure_and_removes_stale_reports(
+    tmp_path, monkeypatch, capsys
+):
+    stale_json = tmp_path / "cost_by_intent.json"
+    stale_txt = tmp_path / "cost_by_intent.txt"
+    stale_json.write_text('{"rows": [{"intent": "旧数据"}]}', encoding="utf-8")
+    stale_txt.write_text("旧表格", encoding="utf-8")
+
     client = FakeClient(
         metrics_v_2=FakeMetrics(error=ApiError(status_code=500, body="down")),
         metrics=FakeMetrics(error=ApiError(status_code=500, body="down")),
@@ -395,4 +437,6 @@ def test_main_reports_fetch_failure(tmp_path, monkeypatch, capsys):
 
     assert job.main([]) == 2
     assert "failed to fetch" in capsys.readouterr().out
-    assert not (tmp_path / "cost_by_intent.json").exists()
+    # Stale numbers must not survive a failed run.
+    assert not stale_json.exists()
+    assert not stale_txt.exists()

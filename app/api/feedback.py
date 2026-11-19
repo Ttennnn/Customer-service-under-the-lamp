@@ -3,8 +3,12 @@
 ``POST /api/feedback`` 接收前端对一轮回答的赞/踩。``up`` 只记录日志;
 ``down`` 把该轮检索快照一并写入低置信度问题池,供后续飞轮归一化与挖掘
 复用。反馈属于用户体验路径:图/Langfuse 不可用时降级为无快照落池,绝不
-返回 500。快照只在会话线程的 ``user_message`` 与本次反馈的问题一致时才
+返回 500。快照只在会话线程记录的本轮用户原话与本次反馈的问题一致时才
 采用,避免把上一轮(或另一轮)的证据挂到当前问题下。
+
+匹配优先使用父 State 的 ``raw_user_message``(未经截断的原话),旧 checkpoint
+没有该字段时回退到模型侧 ``user_message``;这样长输入被截断后,前端发回的
+完整原话仍能对上快照。快照条数取 ``settings.low_confidence_snapshot_top_k``。
 """
 
 from __future__ import annotations
@@ -57,12 +61,16 @@ def get_feedback_graph_dep(
         return None
 
 
-def _latest_snapshot(graph, conversation_id: int, question: str):
-    """Return the current turn's top-3 retrieval snapshot, or ``None``.
+def _latest_snapshot(
+    graph, conversation_id: int, question: str, top_k: int = SNAPSHOT_TOP_K
+):
+    """Return the current turn's retrieval snapshot, or ``None``.
 
     The checkpointed state may belong to a later/older turn (or be missing
-    entirely); only an exact ``user_message`` match is trusted. Any failure
-    reading the state degrades to ``None``.
+    entirely). The raw (untruncated) question is authoritative; older
+    checkpoints without ``raw_user_message`` fall back to the model-facing
+    ``user_message``. Only an exact match is trusted. Any failure reading the
+    state degrades to ``None``.
     """
     if graph is None:
         return None
@@ -75,15 +83,22 @@ def _latest_snapshot(graph, conversation_id: int, question: str):
         logger.warning("feedback: failed to read graph state", exc_info=True)
         return None
 
-    if values.get("user_message") != question:
+    raw_question = values.get("raw_user_message")
+    matched_question = (
+        raw_question if raw_question is not None else values.get("user_message")
+    )
+    if matched_question != question:
         return None
     chunks = values.get("retrieved_snapshot") or []
     if not chunks:
         return None
-    return list(chunks)[:SNAPSHOT_TOP_K]
+    limit = max(0, int(top_k))
+    return list(chunks)[:limit]
 
 
-def record_feedback(session, graph, req: FeedbackRequest) -> dict:
+def record_feedback(
+    session, graph, req: FeedbackRequest, *, settings: Settings | None = None
+) -> dict:
     """Validate ownership, then log ``up`` or pool ``down`` feedback."""
     conversation = get_conversation(session, req.conversation_id, req.session_id)
     if conversation is None:
@@ -98,7 +113,12 @@ def record_feedback(session, graph, req: FeedbackRequest) -> dict:
         )
         return {"status": "ignored"}
 
-    snapshot = _latest_snapshot(graph, conversation.id, req.question)
+    top_k = (
+        settings.low_confidence_snapshot_top_k
+        if settings is not None
+        else SNAPSHOT_TOP_K
+    )
+    snapshot = _latest_snapshot(graph, conversation.id, req.question, top_k)
     row = record_low_confidence(
         session,
         conversation.id,
@@ -116,7 +136,9 @@ def record_feedback(session, graph, req: FeedbackRequest) -> dict:
         row.id,
         len(snapshot or []),
     )
-    return {"status": "recorded", "id": row.id}
+    # ``low_confidence_id`` is the documented field; ``id`` stays for older
+    # clients that already read it.
+    return {"status": "recorded", "low_confidence_id": row.id, "id": row.id}
 
 
 @api_router.post("")
@@ -124,6 +146,7 @@ def submit_feedback(
     req: FeedbackRequest,
     graph=Depends(get_feedback_graph_dep),
     session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     """Record one up/down feedback for a conversation."""
-    return record_feedback(session, graph, req)
+    return record_feedback(session, graph, req, settings=settings)

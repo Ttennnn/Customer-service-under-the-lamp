@@ -4,6 +4,7 @@
 每条都重新查询候选,因此同一批里刚新建的缺口能被后续条目命中。
 """
 
+import logging
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -361,6 +362,42 @@ def test_normalize_and_match_wraps_unparseable_dict_as_flywheel_error(session):
     )
     with pytest.raises(FlywheelError):
         normalize_and_match(llm, "原话", [candidate])
+
+
+def test_normalize_and_match_rejects_boolean_matched_id(session):
+    candidate = ReviewQueue(normalized_question="已有问题", occurrence_count=1)
+    session.add(candidate)
+    session.commit()
+    session.refresh(candidate)
+
+    llm = FakeLLM(
+        {
+            "normalized_question": "问题",
+            "matched_question_id": True,
+            "ai_suggested_answer": "",
+        }
+    )
+    # bool is an int subclass: True must not be coerced into candidate id 1.
+    with pytest.raises(FlywheelError):
+        normalize_and_match(llm, "原话", [candidate])
+
+
+def test_process_pending_logs_candidate_truncation(session, caplog, monkeypatch):
+    caplog.set_level(logging.INFO)
+    session.add(LowConfidenceQuestion(raw_question="q", source="self_check"))
+    for index in range(2):
+        session.add(
+            ReviewQueue(normalized_question=f"候选{index}", review_status="待审")
+        )
+    session.commit()
+
+    monkeypatch.setattr(
+        "app.services.flywheel.normalize_and_match",
+        lambda llm, raw, candidates: FlywheelOutput("新问题", None, ""),
+    )
+    process_pending(session, object(), candidate_limit=2)
+
+    assert "truncated at limit=2" in caplog.text
 
 
 def test_normalize_and_match_accepts_null_id_with_no_candidates(session):

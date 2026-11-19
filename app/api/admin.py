@@ -39,18 +39,31 @@ def _counts(session: Session) -> dict[str, int]:
 
 
 def _highest(session: Session) -> ReviewQueue | None:
+    """Highest-occurrence row that still needs review.
+
+    Only 待审 rows are actionable: an already approved/rejected row with a
+    large historical count must not be advertised as the top thing to look at.
+    """
     return (
         session.query(ReviewQueue)
+        .filter(ReviewQueue.review_status == "待审")
         .order_by(ReviewQueue.occurrence_count.desc(), ReviewQueue.id.asc())
         .first()
     )
 
 
 def _conclusion(counts: dict[str, int], highest: ReviewQueue | None) -> str:
+    if counts["待审"] == 0:
+        if counts["通过"] == 0 and counts["驳回"] == 0:
+            return "还没有知识缺口,先聊几句再启动飞轮。"
+        return (
+            "暂无待审知识缺口"
+            f"（已通过 {counts['通过']} 条，已驳回 {counts['驳回']} 条）。"
+        )
     if highest is None:
-        return "还没有知识缺口,先聊几句再启动飞轮。"
+        return f"{counts['待审']} 条待审。"
     return (
-        f"{counts['待审']} 条待审,最高频问题出现 "
+        f"{counts['待审']} 条待审,最高频待审问题出现 "
         f"{highest.occurrence_count} 次。"
     )
 

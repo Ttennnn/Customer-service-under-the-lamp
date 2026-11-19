@@ -19,6 +19,7 @@ class CustomerServiceState(TypedDict, total=False):
 
     messages: Annotated[list[AnyMessage], add_messages]
     user_message: str
+    raw_user_message: str
     resolved_query: str
     intent: str
     intent_confidence: float

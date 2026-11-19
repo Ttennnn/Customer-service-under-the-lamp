@@ -144,6 +144,8 @@ def _reset_inputs(
     session_id: str,
     settings: Settings,
     plan: ContextPlan,
+    *,
+    raw_message: str | None = None,
 ) -> dict:
     """Build one turn's inputs with every transient field reset explicitly.
 
@@ -154,6 +156,9 @@ def _reset_inputs(
     ``created_ticket_no`` is reset too, otherwise a ticket number from an
     earlier turn would survive a later cancel/unrelated turn (Task 10 reads it).
 
+    ``message`` is the model-facing copy (possibly truncated by the input
+    budget); ``raw_message`` is the untruncated user text stored alongside it
+    as ``raw_user_message`` so feedback can match long questions exactly.
     The user message carries the MySQL ``db-{id}`` identity so the layered
     window and the summary job can anchor on persisted rows. The context plan
     fields are injected as this turn's inputs (never into a resumed Command).
@@ -161,6 +166,7 @@ def _reset_inputs(
     return {
         "messages": [HumanMessage(content=message, id=f"db-{message_id}")],
         "user_message": message,
+        "raw_user_message": raw_message if raw_message is not None else message,
         "resolved_query": "",
         "intent": "",
         "intent_confidence": None,
@@ -408,7 +414,13 @@ def stream_chat_agent(
         current_msg_id=user_message.id,
     )
     inputs = _reset_inputs(
-        prompt_message, user_message.id, cid, user_id, settings, plan
+        prompt_message,
+        user_message.id,
+        cid,
+        user_id,
+        settings,
+        plan,
+        raw_message=message,
     )
 
     yield _conversation_frame(cid)

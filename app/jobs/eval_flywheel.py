@@ -99,6 +99,16 @@ def run_once(
         raise ValueError(f"unknown triggered_by: {triggered_by!r}")
 
     report_path = _report_path()
+    sidecar = report_path.with_suffix(".json")
+    # A stale report/sidecar from a previous successful run must never be
+    # mistaken for this run's output (e.g. a runner that exits 0 without
+    # writing, or one that writes only the markdown file).
+    for stale in (report_path, sidecar):
+        try:
+            stale.unlink()
+        except FileNotFoundError:
+            pass
+
     argv = [
         "--cases",
         CASES_PATH,
@@ -120,11 +130,23 @@ def run_once(
         }
     if code != 0:
         return {"ok": False, "error": f"eval_rag exited with code {code}"}
+    if not report_path.exists() or not sidecar.exists():
+        return {
+            "ok": False,
+            "error": f"eval report is incomplete: missing {report_path} or {sidecar}",
+        }
 
-    sidecar = report_path.with_suffix(".json")
     try:
         metrics = load_metrics_from_report(sidecar)
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (
+        OSError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+        AttributeError,
+    ) as exc:
+        # AttributeError covers structurally wrong JSON such as a list where
+        # an ``overall`` object was expected.
         return {"ok": False, "error": f"cannot read {sidecar}: {exc}"}
 
     session = None

@@ -125,6 +125,24 @@ def test_output_tail_is_truncated_to_4000_chars(monkeypatch):
     assert "END-MARKER" in state["output_tail"]
 
 
+def test_capture_registration_failure_does_not_wedge_the_job(monkeypatch):
+    def broken_capture(state):
+        raise RuntimeError("stdout proxy unavailable")
+
+    monkeypatch.setattr(admin_jobs, "_register_capture", broken_capture)
+    monkeypatch.setitem(admin_jobs.ALLOWED_JOBS, "cost-report", lambda: 0)
+
+    assert admin_jobs.start_job("cost-report") is not None
+    state = _wait_until_done("cost-report")
+
+    assert state["running"] is False
+    assert state["exit_code"] != 0
+    assert "stdout proxy unavailable" in state["last_error"]
+    # The job lock was released, so the same job can be started again.
+    assert admin_jobs.start_job("cost-report") is not None
+    _wait_until_done("cost-report")
+
+
 def test_failed_job_records_exit_code_and_error(monkeypatch):
     def boom():
         raise RuntimeError("langfuse is down")

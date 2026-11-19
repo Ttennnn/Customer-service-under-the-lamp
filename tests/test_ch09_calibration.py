@@ -159,3 +159,41 @@ def test_main_writes_reports_and_excludes_bad_runs(monkeypatch, tmp_path):
     assert report["formula"]["top_k"] == 10
     assert len(report["scored"]) == 3
     assert "0.50" in txt
+
+
+def test_default_cases_source_is_repo_relative():
+    assert job._display_path(job.DEFAULT_CASES) == "tests/eval/rag_cases.json"
+
+
+def test_main_removes_stale_reports_when_calibration_fails(monkeypatch, tmp_path):
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    stale_txt = out_dir / "confidence_calibration.txt"
+    stale_json = out_dir / "confidence_calibration.json"
+    stale_txt.write_text("旧报告", encoding="utf-8")
+    stale_json.write_text("{}", encoding="utf-8")
+
+    # One positive, one negative is required; a single-label dataset fails.
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {"cases": [{"id": "P1", "bucket": "A_policy", "query": "正", "answerable": True}]}
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(job, "get_settings", lambda: _fake_settings(tmp_path))
+    monkeypatch.setattr(job, "analyze", lambda query: QueryAnalysis(query, query, [], "llm"))
+    monkeypatch.setattr(
+        job,
+        "retrieve_hybrid",
+        lambda query, **kwargs: SimpleNamespace(chunks=[_chunk(0.9)], rerank_failed=False),
+    )
+
+    code = job.main(
+        ["--cases", str(cases_path), "--out-dir", str(out_dir)]
+    )
+
+    assert code == 2
+    assert not stale_txt.exists()
+    assert not stale_json.exists()

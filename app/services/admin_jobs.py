@@ -176,10 +176,13 @@ def _release_capture() -> None:
 
 def _run_job(name: str, func: Callable[[], int], lock: threading.Lock) -> None:
     state = _states[name]
-    _register_capture(state)
     exit_code = 0
     last_error = None
     try:
+        # Registration is inside the try/finally: if installing the stdout
+        # proxy fails, the generic handler still records the failure and the
+        # finally block releases the job lock/status instead of wedging it.
+        _register_capture(state)
         result = func()
         if isinstance(result, int) and not isinstance(result, bool):
             exit_code = result

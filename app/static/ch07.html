@@ -143,7 +143,14 @@
     transition: border-color .15s, color .15s, background .15s;
   }
   .feedback-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .feedback-btn.selected,
+  .feedback-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(240,183,106,.12);
+  }
   .feedback-btn:disabled { opacity: .45; cursor: default; }
+  .feedback-btn.selected:disabled { opacity: .8; }
   .feedback-status { color: var(--dim); }
   .feedback-status.error { color: var(--red); }
   .msg.system {
@@ -738,14 +745,25 @@
     bar.append(el("span", null, "这轮回答有帮助吗"));
     var upButton = el("button", "feedback-btn", "👍 有帮助");
     upButton.type = "button";
+    upButton.setAttribute("aria-pressed", "false");
     var downButton = el("button", "feedback-btn", "👎 没帮助");
     downButton.type = "button";
+    downButton.setAttribute("aria-pressed", "false");
     var status = el("span", "feedback-status");
     var locked = false;
+
+    function markSelected(button) {
+      [upButton, downButton].forEach(function (node) {
+        var active = node === button;
+        node.classList.toggle("selected", active);
+        node.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
 
     function send(rating) {
       if (locked) return;
       locked = true;
+      markSelected(rating === "up" ? upButton : downButton);
       upButton.disabled = true;
       downButton.disabled = true;
       status.className = "feedback-status";
@@ -762,10 +780,12 @@
       })
         .then(function (response) {
           if (!response.ok) throw new Error("HTTP " + response.status);
+          // The selected button keeps its highlight while locked.
           status.textContent = "已反馈";
         })
         .catch(function () {
           locked = false;
+          markSelected(null);
           upButton.disabled = false;
           downButton.disabled = false;
           status.className = "feedback-status error";

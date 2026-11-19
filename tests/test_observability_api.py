@@ -266,6 +266,29 @@ def test_admin_summary_counts_and_highest_occurrence(client, session):
     assert body["links"]["observability"] == "/observability"
 
 
+def test_admin_summary_highest_is_pending_only(client, session):
+    _add_review(session, "已通过的旧高频", status="通过", count=99)
+    _add_review(session, "待审低频", status="待审", count=3)
+
+    body = client.get("/api/admin/summary").json()
+
+    assert body["highest"]["normalized_question"] == "待审低频"
+    assert body["highest"]["review_status"] == "待审"
+    assert "最高频待审问题出现 3 次" in body["conclusion"]
+
+
+def test_admin_summary_no_pending_explains_approved_and_rejected(client, session):
+    _add_review(session, "已通过", status="通过", count=5)
+    _add_review(session, "已驳回", status="驳回", count=2)
+
+    body = client.get("/api/admin/summary").json()
+
+    assert body["highest"] is None
+    assert "暂无待审知识缺口" in body["conclusion"]
+    assert "已通过 1 条" in body["conclusion"]
+    assert "已驳回 1 条" in body["conclusion"]
+
+
 def test_admin_summary_empty_queue(client, session):
     body = client.get("/api/admin/summary").json()
 

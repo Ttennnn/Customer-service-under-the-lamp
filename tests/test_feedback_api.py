@@ -90,11 +90,92 @@ def test_down_writes_user_feedback_with_latest_snapshot(session):
 
     row = session.query(LowConfidenceQuestion).one()
     assert out["status"] == "recorded"
+    assert out["low_confidence_id"] == row.id
+    # Legacy field stays for older clients.
+    assert out["id"] == row.id
     assert row.source == "user_feedback"
     assert row.reason == "用户反馈未解决"
     assert row.raw_question == "支持以旧换新吗"
     assert row.conversation_id == cid
     assert row.retrieved_chunks[0]["section_path"] == "售后 > 换货"
+
+
+def test_snapshot_top_k_uses_settings(session):
+    cid = get_or_create_conversation(session, "u1").id
+    snap = [{"question": f"q{i}", "answer": "a"} for i in range(5)]
+    settings = SimpleNamespace(low_confidence_snapshot_top_k=1)
+
+    record_feedback(
+        session,
+        _graph("q", snap),
+        _request(conversation_id=cid, question="q"),
+        settings=settings,
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert [chunk["question"] for chunk in row.retrieved_chunks] == ["q0"]
+
+
+def test_snapshot_is_read_through_bound_graph(session):
+    cid = get_or_create_conversation(session, "u1").id
+    snap = [{"question": "q", "answer": "a", "section_path": "s"}]
+    inner = _graph("q", snap)
+
+    class BoundGraph:
+        bound = inner
+
+    record_feedback(
+        session,
+        BoundGraph(),
+        _request(conversation_id=cid, question="q"),
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert row.retrieved_chunks[0]["section_path"] == "s"
+
+
+def test_snapshot_match_prefers_untruncated_raw_question(session):
+    """A long question is truncated in user_message but kept raw in state."""
+    cid = get_or_create_conversation(session, "u1").id
+    long_question = "退款" * 300
+    snap = [{"question": "退款多久到账", "answer": "1-3 个工作日"}]
+    graph = SimpleNamespace(
+        get_state=lambda config: SimpleNamespace(
+            values={
+                "raw_user_message": long_question,
+                "user_message": long_question[:100],
+                "retrieved_snapshot": snap,
+            }
+        )
+    )
+
+    record_feedback(
+        session,
+        graph,
+        _request(conversation_id=cid, question=long_question),
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert row.retrieved_chunks == snap
+
+
+def test_snapshot_falls_back_to_user_message_for_old_checkpoints(session):
+    cid = get_or_create_conversation(session, "u1").id
+    snap = [{"question": "q", "answer": "a"}]
+    graph = SimpleNamespace(
+        get_state=lambda config: SimpleNamespace(
+            values={"user_message": "q", "retrieved_snapshot": snap}
+        )
+    )
+
+    record_feedback(
+        session,
+        graph,
+        _request(conversation_id=cid, question="q"),
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert row.retrieved_chunks == snap
 
 
 def test_down_keeps_only_top_three_snapshot_chunks(session):
@@ -252,6 +333,7 @@ def test_api_down_records_feedback(client, session):
     assert resp.status_code == 200
     assert resp.json()["status"] == "recorded"
     row = session.query(LowConfidenceQuestion).one()
+    assert resp.json()["low_confidence_id"] == row.id
     assert row.raw_question == "支持以旧换新吗"
     assert row.source == "user_feedback"
 

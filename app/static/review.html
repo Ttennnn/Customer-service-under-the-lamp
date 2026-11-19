@@ -236,6 +236,7 @@
           <tr>
             <th scope="col">归一化问题</th>
             <th scope="col" class="num">出现次数</th>
+            <th scope="col">示例答案</th>
             <th scope="col">状态</th>
             <th scope="col">更新时间</th>
             <th scope="col">操作</th>
@@ -318,6 +319,15 @@
     return Number.isFinite(n) ? String(n) : "0";
   }
 
+  function summarizeAnswer(value) {
+    var text = value ? String(value).trim() : "";
+    if (!text) return "—";
+    if (text.length > ANSWER_SUMMARY_CHARS) {
+      return text.slice(0, ANSWER_SUMMARY_CHARS) + "…";
+    }
+    return text;
+  }
+
   function readError(response) {
     return response.text().then(function (raw) {
       var data = null;
@@ -395,6 +405,10 @@
 
     var countCell = el("td", "num", fmtCount(item.occurrence_count));
 
+    var answerCell = el(
+      "td", "answer-summary", summarizeAnswer(item.ai_suggested_answer)
+    );
+
     var statusCell = document.createElement("td");
     statusCell.append(badge(item.review_status));
 
@@ -416,12 +430,16 @@
     var actionCell = document.createElement("td");
     actionCell.append(actions);
 
+    row.append(
+      questionCell, countCell, answerCell, statusCell, timeCell, actionCell
+    );
+
     var detailRow = document.createElement("tr");
     detailRow.className = "detail-row";
     detailRow.hidden = true;
     var detailCell = document.createElement("td");
     detailCell.className = "detail-cell";
-    detailCell.colSpan = 5;
+    detailCell.colSpan = 6;
     detailRow.append(detailCell);
 
     detailButton.addEventListener("click", function () {

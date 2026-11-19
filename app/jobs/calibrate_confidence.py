@@ -38,9 +38,8 @@ from app.config import get_settings
 from app.rag.query_understanding import analyze
 from app.rag.retrieval import RetrievalStrategy, retrieve_hybrid
 
-DEFAULT_CASES = (
-    Path(__file__).resolve().parents[2] / "tests" / "eval" / "rag_cases.json"
-)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CASES = REPO_ROOT / "tests" / "eval" / "rag_cases.json"
 DEFAULT_TOP_K = 10
 THRESHOLD_STEP = 0.01
 THRESHOLD_COUNT = 101
@@ -58,6 +57,37 @@ def load_cases(path: Path) -> list[dict]:
     if not isinstance(cases, list):
         raise ValueError(f"{path}: expected a 'cases' list")
     return cases
+
+
+def _display_path(path: Path) -> str:
+    """Serialize *path* relative to the repo so reports carry no dev path.
+
+    The default cases file lives in the repo; storing the absolute resolved
+    path would bake one developer's checkout location into the committed
+    report. A caller-supplied file outside the repo falls back to its name.
+    """
+    path = Path(path)
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except (OSError, ValueError):
+        return path.name
+
+
+def remove_reports(out_dir: Path) -> None:
+    """Delete stale calibration reports after a failed run.
+
+    Otherwise ``/observability`` would keep rendering the previous successful
+    threshold sweep as if it were current.
+    """
+    out_dir = Path(out_dir)
+    for name in (REPORT_TXT, REPORT_JSON):
+        try:
+            (out_dir / name).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # Best effort: a read-only directory must not hide the failure.
+            pass
 
 
 def case_label(case: dict) -> bool:
@@ -228,7 +258,7 @@ def build_report(
         "generated_at": (
             generated_at or datetime.now(timezone.utc)
         ).isoformat(),
-        "source": str(cases_path),
+        "source": _display_path(cases_path),
         "formula": {
             "weights": dict(EVIDENCE_WEIGHTS),
             "valid_floor": valid_floor,
@@ -406,8 +436,8 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = get_settings()
     out_dir = args.out_dir or Path(settings.ch09_report_dir)
-    cases = load_cases(args.cases)
     try:
+        cases = load_cases(args.cases)
         report = _run(
             cases,
             top_k=args.top_k,
@@ -416,7 +446,9 @@ def main(argv: list[str] | None = None) -> int:
             margin_scale=settings.evidence_margin_scale,
             cases_path=args.cases,
         )
-    except ValueError as exc:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        # A failed calibration must not leave a previous sweep on the page.
+        remove_reports(out_dir)
         print(f"calibrate_confidence: {exc}")
         return 2
 

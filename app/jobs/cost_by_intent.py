@@ -349,14 +349,19 @@ def fetch_observations(
     """Fetch rows for the report, trying v2 Metrics, v1 Metrics, then a pull.
 
     Returns ``(rows, source)`` where *source* is one of ``metrics_v2``,
-    ``metrics_v1`` or ``observations``. Raises :class:`CostReportError` when
-    every source fails, with each failure summarised in the message.
+    ``metrics_v1`` or ``observations``. A source that succeeds but yields no
+    ``intent:``-tagged rows is not authoritative: the next source is tried, so
+    a partially-populated higher-priority endpoint cannot hide data the lower
+    one has. If every source succeeds but none has intent tags, the last
+    successful (empty) result is returned. Raises :class:`CostReportError`
+    only when every source actually fails, with each failure summarised.
 
     *settings* is accepted for interface symmetry with the other ch09 jobs;
     the API key already scopes queries to one project, so no additional
     environment filter is applied.
     """
     failures: list[str] = []
+    empty_result: tuple[list, str] | None = None
     sources = (
         ("metrics_v2", _fetch_metrics_v2),
         ("metrics_v1", _fetch_metrics_v1),
@@ -371,11 +376,32 @@ def fetch_observations(
             logger.info("cost_by_intent: %s source failed: %s", name, exc)
             failures.append(f"{name}: {type(exc).__name__}: {exc}")
             continue
-        return rows, name
+        if aggregate_by_intent(rows):
+            return rows, name
+        logger.info(
+            "cost_by_intent: %s returned no intent-tagged rows; trying next "
+            "data source",
+            name,
+        )
+        empty_result = (rows, name)
+
+    if empty_result is not None:
+        return empty_result
 
     raise CostReportError(
         "all Langfuse data sources failed (" + "; ".join(failures) + ")"
     )
+
+
+def _remove_reports(report_dir: Path) -> None:
+    """Delete stale report files so the page cannot show old numbers."""
+    for name in (REPORT_TXT, REPORT_JSON):
+        try:
+            (report_dir / name).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:  # noqa: BLE001 - best effort on failure
+            logger.warning("cost_by_intent: cannot remove %s: %s", name, exc)
 
 
 # --- rendering -------------------------------------------------------------
@@ -475,7 +501,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--days must be a positive integer")
 
     settings = get_settings()
+    report_dir = _report_dir(settings)
     if not tracing_enabled(settings):
+        # No run happened, so any existing report is stale too.
+        _remove_reports(report_dir)
         print(
             "cost_by_intent: Langfuse credentials missing "
             "(set LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL); "
@@ -487,6 +516,8 @@ def main(argv: list[str] | None = None) -> int:
         client = get_langfuse_client(settings)
         observations, source = fetch_observations(client, settings, args.days)
     except Exception as exc:  # noqa: BLE001 - CLI reports and exits non-zero
+        # A failed run must not leave yesterday's numbers on /observability.
+        _remove_reports(report_dir)
         print(f"cost_by_intent: failed to fetch Langfuse data: {exc}")
         return 2
 
@@ -497,7 +528,6 @@ def main(argv: list[str] | None = None) -> int:
         rows, args.days, source=source, generated_at=generated_at
     )
 
-    report_dir = _report_dir(settings)
     report_dir.mkdir(parents=True, exist_ok=True)
     txt_path = report_dir / REPORT_TXT
     json_path = report_dir / REPORT_JSON

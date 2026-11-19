@@ -501,6 +501,22 @@ def test_thread_config_omits_metadata_without_user_id():
     assert "metadata" not in config
 
 
+def test_reset_inputs_keeps_raw_untruncated_question(session):
+    settings = Settings(
+        _env_file=None, openai_api_key="test", max_user_input_tokens=5
+    )
+    long_question = "退款到底多久才能到账"
+    graph = FakeGraph(frames=[], final={"answer": "答"})
+
+    list(
+        stream_chat_agent(graph, session, "u1", long_question, settings=settings)
+    )
+
+    inputs = graph.inputs[-1]
+    assert inputs["user_message"] == long_question[:5]
+    assert inputs["raw_user_message"] == long_question
+
+
 def test_stream_chat_passes_langfuse_metadata_to_graph(session):
     graph = FakeGraph(frames=[], final={"answer": "答"})
 
@@ -518,6 +534,53 @@ def test_stream_chat_passes_langfuse_metadata_to_graph(session):
         "langfuse_session_id": "conv:1",
         "langfuse_user_id": "u1",
     }
+
+
+def test_two_graph_runs_keep_distinct_langfuse_session_metadata(session):
+    """The shared compile-time handler must still receive per-run identity.
+
+    Guards the path that lets two concurrent conversations produce separate
+    Langfuse sessions: the handler is shared, but each ``graph.stream`` config
+    carries its own ``langfuse_session_id`` / ``langfuse_user_id``.
+    """
+    settings = _tracing_settings()
+    cid_a = get_or_create_conversation(session, "u1").id
+    cid_b = get_or_create_conversation(session, "u2").id
+    graph_a = FakeGraph(frames=[], final={"answer": "A"})
+    graph_b = FakeGraph(frames=[], final={"answer": "B"})
+
+    list(
+        stream_chat_agent(
+            graph_a,
+            session,
+            "u1",
+            "问 A",
+            settings=settings,
+            conversation_id=cid_a,
+        )
+    )
+    list(
+        stream_chat_agent(
+            graph_b,
+            session,
+            "u2",
+            "问 B",
+            settings=settings,
+            conversation_id=cid_b,
+        )
+    )
+
+    meta_a = graph_a.stream_calls and graph_a.config["metadata"]
+    meta_b = graph_b.stream_calls and graph_b.config["metadata"]
+    assert meta_a == {
+        "langfuse_session_id": f"conv:{cid_a}",
+        "langfuse_user_id": "u1",
+    }
+    assert meta_b == {
+        "langfuse_session_id": f"conv:{cid_b}",
+        "langfuse_user_id": "u2",
+    }
+    assert meta_a["langfuse_session_id"] != meta_b["langfuse_session_id"]
 
 
 class _BoundGraph:
