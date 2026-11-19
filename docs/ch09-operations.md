@@ -41,7 +41,7 @@ LANGFUSE_PUBLIC_KEY=pk-lf-ch09
 LANGFUSE_SECRET_KEY=sk-lf-ch09
 LANGFUSE_BASE_URL=http://localhost:3000
 LANGFUSE_ENVIRONMENT=development
-LANGFUSE_TRACE_NAME=cs-chat
+# LANGFUSE_TRACE_NAME 为预留配置，当前版本未读取，可不设。
 ```
 
 三个字段（public / secret / base URL）齐全时才会在编译期挂上 Langfuse
@@ -92,13 +92,19 @@ DDL 原文在 `sql/ch09-ddl.sql`（`review_queue`、`eval_runs`，以及
 `scripts/` 下的同名脚本只是薄包装，逻辑都在 `app/jobs/`：
 
 ```bash
-.venv/Scripts/python.exe scripts/flywheel_pipeline.py --limit 50
-.venv/Scripts/python.exe scripts/cost_by_intent.py --days 30 --json
-.venv/Scripts/python.exe scripts/eval_flywheel.py --triggered-by 定时 --limit 50
-.venv/Scripts/python.exe scripts/calibrate_confidence.py --json
+.venv/Scripts/python.exe -m scripts.flywheel_pipeline --limit 50
+.venv/Scripts/python.exe -m scripts.cost_by_intent --days 30 --json
+.venv/Scripts/python.exe -m scripts.eval_flywheel --triggered-by 定时 --limit 50
+.venv/Scripts/python.exe -m scripts.calibrate_confidence --json
 ```
 
-直接以模块方式运行也可以；两者参数一致。
+必须从仓库根以模块方式（`-m`）运行：直接按文件路径执行
+（`python scripts/cost_by_intent.py`）时 `sys.path[0]` 是 `scripts/`，仓库根
+不在导入路径上，会报 `ModuleNotFoundError: No module named 'app'`。确需按
+路径运行时加 `PYTHONPATH=.`，例如
+`PYTHONPATH=. .venv/Scripts/python.exe scripts/cost_by_intent.py --help`。
+包装脚本与 `python -m app.jobs.<module>` 的参数完全一致（wrapper 直接调用
+对应 `main`）。
 
 ---
 
@@ -133,8 +139,10 @@ make calibrate-confidence
 ## 5. 飞轮批处理与 cron
 
 `make flywheel` 扫描 `low_confidence_questions.matched_review_id IS NULL`
-的行（每轮最多 `FLYWHEEL_CANDIDATE_LIMIT` 或 `--limit` 条），一次 LLM
-调用完成标准化、与 `review_queue` **全部行**查重、生成示例答案：
+的行：`--limit`（默认 50）控制本轮最多扫描多少条低置信原话；查重时另按
+`--candidate-limit`（默认 `FLYWHEEL_CANDIDATE_LIMIT=200`）取 `review_queue`
+中最近更新的至多 200 行作为候选，而不是库中所有历史行。每条原话一次 LLM
+调用完成标准化、查重与示例答案生成：
 
 - 命中：`occurrence_count` 累加，原话回写 `matched_review_id`；已驳回 /
   已通过的行只累加次数、状态不变。
