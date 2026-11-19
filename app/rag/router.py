@@ -49,7 +49,7 @@ ORDER_ACTION_TERMS: tuple[str, ...] = (
     "运单",
     # Handoff/ticket and logistics actions must always win over generic
     # knowledge words such as 能不能/支持, otherwise forced query_faq would
-    # lock out create_ticket/query_logistics for the turn.
+    # lock out create_ticket and MCP logistics for the turn.
     "人工",
     "转人工",
     "人工客服",

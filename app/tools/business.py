@@ -1,22 +1,21 @@
-"""Mock 业务工具。
+"""Mock 业务数据纯函数。
 
-提供客服机器人调用的三个模拟业务查询工具:
-- query_order: 查询订单
-- query_product: 查询商品
-- query_logistics: 查询物流
+提供确定性的订单快照数据,不依赖 LangChain,供内置工具与图节点复用:
 
-所有工具都使用 ``langchain.tools.tool`` 装饰器,通过类型标注与 docstring
-生成参数 schema;函数返回 JSON 字符串(``ensure_ascii=False``,中文原样输出),
-并原样回显入参中的 ``order_id`` / ``product_name`` / ``tracking_no``。
+- ``DEMO_ORDERS``:演示订单目录,退款子流程的订单选择器与工具共用;
+- ``list_user_orders``:返回三张订单卡的深拷贝;
+- ``order_snapshot``:按订单号返回订单快照 dict,未知订单号用稳定 RNG 生成;
+- ``_days_ago`` / ``_order_rng``:日期与稳定随机数的内部 helper。
+
+``order_snapshot`` 对未知订单号生成与历史 ``query_order`` 完全相同的字段
+(``order_id / items / amount / status / tracking_no / created_at /
+signed_at``),同一 id 跨进程结果一致。
 """
 
 import copy
 import hashlib
-import json
 import random
 from datetime import datetime, timedelta
-
-from langchain.tools import tool
 
 _NOW = datetime.now()
 
@@ -36,7 +35,7 @@ def _order_rng(order_id: str) -> random.Random:
     return random.Random(seed)
 
 
-# 演示订单目录:退款子流程的订单选择器与 ``query_order`` 共用同一份数据。
+# 演示订单目录:退款子流程的订单选择器与 ``order_snapshot`` 共用同一份数据。
 # 日期按模块导入时间相对生成,保证「7 天无理由」等政策演示稳定。
 DEMO_ORDERS: dict[str, dict] = {
     "1001": {
@@ -74,18 +73,18 @@ def list_user_orders(session_id: str) -> list[dict]:
     return [copy.deepcopy(DEMO_ORDERS[order_id]) for order_id in ("1001", "1002", "1003")]
 
 
-@tool
-def query_order(order_id: str) -> str:
-    """查询订单信息。
+def order_snapshot(order_id: str) -> dict | None:
+    """Return the mock order snapshot for *order_id*.
 
-    根据订单号查询订单的商品明细、订单金额与订单状态。
-    查询物流时请使用本工具返回的 tracking_no。
-
-    Args:
-        order_id: 要查询的订单号
+    Demo ids return a deep copy of ``DEMO_ORDERS``; any other non-empty id
+    gets stable generated data with the same field shape (including
+    ``tracking_no`` and the ``created_at`` / ``signed_at`` dates). A falsy
+    id returns ``None``.
     """
+    if not order_id:
+        return None
     if order_id in DEMO_ORDERS:
-        return json.dumps(copy.deepcopy(DEMO_ORDERS[order_id]), ensure_ascii=False)
+        return copy.deepcopy(DEMO_ORDERS[order_id])
 
     rng = _order_rng(order_id)
     item_names = ["无线蓝牙耳机", "智能手环", "移动电源", "机械键盘", "保温杯"]
@@ -101,68 +100,12 @@ def query_order(order_id: str) -> str:
     status = rng.choice(["待付款", "待发货", "运输中", "已签收"])
     tracking_no = "SF" + "".join(str(rng.randint(0, 9)) for _ in range(10))
     created_at = _days_ago(rng.randint(1, 10))
-    return json.dumps(
-        {
-            "order_id": order_id,
-            "items": items,
-            "amount": amount,
-            "status": status,
-            "tracking_no": tracking_no,
-            "created_at": created_at,
-            "signed_at": created_at if status == "已签收" else None,
-        },
-        ensure_ascii=False,
-    )
-
-
-@tool
-def query_product(product_name: str) -> str:
-    """查询某个订单商品的实时价格与库存快照。
-
-    仅用于查询订单商品的实时价格、库存等交易信息;商品型号参数、规格、
-    退换货政策等知识类问题应查询知识库(query_faq),不要用本工具回答。
-
-    Args:
-        product_name: 要查询的商品名称(订单中的商品)
-    """
-    price = round(random.uniform(10, 2000), 2)
-    stock = random.randint(0, 500)
-    specs = random.sample(
-        ["标准版", "高配版", "旗舰版", "mini版", "套装版"],
-        k=random.randint(1, 3),
-    )
-    return json.dumps(
-        {"product_name": product_name, "price": price, "stock": stock, "specs": specs},
-        ensure_ascii=False,
-    )
-
-
-@tool
-def query_logistics(tracking_no: str) -> str:
-    """查询物流信息。
-
-    根据物流单号查询物流单号、承运商、当前物流节点与完整物流轨迹。
-    物流单号必须来自 query_order 返回的 tracking_no，不要用订单号或猜测值代替。
-
-    Args:
-        tracking_no: 要查询的物流单号
-    """
-    carriers = ["顺丰速运", "中通快递", "圆通速递", "韵达快递"]
-    nodes = ["已揽收", "运输中", "到达转运中心", "派送中", "已签收"]
-    descs = ["快件已发出", "快件到达网点", "快件正在派送", "快件已签收"]
-
-    carrier = random.choice(carriers)
-    current_node = random.choice(nodes)
-    traces = [
-        {"node": random.choice(nodes), "desc": random.choice(descs)}
-        for _ in range(random.randint(2, 5))
-    ]
-    return json.dumps(
-        {
-            "tracking_no": tracking_no,
-            "carrier": carrier,
-            "current_node": current_node,
-            "traces": traces,
-        },
-        ensure_ascii=False,
-    )
+    return {
+        "order_id": order_id,
+        "items": items,
+        "amount": amount,
+        "status": status,
+        "tracking_no": tracking_no,
+        "created_at": created_at,
+        "signed_at": created_at if status == "已签收" else None,
+    }

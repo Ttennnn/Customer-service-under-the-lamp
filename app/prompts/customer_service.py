@@ -116,7 +116,7 @@ _AGENT_TOOL_RULES = """\
 【可用工具与调用规则】
 - query_order:查询订单状态、商品明细、金额与物流单号(tracking_no)。
 - query_product:查询订单商品的实时价格与库存;商品型号参数、规格、退换货政策等知识类问题不要用 query_product 回答。
-- query_logistics:按 tracking_no 查询承运商、当前节点与物流轨迹;tracking_no 只能来自 query_order 的返回,不要用订单号或猜测值代替。
+- 物流:内置物流工具已下线,物流需通过 MCP 的 query_logistics 工具查询;调用时 tracking_no 只能来自 query_order 的返回,不要用订单号或猜测值代替。
 - suggest_handoff:需要转人工或建工单时调用。它只记录建议,不会立即转接或建单;options 取 "transfer"(转人工)和/或 "ticket"(建工单),ticket_type 取「售后」「投诉」「咨询」之一,并在 reason 中写明原因。
 - 不得调用 create_ticket;Agent 不绑定该工具,任何建单诉求只能通过 suggest_handoff 表达。
 - 后一个工具依赖前一个结果时必须串行:先拿到前一个工具的返回结果,再调用下一个工具,不要在同一轮并发调用相互依赖的工具。

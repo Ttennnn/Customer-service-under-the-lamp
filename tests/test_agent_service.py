@@ -18,7 +18,7 @@ from app.models import LowConfidenceQuestion, Message
 from app.services.history import get_or_create_conversation
 from tests.agent_fakes import FakeGraph
 
-TOOL_FRAME = {"type": "tool", "tool": "query_logistics", "label": "查物流"}
+TOOL_FRAME = {"type": "tool", "tool": "query_order", "label": "查订单"}
 SOURCES_FRAME = {
     "type": "sources",
     "sources": [

@@ -17,7 +17,7 @@ from typing import Literal
 from langchain.tools import tool
 from langchain_core.tools import BaseTool
 
-from app.tools.business import query_logistics, query_order, query_product
+from app.tools.builtin.orders import query_order, query_product
 
 HANDOFF_LABELS: dict[str, str] = {"transfer": "转人工", "ticket": "建工单"}
 
@@ -70,7 +70,6 @@ def submit_refund(order_id: str) -> str:
 GENERAL_AGENT_TOOLS: list[BaseTool] = [
     query_order,
     query_product,
-    query_logistics,
     suggest_handoff,
 ]
 
@@ -87,7 +86,7 @@ AGENT_TOOLS_BY_NAME: dict[str, BaseTool] = {
 }
 
 BUSINESS_TOOL_NAMES: frozenset[str] = frozenset(
-    {"query_order", "query_product", "query_logistics"}
+    {"query_order", "query_product"}
 )
 
 

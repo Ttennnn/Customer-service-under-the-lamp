@@ -51,11 +51,9 @@ from app.rag.query_understanding import (
     expand_synonyms,
 )
 from app.rag.retrieval import RetrievedChunk, retrieve_hybrid
-from app.tools.business import list_user_orders, query_order
+from app.tools.business import list_user_orders, order_snapshot
 from app.tools.context import CitationCollector
-from app.tools.executor import execute_tool
 from app.tools.faq import order_for_prompt
-from app.tools.registry import tool_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -207,16 +205,12 @@ def fetch_order_node(state: CustomerServiceState) -> dict[str, Any]:
 
     logger.info("ch06 fetch_order order_id=%s source=%s", order_id, source)
     try:
-        raw = execute_tool(
-            query_order,
-            {"order_id": order_id},
-            timeout_s=tool_timeout("query_order"),
-            retries=0,
-        )
-        order_data = json.loads(raw)
+        order_data = order_snapshot(order_id)
+        if order_data is None:
+            raise ValueError(f"no order snapshot for {order_id!r}")
         if not isinstance(order_data, dict):
             raise ValueError("order payload is not a JSON object")
-    except Exception:  # noqa: BLE001 - 工具/解析失败走兜底,不进 Agent
+    except Exception:  # noqa: BLE001 - 快照失败走兜底,不进 Agent
         logger.exception("ch06 fetch_order failed order_id=%s", order_id)
         _emit(ORDER_FAILED_TEXT)
         failure: dict[str, Any] = {

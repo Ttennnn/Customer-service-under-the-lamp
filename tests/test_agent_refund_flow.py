@@ -1,6 +1,6 @@
 """Refund sub-flow tests: fetch_order (Task 12) + retrieve_policy (Task 13)."""
 
-import json
+import copy
 import logging
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -103,14 +103,14 @@ def _run_to_interrupt(graph, message="能退吗", resolved=None):
 
 
 def _order_tool(monkeypatch, calls, payload=None):
-    def fake_execute_tool(tool, args, **kwargs):
-        calls.append((tool.name, dict(args)))
+    def fake_order_snapshot(order_id):
+        calls.append(("order_snapshot", {"order_id": order_id}))
         data = payload
         if data is None:
-            data = DEMO_ORDERS[args["order_id"]]
-        return json.dumps(data, ensure_ascii=False)
+            data = DEMO_ORDERS[order_id]
+        return copy.deepcopy(data)
 
-    monkeypatch.setattr("app.agent.graph.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.agent.graph.order_snapshot", fake_order_snapshot)
 
 
 def _chunk(chunk_id, score):
@@ -185,7 +185,7 @@ def test_fetch_order_resume_fills_slot_and_adds_human_message(monkeypatch):
     assert values["order_data"]["order_id"] == "1001"
     assert values["gate_reason"] == "below_threshold"
     assert values["gate_passed"] is False
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [("order_snapshot", {"order_id": "1001"})]
     markers = [
         message
         for message in values["messages"]
@@ -230,7 +230,7 @@ def test_fetch_order_valid_id_from_message_calls_query_once(monkeypatch):
     assert values["order_id"] == "1001"
     assert values["order_data"]["order_id"] == "1001"
     assert values["gate_reason"] == "below_threshold"
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [("order_snapshot", {"order_id": "1001"})]
     assert not graph.get_state(CONFIG).interrupts
 
 
@@ -249,7 +249,7 @@ def test_fetch_order_prefers_valid_state_order_id(monkeypatch, caplog):
 
     assert result["order_id"] == "1001"
     assert result["order_data"]["order_id"] == "1001"
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [("order_snapshot", {"order_id": "1001"})]
     assert any(
         "ch06 fetch_order order_id=1001 source=state" in record.getMessage()
         for record in caplog.records
@@ -270,17 +270,17 @@ def test_fetch_order_rejects_state_id_outside_catalog_then_extracts(monkeypatch)
 
     assert result["order_id"] == "1002"
     assert result["order_data"]["order_id"] == "1002"
-    assert calls == [("query_order", {"order_id": "1002"})]
+    assert calls == [("order_snapshot", {"order_id": "1002"})]
 
 
 def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):
     calls = []
 
-    def failing_execute_tool(tool, args, **kwargs):
-        calls.append((tool.name, dict(args)))
-        return "工具执行失败"
+    def failing_order_snapshot(order_id):
+        calls.append(("order_snapshot", {"order_id": order_id}))
+        return None
 
-    monkeypatch.setattr("app.agent.graph.execute_tool", failing_execute_tool)
+    monkeypatch.setattr("app.agent.graph.order_snapshot", failing_order_snapshot)
     graph = _build()
 
     _run_to_interrupt(graph)
@@ -300,17 +300,17 @@ def test_fetch_order_resume_tool_failure_keeps_selection(monkeypatch):
     assert len(markers) == 1
     assert isinstance(values["messages"][-1], AIMessage)
     assert values["messages"][-1].content == ORDER_FAILED_TEXT
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [("order_snapshot", {"order_id": "1001"})]
 
 
 def test_fetch_order_tool_failure_falls_back(monkeypatch):
     calls = []
 
-    def failing_execute_tool(tool, args, **kwargs):
-        calls.append((tool.name, dict(args)))
-        return "工具执行失败"
+    def failing_order_snapshot(order_id):
+        calls.append(("order_snapshot", {"order_id": order_id}))
+        return None
 
-    monkeypatch.setattr("app.agent.graph.execute_tool", failing_execute_tool)
+    monkeypatch.setattr("app.agent.graph.order_snapshot", failing_order_snapshot)
     graph = _build(resolved="订单 1001 能退吗")
 
     values = graph.invoke(_state(resolved="订单 1001 能退吗"), CONFIG)
@@ -321,7 +321,7 @@ def test_fetch_order_tool_failure_falls_back(monkeypatch):
     assert values["gate_passed"] is False
     assert isinstance(values["messages"][-1], AIMessage)
     assert values["messages"][-1].content == ORDER_FAILED_TEXT
-    assert calls == [("query_order", {"order_id": "1001"})]
+    assert calls == [("order_snapshot", {"order_id": "1001"})]
 
 
 def test_retrieve_policy_runs_three_queries_and_merges(monkeypatch, caplog):
@@ -465,15 +465,15 @@ def test_retrieve_policy_low_score_fails_gate(monkeypatch):
 def test_refund_flow_order_then_policy_then_agent(monkeypatch):
     calls = []
 
-    def fake_execute_tool(tool, args, **kwargs):
-        calls.append(("query_order", dict(args)))
-        return json.dumps(DEMO_ORDERS[args["order_id"]], ensure_ascii=False)
+    def fake_order_snapshot(order_id):
+        calls.append(("order_snapshot", {"order_id": order_id}))
+        return copy.deepcopy(DEMO_ORDERS[order_id])
 
     def fake_retrieve(query, **kwargs):
         calls.append(("retrieve_hybrid", query))
         return make_retrieval_result([_chunk(1, 0.9)])
 
-    monkeypatch.setattr("app.agent.graph.execute_tool", fake_execute_tool)
+    monkeypatch.setattr("app.agent.graph.order_snapshot", fake_order_snapshot)
     monkeypatch.setattr("app.agent.graph.retrieve_hybrid", fake_retrieve)
     llm = RecordingScriptedLLM(
         [text_chunk("订单 1001 符合退款条件,请填写退款表单。")], calls
@@ -484,7 +484,7 @@ def test_refund_flow_order_then_policy_then_agent(monkeypatch):
 
     # The deterministic path runs in full before the Agent model is invoked.
     assert calls == [
-        ("query_order", {"order_id": "1001"}),
+        ("order_snapshot", {"order_id": "1001"}),
         ("retrieve_hybrid", "q1"),
         ("retrieve_hybrid", "q2"),
         ("retrieve_hybrid", "q3"),

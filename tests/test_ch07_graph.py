@@ -70,7 +70,9 @@ def test_fetch_order_picker_note_is_human_message(monkeypatch):
 
     monkeypatch.setattr(graph_mod, "list_user_orders", lambda sid: [{"order_id": "1001"}])
     monkeypatch.setattr(graph_mod, "interrupt", lambda payload: "1001")
-    monkeypatch.setattr(graph_mod, "execute_tool", lambda *a, **k: '{"order_id": "1001"}')
+    monkeypatch.setattr(
+        graph_mod, "order_snapshot", lambda order_id: {"order_id": order_id}
+    )
     out = graph_mod.fetch_order_node({"session_id": "s", "resolved_query": "退款"})
     assert isinstance(out["messages"][0], HumanMessage)
     assert "订单 1001" in out["messages"][0].content

@@ -8,7 +8,7 @@ from app.agent.tools import (
 
 def test_agent_tools_exclude_faq_and_create_ticket():
     assert [t.name for t in AGENT_TOOLS] == [
-        "query_order", "query_product", "query_logistics", "suggest_handoff"
+        "query_order", "query_product", "suggest_handoff"
     ]
 
 
@@ -30,7 +30,7 @@ def test_tools_for_route_splits_refund_and_business():
     from app.agent.tools import tools_for_route
     assert [t.name for t in tools_for_route("refund_flow")] == ["submit_refund", "suggest_handoff"]
     assert [t.name for t in tools_for_route("business")] == [
-        "query_order", "query_product", "query_logistics", "suggest_handoff"
+        "query_order", "query_product", "suggest_handoff"
     ]
 
 
@@ -38,7 +38,7 @@ def test_tools_for_route_defaults_to_general_tools():
     from app.agent.tools import tools_for_route
     for route in ("knowledge", "", "escalate"):
         assert [t.name for t in tools_for_route(route)] == [
-            "query_order", "query_product", "query_logistics", "suggest_handoff"
+            "query_order", "query_product", "suggest_handoff"
         ]
 
 

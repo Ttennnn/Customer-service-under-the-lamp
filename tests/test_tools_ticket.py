@@ -37,6 +37,6 @@ def test_create_ticket_accepts_refund(session, ticket_type):
     assert TICKET_NO_PATTERN.match(out)
     assert session.query(Ticket).one().ticket_type == "退款"
 
-def test_registry_has_five_tools():
+def test_registry_keeps_legacy_exports_without_logistics():
     from app.tools.registry import ALL_TOOLS
-    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_logistics", "query_faq", "create_ticket"]
+    assert [t.name for t in ALL_TOOLS] == ["query_order", "query_product", "query_faq", "create_ticket"]

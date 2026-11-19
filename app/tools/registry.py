@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.tools import BaseTool
 
-from app.tools.business import query_logistics, query_order, query_product
+from app.tools.builtin.orders import query_order, query_product
 from app.tools.faq import query_faq
 from app.tools.spec import ToolSpec
 from app.tools.ticket import create_ticket
@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 ALL_TOOLS: list[BaseTool] = [
     query_order,
     query_product,
-    query_logistics,
     query_faq,
     create_ticket,
 ]
@@ -53,11 +52,10 @@ def tool_timeout(name: str) -> float:
     """Return the execution timeout in seconds for tool *name*."""
     return TOOL_TIMEOUTS.get(name, DEFAULT_TOOL_TIMEOUT)
 
-# 五个工具的展示名(仅为中文标签字符串,不包含工具对象)。
+# 四个工具的展示名(仅为中文标签字符串,不包含工具对象)。
 TOOL_LABELS: dict[str, str] = {
     "query_order": "查订单",
     "query_product": "查商品",
-    "query_logistics": "查物流",
     "query_faq": "查常见问题",
     "create_ticket": "创建工单",
 }
