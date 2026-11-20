@@ -1,0 +1,13 @@
+# eval 趋势（最近 10 轮）
+
+run #1 | 2026-11-19 16:24:21 | 手动 | dataset=30
+  Recall@10     1.000 —
+  MRR@10        1.000 —
+  Faithfulness  1.000 —
+  D accuracy    n/a —
+
+run #2 | 2026-11-19 16:25:59 | 手动 | dataset=30
+  Recall@10     1.000 → 1.000 →
+  MRR@10        1.000 → 1.000 →
+  Faithfulness  1.000 → 1.000 →
+  D accuracy    n/a → n/a —

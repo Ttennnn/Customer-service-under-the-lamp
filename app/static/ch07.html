@@ -123,6 +123,36 @@
   .bubble.error { color: var(--red); border-color: rgba(217,119,87,.5); }
   .typing { color: var(--dim); font-size: 13px; }
   .meta-line { color: var(--dim); font-size: 11.5px; line-height: 1.5; }
+  .feedback-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .feedback-btn {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--dim);
+    border-radius: 8px;
+    padding: 3px 9px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .feedback-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .feedback-btn.selected,
+  .feedback-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(240,183,106,.12);
+  }
+  .feedback-btn:disabled { opacity: .45; cursor: default; }
+  .feedback-btn.selected:disabled { opacity: .8; }
+  .feedback-status { color: var(--dim); }
+  .feedback-status.error { color: var(--red); }
   .msg.system {
     justify-content: center;
     color: var(--dim);
@@ -654,7 +684,8 @@
       options: null,
       answer: "",
       errored: false,
-      interrupted: false
+      interrupted: false,
+      userQuestion: ""
     };
   }
 
@@ -701,6 +732,74 @@
     }
   }
 
+  // Feedback is only for a real, completed answer of a real conversation.
+  // The question is captured per turn (resumed turns reuse lastUserMessage),
+  // so a delayed click cannot attach the rating to a later question.
+  function addFeedbackBar(ctx) {
+    if (!ctx || !ctx.body) return;
+    if (!ctx.answer || ctx.errored || ctx.interrupted) return;
+    if (activeConversationId === null || !ctx.userQuestion) return;
+
+    var question = ctx.userQuestion;
+    var bar = el("div", "feedback-bar");
+    bar.append(el("span", null, "这轮回答有帮助吗"));
+    var upButton = el("button", "feedback-btn", "👍 有帮助");
+    upButton.type = "button";
+    upButton.setAttribute("aria-pressed", "false");
+    var downButton = el("button", "feedback-btn", "👎 没帮助");
+    downButton.type = "button";
+    downButton.setAttribute("aria-pressed", "false");
+    var status = el("span", "feedback-status");
+    var locked = false;
+
+    function markSelected(button) {
+      [upButton, downButton].forEach(function (node) {
+        var active = node === button;
+        node.classList.toggle("selected", active);
+        node.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function send(rating) {
+      if (locked) return;
+      locked = true;
+      markSelected(rating === "up" ? upButton : downButton);
+      upButton.disabled = true;
+      downButton.disabled = true;
+      status.className = "feedback-status";
+      status.textContent = "提交中…";
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          conversation_id: activeConversationId,
+          rating: rating,
+          question: question
+        })
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          // The selected button keeps its highlight while locked.
+          status.textContent = "已反馈";
+        })
+        .catch(function () {
+          locked = false;
+          markSelected(null);
+          upButton.disabled = false;
+          downButton.disabled = false;
+          status.className = "feedback-status error";
+          status.textContent = "反馈失败，请重试";
+        });
+    }
+
+    upButton.addEventListener("click", function () { send("up"); });
+    downButton.addEventListener("click", function () { send("down"); });
+    bar.append(upButton, downButton, status);
+    ctx.body.append(bar);
+    scrollToBottom();
+  }
+
   function finishAssistantMessage(ctx) {
     if (ctx.typing) {
       if (ctx.typing.parentNode) ctx.typing.parentNode.removeChild(ctx.typing);
@@ -718,6 +817,7 @@
       ctx.bubble.textContent = "（客服暂无回复）";
       ctx.bubble.classList.add("error");
     }
+    addFeedbackBar(ctx);
   }
 
   /* ---------- order picker (interrupt kind=select_order) ---------- */
@@ -808,6 +908,7 @@
     appendSystemMessage("已选择订单 " + orderId);
 
     var ctx = startAssistantMessage();
+    ctx.userQuestion = lastUserMessage;
     streaming = true;
     syncComposer();
 
@@ -926,6 +1027,7 @@
     appendSystemMessage(confirmed ? "已提交工单" : "已取消建单");
 
     var ctx = startAssistantMessage();
+    ctx.userQuestion = lastUserMessage;
     streaming = true;
     syncComposer();
 
@@ -1357,6 +1459,7 @@
     lastUserMessage = text;
     appendMessage("user", text);
     var ctx = startAssistantMessage();
+    ctx.userQuestion = text;
     streaming = true;
     syncComposer();
 

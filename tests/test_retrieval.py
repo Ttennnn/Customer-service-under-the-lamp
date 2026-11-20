@@ -77,13 +77,14 @@ class BoomReranker:
         raise RerankError("boom")
 
 
-def _row(session, q, a, section_path=None):
+def _row(session, q, a, section_path=None, is_key_clause=False):
     c = KnowledgeChunk(
         category="售后",
         questions=q,
         answer=a,
         section_path=section_path,
         content_type="faq",
+        is_key_clause=is_key_clause,
     )
     session.add(c)
     session.commit()
@@ -585,6 +586,23 @@ def test_default_strategy_is_hybrid_rerank(session):
         analysis=FIXED_ANALYSIS,
     )
     assert result.strategy is RetrievalStrategy.HYBRID_RERANK
+
+
+def test_retrieval_backfills_is_key_clause(session):
+    key_row = _row(session, "关键问", "关键答", is_key_clause=True)
+    plain_row = _row(session, "普通问", "普通答")
+    store = FakeHybridStore(
+        hybrid=[SearchHit(key_row.id, 0.9), SearchHit(plain_row.id, 0.8)]
+    )
+    result = retrieve_hybrid(
+        "q",
+        strategy=RetrievalStrategy.HYBRID,
+        session=session,
+        embedder=FakeEmbedder(),
+        store=store,
+        analysis=FIXED_ANALYSIS,
+    )
+    assert [c.is_key_clause for c in result.chunks] == [True, False]
 
 
 def test_infrastructure_error_is_not_swallowed(session):

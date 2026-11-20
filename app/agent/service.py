@@ -49,6 +49,7 @@ from langgraph.types import Command
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.observability import _state_graph, tracing_enabled
 from app.services.history import (
     ConversationNotFound,
     append_message,
@@ -61,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 ERROR_TEXT = "客服服务暂时不可用,请稍后重试"
 CONVERSATION_NOT_FOUND_TEXT = "会话不存在"
-_GATE_GAP_REASONS = frozenset({"empty", "below_threshold"})
+_POOL_FALLBACK_SOURCES = frozenset({"retrieval_low_conf", "self_check"})
 _FORWARDED_FRAME_TYPES = frozenset({"token", "tool", "sources"})
 
 
@@ -74,9 +75,31 @@ def _dumps(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _thread_config(conversation_id: int) -> dict:
-    """Config pinning the checkpointer thread to one conversation."""
-    return {"configurable": {"thread_id": f"conv:{conversation_id}"}}
+def _thread_config(
+    conversation_id: int,
+    *,
+    user_id: str | None = None,
+    settings: Settings | None = None,
+) -> dict:
+    """Config pinning the checkpointer thread to one conversation.
+
+    When both ``user_id`` and ``settings`` are supplied *and* tracing is
+    enabled, the Langfuse LangChain metadata keys are added so the trace is
+    grouped by conversation session and attributed to the user.  Callers that
+    only need to read a snapshot (``has_pending_interrupt``) keep the legacy
+    two-argument path.
+    """
+    config: dict = {"configurable": {"thread_id": f"conv:{conversation_id}"}}
+    if (
+        user_id is not None
+        and settings is not None
+        and tracing_enabled(settings)
+    ):
+        config["metadata"] = {
+            "langfuse_session_id": f"conv:{conversation_id}",
+            "langfuse_user_id": user_id,
+        }
+    return config
 
 
 def _conversation_frame(conversation_id: int) -> str:
@@ -121,6 +144,8 @@ def _reset_inputs(
     session_id: str,
     settings: Settings,
     plan: ContextPlan,
+    *,
+    raw_message: str | None = None,
 ) -> dict:
     """Build one turn's inputs with every transient field reset explicitly.
 
@@ -131,6 +156,9 @@ def _reset_inputs(
     ``created_ticket_no`` is reset too, otherwise a ticket number from an
     earlier turn would survive a later cancel/unrelated turn (Task 10 reads it).
 
+    ``message`` is the model-facing copy (possibly truncated by the input
+    budget); ``raw_message`` is the untruncated user text stored alongside it
+    as ``raw_user_message`` so feedback can match long questions exactly.
     The user message carries the MySQL ``db-{id}`` identity so the layered
     window and the summary job can anchor on persisted rows. The context plan
     fields are injected as this turn's inputs (never into a resumed Command).
@@ -138,6 +166,7 @@ def _reset_inputs(
     return {
         "messages": [HumanMessage(content=message, id=f"db-{message_id}")],
         "user_message": message,
+        "raw_user_message": raw_message if raw_message is not None else message,
         "resolved_query": "",
         "intent": "",
         "intent_confidence": None,
@@ -152,6 +181,11 @@ def _reset_inputs(
         "gate_passed": False,
         "gate_reason": "",
         "rerank_failed": False,
+        "evidence_confidence": None,
+        "evidence_signals": {},
+        "fallback_source": "",
+        "fallback_reason": "",
+        "retrieved_snapshot": [],
         "answer": "",
         "created_ticket_no": "",
         "suggested_actions": [],
@@ -192,7 +226,7 @@ def _interrupt_payload(snapshot) -> dict | None:
 
 def _pending_interrupt(graph, config: dict) -> dict | None:
     """Read the thread snapshot and return its pending interrupt payload."""
-    return _interrupt_payload(graph.get_state(config))
+    return _interrupt_payload(_state_graph(graph).get_state(config))
 
 
 def has_pending_interrupt(graph, conversation_id: int) -> bool:
@@ -203,6 +237,21 @@ def has_pending_interrupt(graph, conversation_id: int) -> bool:
 def _interrupt_frame(payload: dict) -> str:
     """Serialize the order-picker frame the frontend renders as cards."""
     return _dumps({"type": "interrupt", **payload})
+
+
+def _pool_reason(state_values: dict, fallback_source: str) -> str:
+    """Build the low-confidence ``reason`` from the gate's evidence signals."""
+    reason = state_values.get("fallback_reason") or ""
+    if reason:
+        return reason
+    confidence = state_values.get("evidence_confidence")
+    if confidence is not None:
+        reason = f"evidence_confidence={float(confidence):.3f}"
+        signals = state_values.get("evidence_signals") or {}
+        if signals:
+            reason += f" signals={json.dumps(signals, ensure_ascii=False)}"
+        return reason
+    return state_values.get("gate_reason") or fallback_source
 
 
 def _finish_turn(
@@ -218,6 +267,12 @@ def _finish_turn(
     and the answer does not already contain it, the number is appended as a
     plain-text token frame (before ``options``, so the browser receives it)
     and the augmented answer — not the original — is persisted.
+
+    Only the two genuine knowledge-gap fallbacks (``retrieval_low_conf`` and
+    ``self_check``) enter the low-confidence pool; infra/rerank/order failures
+    leave ``fallback_source`` empty and never pollute it. Pooled rows carry the
+    turn's ``retrieved_snapshot`` so reviewers see the evidence that was
+    actually retrieved.
     """
     answer = state_values.get("answer") or ""
     ticket_no = state_values.get("created_ticket_no") or ""
@@ -233,15 +288,19 @@ def _finish_turn(
     append_message(session, conversation_id, "assistant", answer)
     session.commit()
 
-    gate_reason = state_values.get("gate_reason")
-    if gate_reason in _GATE_GAP_REASONS:
+    fallback_source = state_values.get("fallback_source") or ""
+    if fallback_source in _POOL_FALLBACK_SOURCES:
         try:
             record_low_confidence(
                 session,
                 conversation_id,
                 question,
-                gate_reason,
-                source="confidence_gate",
+                _pool_reason(state_values, fallback_source),
+                source=fallback_source,
+                retrieved_chunks=list(
+                    state_values.get("retrieved_snapshot") or []
+                )
+                or None,
             )
             session.commit()
         except Exception:  # noqa: BLE001 - a pool write must not break chat
@@ -318,10 +377,10 @@ def stream_chat_agent(
         return
 
     cid = conversation.id
-    config = _thread_config(cid)
+    config = _thread_config(cid, user_id=user_id, settings=settings)
 
     try:
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - pending check failure becomes one frame
         logger.exception("ch07 chat pending check failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})
@@ -355,14 +414,20 @@ def stream_chat_agent(
         current_msg_id=user_message.id,
     )
     inputs = _reset_inputs(
-        prompt_message, user_message.id, cid, user_id, settings, plan
+        prompt_message,
+        user_message.id,
+        cid,
+        user_id,
+        settings,
+        plan,
+        raw_message=message,
     )
 
     yield _conversation_frame(cid)
 
     try:
         yield from _iter_forwarded_frames(graph, inputs, config)
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - stream errors become one SSE frame
         logger.exception("ch07 chat graph failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})
@@ -428,8 +493,8 @@ def resume_chat_agent(
         return
 
     cid = conversation.id
-    config = _thread_config(cid)
-    snapshot = graph.get_state(config)
+    config = _thread_config(cid, user_id=user_id, settings=settings)
+    snapshot = _state_graph(graph).get_state(config)
     pending = _interrupt_payload(snapshot)
     if pending is None:
         raise NoPendingInterrupt(f"conversation {cid} has no pending interrupt")
@@ -454,7 +519,7 @@ def resume_chat_agent(
         yield from _iter_forwarded_frames(
             graph, Command(resume=resume_value), config
         )
-        snapshot = graph.get_state(config)
+        snapshot = _state_graph(graph).get_state(config)
     except Exception:  # noqa: BLE001 - stream errors become one SSE frame
         logger.exception("ch07 resume graph failed conversation_id=%s", cid)
         yield _dumps({"error": ERROR_TEXT})

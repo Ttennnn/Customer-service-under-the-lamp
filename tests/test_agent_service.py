@@ -9,6 +9,7 @@ from langgraph.types import Command
 
 from app.agent.service import (
     NoPendingInterrupt,
+    _thread_config,
     has_pending_interrupt,
     resume_chat_agent,
     stream_chat_agent,
@@ -102,6 +103,11 @@ def test_service_resets_transient_state(session):
     assert inputs["gate_passed"] is False
     assert inputs["gate_reason"] == ""
     assert inputs["rerank_failed"] is False
+    assert inputs["evidence_confidence"] is None
+    assert inputs["evidence_signals"] == {}
+    assert inputs["fallback_source"] == ""
+    assert inputs["fallback_reason"] == ""
+    assert inputs["retrieved_snapshot"] == []
     assert inputs["resolved_query"] == ""
     assert inputs["intent_confidence"] is None
     assert inputs["session_id"] == "u1"
@@ -197,6 +203,7 @@ def test_service_records_low_confidence_for_gate_gap(session):
             "route": "knowledge",
             "gate_passed": False,
             "gate_reason": "below_threshold",
+            "fallback_source": "retrieval_low_conf",
             "answer": "抱歉,知识库暂未收录足够的信息。",
         },
     )
@@ -204,10 +211,71 @@ def test_service_records_low_confidence_for_gate_gap(session):
     rows = session.query(LowConfidenceQuestion).all()
     assert len(rows) == 1
     row = rows[0]
-    assert row.source == "confidence_gate"
+    assert row.source == "retrieval_low_conf"
     assert row.conversation_id == cid
     assert row.raw_question == "你好"
     assert row.reason == "below_threshold"
+
+
+def test_gate_gap_records_retrieval_low_conf_with_snapshot(session):
+    _run(
+        session,
+        final={
+            "route": "knowledge",
+            "gate_passed": False,
+            "gate_reason": "low_confidence",
+            "fallback_source": "retrieval_low_conf",
+            "evidence_confidence": 0.21,
+            "retrieved_snapshot": [
+                {
+                    "question": "q",
+                    "answer": "a",
+                    "rerank_score": 0.2,
+                    "section_path": "s",
+                    "is_key_clause": False,
+                }
+            ],
+            "answer": "兜底",
+        },
+    )
+
+    rows = session.query(LowConfidenceQuestion).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.source == "retrieval_low_conf"
+    assert row.retrieved_chunks[0]["rerank_score"] == 0.2
+    assert "evidence_confidence" in row.reason
+
+
+def test_selfcheck_gap_records_self_check(session):
+    _run(
+        session,
+        final={
+            "route": "knowledge",
+            "gate_passed": False,
+            "fallback_source": "self_check",
+            "fallback_reason": "证据只沾边",
+            "answer": "兜底",
+        },
+    )
+
+    row = session.query(LowConfidenceQuestion).one()
+    assert row.source == "self_check"
+    assert row.reason == "证据只沾边"
+
+
+@pytest.mark.parametrize("source", ["", "infra_error", "rerank_failed"])
+def test_infra_does_not_pool(session, source):
+    _run(
+        session,
+        final={
+            "gate_passed": False,
+            "fallback_source": source,
+            "answer": "兜底",
+        },
+    )
+
+    assert session.query(LowConfidenceQuestion).count() == 0
 
 
 @pytest.mark.parametrize("gate_reason", ["infra_error", "rerank_failed"])
@@ -389,3 +457,189 @@ def test_service_graph_error_yields_error_frame(session):
     assert len(events) == 2
     assert json.loads(events[-1]) == {"error": "客服服务暂时不可用,请稍后重试"}
     assert session.query(Message).filter(Message.role == "assistant").count() == 0
+
+
+def _tracing_settings():
+    return Settings(
+        _env_file=None,
+        openai_api_key="test",
+        langfuse_public_key="pk-lf-test",
+        langfuse_secret_key="sk-lf-test",
+        langfuse_base_url="http://localhost:3000",
+    )
+
+
+def test_thread_config_keeps_legacy_shape_without_user_or_settings():
+    assert _thread_config(7) == {"configurable": {"thread_id": "conv:7"}}
+
+
+def test_thread_config_adds_langfuse_metadata_when_tracing_enabled():
+    config = _thread_config(1, user_id="u1", settings=_tracing_settings())
+
+    assert config == {
+        "configurable": {"thread_id": "conv:1"},
+        "metadata": {
+            "langfuse_session_id": "conv:1",
+            "langfuse_user_id": "u1",
+        },
+    }
+    # The callback handler is attached at compile time, not per call.
+    assert "callbacks" not in config
+
+
+def test_thread_config_omits_metadata_when_tracing_disabled():
+    config = _thread_config(1, user_id="u1", settings=_settings())
+
+    assert config == {"configurable": {"thread_id": "conv:1"}}
+    assert "metadata" not in config
+    assert "callbacks" not in config
+
+
+def test_thread_config_omits_metadata_without_user_id():
+    config = _thread_config(1, settings=_tracing_settings())
+
+    assert "metadata" not in config
+
+
+def test_reset_inputs_keeps_raw_untruncated_question(session):
+    settings = Settings(
+        _env_file=None, openai_api_key="test", max_user_input_tokens=5
+    )
+    long_question = "退款到底多久才能到账"
+    graph = FakeGraph(frames=[], final={"answer": "答"})
+
+    list(
+        stream_chat_agent(graph, session, "u1", long_question, settings=settings)
+    )
+
+    inputs = graph.inputs[-1]
+    assert inputs["user_message"] == long_question[:5]
+    assert inputs["raw_user_message"] == long_question
+
+
+def test_stream_chat_passes_langfuse_metadata_to_graph(session):
+    graph = FakeGraph(frames=[], final={"answer": "答"})
+
+    list(
+        stream_chat_agent(
+            graph,
+            session,
+            "u1",
+            "你好",
+            settings=_tracing_settings(),
+        )
+    )
+
+    assert graph.config["metadata"] == {
+        "langfuse_session_id": "conv:1",
+        "langfuse_user_id": "u1",
+    }
+
+
+def test_two_graph_runs_keep_distinct_langfuse_session_metadata(session):
+    """The shared compile-time handler must still receive per-run identity.
+
+    Guards the path that lets two concurrent conversations produce separate
+    Langfuse sessions: the handler is shared, but each ``graph.stream`` config
+    carries its own ``langfuse_session_id`` / ``langfuse_user_id``.
+    """
+    settings = _tracing_settings()
+    cid_a = get_or_create_conversation(session, "u1").id
+    cid_b = get_or_create_conversation(session, "u2").id
+    graph_a = FakeGraph(frames=[], final={"answer": "A"})
+    graph_b = FakeGraph(frames=[], final={"answer": "B"})
+
+    list(
+        stream_chat_agent(
+            graph_a,
+            session,
+            "u1",
+            "问 A",
+            settings=settings,
+            conversation_id=cid_a,
+        )
+    )
+    list(
+        stream_chat_agent(
+            graph_b,
+            session,
+            "u2",
+            "问 B",
+            settings=settings,
+            conversation_id=cid_b,
+        )
+    )
+
+    meta_a = graph_a.stream_calls and graph_a.config["metadata"]
+    meta_b = graph_b.stream_calls and graph_b.config["metadata"]
+    assert meta_a == {
+        "langfuse_session_id": f"conv:{cid_a}",
+        "langfuse_user_id": "u1",
+    }
+    assert meta_b == {
+        "langfuse_session_id": f"conv:{cid_b}",
+        "langfuse_user_id": "u2",
+    }
+    assert meta_a["langfuse_session_id"] != meta_b["langfuse_session_id"]
+
+
+class _BoundGraph:
+    """Mimics ``RunnableBinding`` from ``compile().with_config(...)``.
+
+    It only forwards ``stream``; ``get_state`` lives on ``bound`` so a missed
+    ``_state_graph`` unwrap surfaces immediately.
+    """
+
+    def __init__(self, bound):
+        self.bound = bound
+
+    def stream(self, *args, **kwargs):
+        return self.bound.stream(*args, **kwargs)
+
+
+def test_service_reads_state_through_bound_graph(session):
+    inner = FakeGraph(frames=[], final={"answer": "答"})
+    graph = _BoundGraph(inner)
+
+    events = list(
+        stream_chat_agent(graph, session, "u1", "你好", settings=_settings())
+    )
+
+    assert not any('"error"' in event for event in events)
+    assert inner.stream_calls
+    answers = [
+        row.content
+        for row in session.query(Message).filter(Message.role == "assistant")
+    ]
+    assert answers == ["答"]
+
+
+def test_has_pending_interrupt_accepts_bound_graph(session):
+    inner = FakeGraph(frames=[], final={}, snapshots=[_pending_snapshot()])
+    graph = _BoundGraph(inner)
+
+    assert has_pending_interrupt(graph, 7) is True
+    assert inner.config == {"configurable": {"thread_id": "conv:7"}}
+
+
+def test_resume_chat_reads_state_through_bound_graph(session):
+    inner = FakeGraph(
+        frames=[],
+        final={"answer": "已处理"},
+        snapshots=[_pending_snapshot()],
+    )
+    graph = _BoundGraph(inner)
+
+    events = list(
+        resume_chat_agent(
+            graph,
+            session,
+            "u1",
+            "1001",
+            settings=_settings(),
+            conversation_id=None,
+        )
+    )
+
+    assert not any('"error"' in event for event in events)
+    assert inner.stream_calls

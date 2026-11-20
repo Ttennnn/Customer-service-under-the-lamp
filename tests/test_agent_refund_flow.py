@@ -83,6 +83,16 @@ def _build(llm=None, *, intent="退款退货", resolved=None, queries=None, **kw
         IntentResult(intent=intent, confidence=0.9),
         queries=queries,
     )
+    # The evidence score is the sole formal gate; pin an explicit threshold so
+    # low-score tests do not depend on the old confidence_min_score floor.
+    kwargs.setdefault(
+        "settings",
+        Settings(
+            _env_file=None,
+            openai_api_key="test",
+            evidence_confidence_threshold=0.5,
+        ),
+    )
     return build_graph(
         llm if llm is not None else ExplodingLLM(),
         intent_llm,
@@ -458,6 +468,7 @@ def test_retrieve_policy_low_score_fails_gate(monkeypatch):
 
     assert result["gate_passed"] is False
     assert result["gate_reason"] == "below_threshold"
+    assert result["fallback_source"] == "retrieval_low_conf"
     assert result["answer"] == KNOWLEDGE_GAP_TEXT
     assert result["step_count"] == 0
 
@@ -526,6 +537,7 @@ def test_refund_gate_failure_skips_agent_and_form(monkeypatch):
 
     assert result["gate_passed"] is False
     assert result["gate_reason"] == "below_threshold"
+    assert result["fallback_source"] == "retrieval_low_conf"
     assert result["answer"] == KNOWLEDGE_GAP_TEXT
     assert result["step_count"] == 0
     assert not any(

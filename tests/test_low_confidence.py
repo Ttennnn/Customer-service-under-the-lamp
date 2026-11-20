@@ -24,3 +24,26 @@ def test_record_low_confidence_keeps_conversation_id_and_custom_source(session):
     assert row.conversation_id == 42
     assert row.source == "retrieval_low_conf"
     assert row.reason is None
+
+
+def test_record_low_confidence_persists_retrieved_chunks(session):
+    chunks = [
+        {
+            "question": "q",
+            "answer": "a",
+            "rerank_score": 0.2,
+            "section_path": "s",
+            "is_key_clause": False,
+        }
+    ]
+    row = record_low_confidence(
+        session,
+        7,
+        "支持以旧换新吗",
+        "evidence_confidence=0.2",
+        source="retrieval_low_conf",
+        retrieved_chunks=chunks,
+    )
+    session.commit()
+
+    assert row.retrieved_chunks == chunks

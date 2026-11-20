@@ -58,6 +58,7 @@ class CitationCollector:
                         "category": chunk.category,
                         "content_type": chunk.content_type,
                         "score": chunk.score,
+                        "is_key_clause": chunk.is_key_clause,
                     }
                 )
             numbers.append(number)

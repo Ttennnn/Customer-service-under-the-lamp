@@ -371,7 +371,9 @@ def test_ch06_lazy_graph_builds_once_and_closes(monkeypatch):
 
     monkeypatch.setattr(ch06_api, "build_llm", fake_build_llm)
 
-    def fake_build_graph(llm, intent_llm, *, checkpointer=None, settings=None):
+    def fake_build_graph(
+        llm, intent_llm, *, checkpointer=None, settings=None, self_check_llm=None
+    ):
         built.append(checkpointer)
         return object()
 
@@ -435,3 +437,56 @@ def test_ch06_app_does_not_build_graph_at_startup(client):
     # startup ran; neither the graph nor the checkpointer may exist yet.
     assert app.state.ch06_graph is None
     assert app.state.ch06_checkpoint_handle is None
+
+
+def test_ch06_lazy_graph_attaches_tracing_when_enabled(monkeypatch):
+    class Handle:
+        saver = object()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        ch06_api, "open_sqlite_checkpointer", lambda path: Handle()
+    )
+    monkeypatch.setattr(
+        ch06_api,
+        "build_llm",
+        lambda settings, temperature=0.7, model=None: object(),
+    )
+    built = object()
+    monkeypatch.setattr(ch06_api, "build_graph", lambda *a, **k: built)
+
+    bound = object()
+    seen = []
+
+    def fake_attach(graph, settings):
+        seen.append((graph, settings))
+        return bound
+
+    monkeypatch.setattr(ch06_api, "attach_tracing", fake_attach)
+    request = _fake_request_state()
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="test",
+        langfuse_public_key="pk-lf-test",
+        langfuse_secret_key="sk-lf-test",
+    )
+
+    result = ch06_api.get_ch06_graph_dep(request, settings)
+
+    assert result is bound
+    assert request.app.state.ch06_graph is bound
+    assert seen and seen[0][0] is built and seen[0][1] is settings
+
+    ch06_api.close_ch06_graph(request.app)
+
+
+def test_lifespan_flushes_tracing_on_shutdown(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.main.flush_tracing", lambda: calls.append(True))
+
+    with TestClient(app) as c:
+        assert c.get("/ch06").status_code == 200
+
+    assert calls == [True]

@@ -7,6 +7,7 @@ from app.rag.vectorize import (
     vectorization_text,
     vectorize_all,
     vectorize_pending,
+    vectorize_rows,
 )
 
 
@@ -55,6 +56,28 @@ def test_vectorize_pending_sets_done_and_vector_id(session):
     assert isinstance(s.items[0], VectorItem)
     assert s.items[0].vector_id == vector_id_for(c.id)
     assert s.items[0].chunk_id == c.id and len(s.items[0].vector) == 1024
+
+
+def test_vectorize_rows_only_publishes_given_rows(session):
+    selected = _chunk(session, q="选中", a="A")
+    _chunk(session, q="无关", a="B")  # also pending, must stay untouched
+
+    e = FakeEmbedder()
+    s = FakeStore()
+    report = vectorize_rows(session, [selected], e, s)
+
+    session.expire_all()
+    assert report.processed == 1
+    assert session.get(KnowledgeChunk, selected.id).vectorize_status == "done"
+    other = session.query(KnowledgeChunk).filter_by(questions="无关").one()
+    assert other.vectorize_status == "pending"
+    assert [item.chunk_id for item in s.items] == [selected.id]
+    assert e.calls == [["售后\n选中\nA"]]
+
+
+def test_vectorize_rows_validates_batch_size(session):
+    with pytest.raises(ValueError, match="batch_size"):
+        vectorize_rows(session, [], FakeEmbedder(), FakeStore(), batch_size=0)
 
 
 def test_second_run_does_nothing(session):

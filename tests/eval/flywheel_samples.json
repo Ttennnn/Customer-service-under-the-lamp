@@ -1,0 +1,125 @@
+{
+  "samples": [
+    {
+      "id": "F01",
+      "raw_question": "退钱大概啥时候能到账啊",
+      "candidates": [
+        {"id": 11, "normalized_question": "退款多久到账", "occurrence_count": 5, "review_status": "待审"},
+        {"id": 12, "normalized_question": "发票什么时候开具", "occurrence_count": 2, "review_status": "通过"},
+        {"id": 13, "normalized_question": "默认发什么快递", "occurrence_count": 1, "review_status": "驳回"}
+      ],
+      "expect_matched_id": 11,
+      "expect_normalized_any": ["退款", "到账"]
+    },
+    {
+      "id": "F02",
+      "raw_question": "买的东西不想要了，怎么把钱退回来",
+      "candidates": [
+        {"id": 21, "normalized_question": "退款申请怎么操作", "occurrence_count": 2, "review_status": "驳回"},
+        {"id": 22, "normalized_question": "退货需要什么材料", "occurrence_count": 4, "review_status": "待审"}
+      ],
+      "expect_matched_id": 21,
+      "expect_normalized_any": ["退款", "退钱", "申请"]
+    },
+    {
+      "id": "F03",
+      "raw_question": "这个耳机能试听吗",
+      "candidates": [
+        {"id": 31, "normalized_question": "商品支持试听吗", "occurrence_count": 3, "review_status": "通过"},
+        {"id": 32, "normalized_question": "耳机怎么清洁保养", "occurrence_count": 1, "review_status": "待审"}
+      ],
+      "expect_matched_id": 31,
+      "expect_normalized_any": ["试听"]
+    },
+    {
+      "id": "F04",
+      "raw_question": "发票啥时候能开给我",
+      "candidates": [
+        {"id": 41, "normalized_question": "发票什么时候开具", "occurrence_count": 3, "review_status": "待审"},
+        {"id": 42, "normalized_question": "退款多久到账", "occurrence_count": 6, "review_status": "待审"}
+      ],
+      "expect_matched_id": 41,
+      "expect_normalized_any": ["发票", "开具"]
+    },
+    {
+      "id": "F05",
+      "raw_question": "订单 889900 能改收货地址吗",
+      "candidates": [
+        {"id": 51, "normalized_question": "订单可以修改收货地址吗", "occurrence_count": 1, "review_status": "待审"},
+        {"id": 52, "normalized_question": "订单 889900 什么时候发货", "occurrence_count": 2, "review_status": "待审"}
+      ],
+      "expect_matched_id": 51,
+      "expect_normalized_any": ["889900", "收货地址"]
+    },
+    {
+      "id": "F06",
+      "raw_question": "你们发货用哪家快递",
+      "candidates": [
+        {"id": 61, "normalized_question": "默认发什么快递", "occurrence_count": 7, "review_status": "通过"},
+        {"id": 62, "normalized_question": "发货后多久能到", "occurrence_count": 2, "review_status": "待审"}
+      ],
+      "expect_matched_id": 61,
+      "expect_normalized_any": ["快递"]
+    },
+    {
+      "id": "F07",
+      "raw_question": "支持以旧换新吗",
+      "candidates": [
+        {"id": 71, "normalized_question": "退款多久到账", "occurrence_count": 4, "review_status": "待审"},
+        {"id": 72, "normalized_question": "发票什么时候开具", "occurrence_count": 1, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["以旧换新"]
+    },
+    {
+      "id": "F08",
+      "raw_question": "会员积分怎么兑换",
+      "candidates": [
+        {"id": 81, "normalized_question": "默认发什么快递", "occurrence_count": 3, "review_status": "通过"},
+        {"id": 82, "normalized_question": "退款申请怎么操作", "occurrence_count": 2, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["积分"]
+    },
+    {
+      "id": "F09",
+      "raw_question": "这个型号 X200 的电池容量多大",
+      "candidates": [
+        {"id": 91, "normalized_question": "商品参数在哪里看", "occurrence_count": 2, "review_status": "待审"},
+        {"id": 92, "normalized_question": "X200 支持快充吗", "occurrence_count": 1, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["电池", "X200"]
+    },
+    {
+      "id": "F10",
+      "raw_question": "春节期间还发货吗",
+      "candidates": [
+        {"id": 101, "normalized_question": "默认发什么快递", "occurrence_count": 5, "review_status": "通过"},
+        {"id": 102, "normalized_question": "发货后多久能到", "occurrence_count": 2, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["春节"]
+    },
+    {
+      "id": "F11",
+      "raw_question": "耳机左耳没声音了怎么办",
+      "candidates": [
+        {"id": 111, "normalized_question": "商品支持试听吗", "occurrence_count": 1, "review_status": "待审"},
+        {"id": 112, "normalized_question": "耳机怎么清洁保养", "occurrence_count": 2, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["左耳", "没声音", "无声"]
+    },
+    {
+      "id": "F12",
+      "raw_question": "能用花呗分期付款吗",
+      "candidates": [
+        {"id": 121, "normalized_question": "退款申请怎么操作", "occurrence_count": 1, "review_status": "待审"},
+        {"id": 122, "normalized_question": "发票什么时候开具", "occurrence_count": 1, "review_status": "待审"}
+      ],
+      "expect_matched_id": null,
+      "expect_normalized_any": ["花呗", "分期"]
+    }
+  ]
+}

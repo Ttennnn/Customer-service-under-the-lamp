@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>待审队列 · 灯下后台</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1d2430;
+    --muted: #5c6675;
+    --border: #d9dee6;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4e0;
+    --warn-text: #8a4b00;
+    --error: #b42318;
+    --ok: #067647;
+    --chip: #eef2f8;
+    --shadow: 0 18px 50px rgba(15, 23, 42, .18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f;
+      --panel: #1d232d;
+      --text: #e6ebf2;
+      --muted: #9aa6b6;
+      --border: #333d4c;
+      --accent: #6d9bff;
+      --accent-text: #0b1220;
+      --warn-bg: #3a2c12;
+      --warn-text: #ffd28a;
+      --error: #ff8a80;
+      --ok: #6ee7b7;
+      --chip: #252d39;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .55);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .page { max-width: 1060px; margin: 0 auto; }
+  .page-header {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  h2 { margin: 0 0 10px; font-size: 18px; }
+  .subtitle { margin: 0; color: var(--muted); }
+  .linkbtn, button {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 9px;
+    padding: 7px 13px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  button:hover:not(:disabled), .linkbtn:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { color: var(--accent-text); filter: brightness(1.05); }
+  button.danger { color: var(--error); border-color: var(--error); }
+  .gates {
+    margin: 0 0 16px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border: 1px solid currentColor;
+    font-size: 13.5px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 10px 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .toolbar label { display: flex; gap: 7px; align-items: center; color: var(--muted); }
+  select {
+    padding: 6px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+  }
+  .status { color: var(--muted); font-size: 12.5px; min-height: 18px; }
+  .status.error { color: var(--error); }
+  .status.ok { color: var(--ok); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  tbody tr:hover { background: var(--chip); }
+  .q-text { font-weight: 600; overflow-wrap: anywhere; }
+  .q-meta { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin: 2px 0 0; }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .badge.pending { color: var(--warn-text); border-color: var(--warn-text); background: var(--warn-bg); }
+  .badge.approved { color: var(--ok); border-color: var(--ok); }
+  .badge.rejected { color: var(--error); border-color: var(--error); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row-actions button { padding: 4px 9px; font-size: 12px; }
+  .empty { margin: 16px 0 4px; color: var(--muted); text-align: center; }
+  .detail-cell { background: var(--bg); }
+  .detail-box { display: grid; gap: 12px; padding: 4px 2px 8px; }
+  .detail-title { margin: 0; font-size: 13px; color: var(--muted); }
+  .question-card {
+    display: grid;
+    gap: 6px;
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  .raw-question { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .chunk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+  .chunk-card {
+    display: grid;
+    gap: 4px;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--chip);
+    font-size: 12.5px;
+  }
+  .chunk-head { display: flex; gap: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .chunk-path { color: var(--accent); font-size: 11.5px; overflow-wrap: anywhere; }
+  .chunk-score { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11.5px; }
+  .chunk-answer { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+  .chip {
+    display: inline-block;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    font-size: 10.5px;
+  }
+  dialog {
+    width: min(640px, calc(100vw - 32px));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: rgba(8, 12, 20, .55); }
+  .dialog-target { margin: 0 0 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .dialog-field { display: grid; gap: 6px; margin-bottom: 10px; }
+  .dialog-field span { font-weight: 600; font-size: 13px; }
+  textarea {
+    width: 100%;
+    min-height: 170px;
+    resize: vertical;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  @media (max-width: 720px) {
+    th:nth-child(4), td:nth-child(4) { display: none; }
+    .page-header { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>待审队列</h1>
+      <p class="subtitle">用户反馈与低置信问题会先归一化合并，再按出现次数排队；默认只看待审。</p>
+    </div>
+    <a class="linkbtn" href="/admin">返回后台首页</a>
+  </header>
+
+  <p class="gates" role="note">
+    三道闸：<strong>垃圾闸</strong>（闲聊/测试/无信息量，直接驳回）→
+    <strong>时效闸</strong>（政策或价格已变更，按当前口径改答案）→
+    <strong>频次闸</strong>（出现次数越高越先审）。通过即写回知识库，下一轮检索立即可用。
+  </p>
+
+  <main class="panel">
+    <div class="toolbar">
+      <label>状态
+        <select id="status-filter">
+          <option value="待审" selected>待审</option>
+          <option value="通过">通过</option>
+          <option value="驳回">驳回</option>
+          <option value="">全部</option>
+        </select>
+      </label>
+      <button id="refresh" type="button">刷新</button>
+      <span id="list-status" class="status" role="status" aria-live="polite"></span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">归一化问题</th>
+            <th scope="col" class="num">出现次数</th>
+            <th scope="col">示例答案</th>
+            <th scope="col">状态</th>
+            <th scope="col">更新时间</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="queue-body"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="empty" hidden>当前筛选下没有待处理的问题。</p>
+  </main>
+</div>
+
+<dialog id="approve-dialog" aria-labelledby="approve-title">
+  <h2 id="approve-title">通过并写回知识库</h2>
+  <p id="approve-target" class="dialog-target"></p>
+  <label class="dialog-field">
+    <span>审核后的标准答案</span>
+    <textarea id="approve-answer" spellcheck="false"></textarea>
+  </label>
+  <p id="approve-status" class="status" role="status" aria-live="polite"></p>
+  <div class="dialog-actions">
+    <button id="approve-cancel" type="button">取消</button>
+    <button id="approve-submit" class="primary" type="button">通过并写回</button>
+  </div>
+</dialog>
+
+<script src="/static/admin.js" defer></script>
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_CLASS = { "待审": "pending", "通过": "approved", "驳回": "rejected" };
+  var ANSWER_SUMMARY_CHARS = 240;
+
+  var body = document.getElementById("queue-body");
+  var emptyHint = document.getElementById("empty");
+  var listStatus = document.getElementById("list-status");
+  var statusFilter = document.getElementById("status-filter");
+  var refreshButton = document.getElementById("refresh");
+
+  var dialog = document.getElementById("approve-dialog");
+  var dialogTarget = document.getElementById("approve-target");
+  var answerInput = document.getElementById("approve-answer");
+  var dialogStatus = document.getElementById("approve-status");
+  var approveSubmit = document.getElementById("approve-submit");
+  var approveCancel = document.getElementById("approve-cancel");
+
+  var currentItems = [];
+  var detailRows = {};
+  var detailCache = {};
+  var approvingId = null;
+  var listToken = 0;
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function setStatus(message, kind) {
+    listStatus.className = "status" + (kind ? " " + kind : "");
+    listStatus.textContent = message || "";
+  }
+
+  function setDialogStatus(message, kind) {
+    dialogStatus.className = "status" + (kind ? " " + kind : "");
+    dialogStatus.textContent = message || "";
+  }
+
+  function fmtTime(value) {
+    if (!value) return "—";
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function fmtCount(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? String(n) : "0";
+  }
+
+  function summarizeAnswer(value) {
+    var text = value ? String(value).trim() : "";
+    if (!text) return "—";
+    if (text.length > ANSWER_SUMMARY_CHARS) {
+      return text.slice(0, ANSWER_SUMMARY_CHARS) + "…";
+    }
+    return text;
+  }
+
+  function readError(response) {
+    return response.text().then(function (raw) {
+      var data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch (err) { data = null; }
+      if (data && typeof data.detail === "string") return data.detail;
+      return "HTTP " + response.status;
+    });
+  }
+
+  function badge(status) {
+    return el("span", "badge " + (STATUS_CLASS[status] || ""), status || "未知");
+  }
+
+  /* ---------- list ---------- */
+
+  function loadQueue() {
+    var token = ++listToken;
+    detailRows = {};
+    setStatus("加载中…");
+    var status = statusFilter.value;
+    // Always send the parameter: the API defaults to 待审, so omitting it
+    // would not mean "全部". An empty value is what disables the filter.
+    var url = "/api/review/queue?status=" + encodeURIComponent(status);
+    return fetch(url)
+      .then(function (response) {
+        if (!response.ok) {
+          return readError(response).then(function (detail) { throw new Error(detail); });
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (token !== listToken) return;
+        var items = (data && data.items) || [];
+        items = items.slice().sort(function (a, b) {
+          return (Number(b.occurrence_count) || 0) - (Number(a.occurrence_count) || 0) ||
+            (Number(a.id) || 0) - (Number(b.id) || 0);
+        });
+        currentItems = items;
+        renderQueue(items);
+        setStatus(items.length ? "共 " + items.length + " 条。" : "");
+      })
+      .catch(function (err) {
+        if (token !== listToken) return;
+        body.replaceChildren();
+        emptyHint.hidden = false;
+        emptyHint.textContent = "加载失败：" + (err && err.message ? err.message : String(err));
+        setStatus("加载失败。", "error");
+      });
+  }
+
+  function renderQueue(items) {
+    body.replaceChildren();
+    detailCache = {};
+    emptyHint.hidden = items.length > 0;
+    if (!items.length) {
+      emptyHint.textContent = "当前筛选下没有待处理的问题。";
+      return;
+    }
+    items.forEach(function (item) {
+      body.append(buildRow(item));
+    });
+  }
+
+  function buildRow(item) {
+    var id = Number(item.id);
+    var row = document.createElement("tr");
+    row.setAttribute("data-id", String(id));
+
+    var questionCell = document.createElement("td");
+    questionCell.append(el("div", "q-text", item.normalized_question || "（无问题）"));
+    questionCell.append(el(
+      "p", "q-meta",
+      "#" + id + " · 创建于 " + fmtTime(item.created_at)
+    ));
+
+    var countCell = el("td", "num", fmtCount(item.occurrence_count));
+
+    var answerCell = el(
+      "td", "answer-summary", summarizeAnswer(item.ai_suggested_answer)
+    );
+
+    var statusCell = document.createElement("td");
+    statusCell.append(badge(item.review_status));
+
+    var timeCell = el("td", null, fmtTime(item.updated_at || item.created_at));
+
+    var actions = el("div", "row-actions");
+    var detailButton = el("button", null, "详情");
+    detailButton.type = "button";
+    actions.append(detailButton);
+    if (item.review_status === "待审") {
+      var approveButton = el("button", null, "通过");
+      approveButton.type = "button";
+      var rejectButton = el("button", "danger", "驳回");
+      rejectButton.type = "button";
+      actions.append(approveButton, rejectButton);
+      approveButton.addEventListener("click", function () { openApprove(item); });
+      rejectButton.addEventListener("click", function () { rejectItem(item, rejectButton); });
+    }
+    var actionCell = document.createElement("td");
+    actionCell.append(actions);
+
+    row.append(
+      questionCell, countCell, answerCell, statusCell, timeCell, actionCell
+    );
+
+    var detailRow = document.createElement("tr");
+    detailRow.className = "detail-row";
+    detailRow.hidden = true;
+    var detailCell = document.createElement("td");
+    detailCell.className = "detail-cell";
+    detailCell.colSpan = 6;
+    detailRow.append(detailCell);
+
+    detailButton.addEventListener("click", function () {
+      toggleDetail(item, detailRow, detailCell, detailButton);
+    });
+
+    var fragment = document.createDocumentFragment();
+    fragment.append(row, detailRow);
+    // Stash the two-row pair so toggleDetail can find it again.
+    detailRows[id] = { row: row, detailRow: detailRow, cell: detailCell, button: detailButton };
+    return fragment;
+  }
+
+  function toggleDetail(item, detailRow, cell, button) {
+    var id = Number(item.id);
+    var opening = detailRow.hidden;
+    detailRow.hidden = !opening;
+    button.textContent = opening ? "收起" : "详情";
+    if (!opening) return;
+
+    var cached = detailCache[id];
+    if (cached) {
+      renderDetail(cell, cached);
+      return;
+    }
+    cell.replaceChildren(el("p", "q-meta", "详情加载中…"));
+    fetch("/api/review/" + encodeURIComponent(id))
+      .then(function (response) {
+        if (!response.ok) {
+          return readError(response).then(function (detail) { throw new Error(detail); });
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        detailCache[id] = data;
+        renderDetail(cell, data);
+      })
+      .catch(function (err) {
+        cell.replaceChildren(el(
+          "p", "q-meta", "详情加载失败：" + (err && err.message ? err.message : String(err))
+        ));
+      });
+  }
+
+  function renderDetail(cell, data) {
+    var box = el("div", "detail-box");
+    box.append(el("h3", "detail-title", "用户原话与检索快照"));
+    var questions = data && Array.isArray(data.questions) ? data.questions : [];
+    if (!questions.length) {
+      box.append(el("p", "q-meta", "没有关联的用户原话。"));
+      cell.replaceChildren(box);
+      return;
+    }
+    questions.forEach(function (question) {
+      box.append(buildQuestionCard(question));
+    });
+    cell.replaceChildren(box);
+  }
+
+  function buildQuestionCard(question) {
+    var card = el("div", "question-card");
+    card.append(el("p", "raw-question", question.raw_question || "（空问题）"));
+
+    var meta = [];
+    if (question.source) meta.push("来源：" + question.source);
+    if (question.created_at) meta.push("时间：" + fmtTime(question.created_at));
+    if (question.reason) meta.push("原因：" + question.reason);
+    card.append(el("p", "q-meta", meta.join(" · ") || "无来源信息"));
+
+    var chunks = Array.isArray(question.retrieved_chunks) ? question.retrieved_chunks : [];
+    if (!chunks.length) {
+      card.append(el("p", "q-meta", "该问题没有检索快照（反馈时图或追踪不可用）。"));
+      return card;
+    }
+    var grid = el("div", "chunk-grid");
+    chunks.forEach(function (chunk) {
+      grid.append(buildChunkCard(chunk));
+    });
+    card.append(grid);
+    return card;
+  }
+
+  function buildChunkCard(chunk) {
+    chunk = chunk && typeof chunk === "object" ? chunk : {};
+    var card = el("div", "chunk-card");
+
+    var head = el("div", "chunk-head");
+    head.append(el("span", "chunk-path", chunk.section_path || "（无章节）"));
+    // New snapshots use rerank_score; legacy rows may still carry score.
+    var score = chunk.rerank_score;
+    if (score === undefined || score === null) score = chunk.score;
+    var scoreText = Number(score);
+    head.append(el(
+      "span", "chunk-score",
+      Number.isFinite(scoreText) ? "score " + scoreText.toFixed(3) : "score —"
+    ));
+    card.append(head);
+
+    if (chunk.is_key_clause) card.append(el("span", "chip", "关键条款"));
+    if (chunk.question) card.append(el("p", "q-meta", "片段问题：" + chunk.question));
+
+    var answer = chunk.answer ? String(chunk.answer) : "";
+    if (answer.length > ANSWER_SUMMARY_CHARS) {
+      answer = answer.slice(0, ANSWER_SUMMARY_CHARS) + "…";
+    }
+    card.append(el("p", "chunk-answer", answer || "（无答案摘要）"));
+    return card;
+  }
+
+  /* ---------- approve / reject ---------- */
+
+  function openApprove(item) {
+    approvingId = Number(item.id);
+    dialogTarget.textContent = "问题：" + (item.normalized_question || "（无问题）");
+    answerInput.value = item.ai_suggested_answer || "";
+    setDialogStatus("");
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    answerInput.focus();
+    answerInput.setSelectionRange(answerInput.value.length, answerInput.value.length);
+  }
+
+  function closeApprove() {
+    if (dialog.open && typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    approvingId = null;
+  }
+
+  function submitApprove() {
+    if (approvingId === null) return;
+    var answer = answerInput.value.trim();
+    if (!answer) {
+      setDialogStatus("答案不能为空。", "error");
+      return;
+    }
+    approveSubmit.disabled = true;
+    setDialogStatus("写回知识库中…");
+    fetch("/api/review/" + encodeURIComponent(approvingId) + "/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved_answer: answer })
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          return readError(response).then(function (detail) { throw new Error(detail); });
+        }
+        return response.json();
+      })
+      .then(function () {
+        closeApprove();
+        setStatus("已通过并写回知识库。", "ok");
+        loadQueue();
+      })
+      .catch(function (err) {
+        setDialogStatus("通过失败：" + (err && err.message ? err.message : String(err)), "error");
+      })
+      .finally(function () {
+        approveSubmit.disabled = false;
+      });
+  }
+
+  function rejectItem(item, button) {
+    var id = Number(item.id);
+    if (!window.confirm("驳回「" + (item.normalized_question || "该问题") + "」后不会写回知识库，确定？")) {
+      return;
+    }
+    button.disabled = true;
+    fetch("/api/review/" + encodeURIComponent(id) + "/reject", { method: "POST" })
+      .then(function (response) {
+        if (!response.ok) {
+          return readError(response).then(function (detail) { throw new Error(detail); });
+        }
+        return response.json();
+      })
+      .then(function () {
+        setStatus("已驳回 #" + id + "。", "ok");
+        loadQueue();
+      })
+      .catch(function (err) {
+        setStatus("驳回失败：" + (err && err.message ? err.message : String(err)), "error");
+      })
+      .finally(function () {
+        button.disabled = false;
+      });
+  }
+
+  approveSubmit.addEventListener("click", submitApprove);
+  approveCancel.addEventListener("click", closeApprove);
+  statusFilter.addEventListener("change", loadQueue);
+  refreshButton.addEventListener("click", loadQueue);
+
+  loadQueue();
+})();
+</script>
+</body>
+</html>

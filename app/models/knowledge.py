@@ -100,6 +100,14 @@ class LowConfidenceQuestion(Base):
         index=True,
     )
     reason: Mapped[Optional[str]] = mapped_column(Text)
+    # ch09: retrieval snapshot at pool time (Top N chunks) and the review_queue
+    # gap this raw question was merged into during dedup.
+    retrieved_chunks: Mapped[Optional[list]] = mapped_column(JSON)
+    matched_review_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("review_queue.id", ondelete="SET NULL"),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), index=True
     )

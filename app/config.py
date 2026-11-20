@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     agent_max_steps: int = 6
     agent_token_budget: int = 12000
     agent_tool_result_max_chars: int = 2000
+    # DEPRECATED (ch09): kept only for the legacy ch05 retrieve/refund path.
+    # The ch09 evidence-confidence gate must not read this value.
     confidence_min_score: float = 0.1
     langgraph_checkpoint_db: str = ".data/ch05-checkpoints.sqlite"
 
@@ -85,6 +87,23 @@ class Settings(BaseSettings):
     tool_audit_result_max_chars: int = 500
     demo_ticket_delay_seconds: float = 0
 
+    # --- ch09 observability & data flywheel ---
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "http://localhost:3000"
+    langfuse_environment: str = "development"
+    langfuse_trace_name: str = "cs-chat"
+    stream_usage: bool = True
+    evidence_confidence_threshold: float = 0.15
+    evidence_valid_floor: float = 0.1
+    evidence_valid_cap: int = 3
+    evidence_margin_scale: float = 0.2
+    low_confidence_snapshot_top_k: int = 3
+    flywheel_candidate_limit: int = 200
+    flywheel_llm_max_tokens: int = 800
+    flywheel_timeout_s: float = 20
+    ch09_report_dir: str = "data/ch09/reports"
+
     @property
     def effective_max_agent_steps(self) -> int:
         return self.max_agent_steps if self.max_agent_steps is not None else self.agent_max_steps
@@ -114,14 +133,22 @@ def build_llm(
     temperature: float = 0.7,
     model: str | None = None,
     max_tokens: int | None = None,
+    request_timeout: float | None = None,
 ) -> ChatOpenAI:
+    kwargs = {}
+    if request_timeout is not None:
+        # langchain-openai stores this as ``request_timeout``; the alias keeps
+        # the per-request timeout on the model itself rather than per call.
+        kwargs["timeout"] = request_timeout
     return ChatOpenAI(
         model=model or settings.model_name,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         streaming=True,
+        stream_usage=settings.stream_usage,
         temperature=temperature,
         max_tokens=max_tokens or settings.max_output_tokens,
+        **kwargs,
     )
 
 

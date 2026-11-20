@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>后台首页 · 灯下</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1d2430;
+    --muted: #5c6675;
+    --border: #d9dee6;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4e0;
+    --warn-text: #8a4b00;
+    --error: #b42318;
+    --ok: #067647;
+    --chip: #eef2f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f;
+      --panel: #1d232d;
+      --text: #e6ebf2;
+      --muted: #9aa6b6;
+      --border: #333d4c;
+      --accent: #6d9bff;
+      --accent-text: #0b1220;
+      --warn-bg: #3a2c12;
+      --warn-text: #ffd28a;
+      --error: #ff8a80;
+      --ok: #6ee7b7;
+      --chip: #252d39;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .page { max-width: 1060px; margin: 0 auto; }
+  .page-header {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  h2 { margin: 0 0 10px; font-size: 16px; }
+  .subtitle { margin: 0; color: var(--muted); }
+  .linkbtn, button {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 9px;
+    padding: 7px 13px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  button:hover:not(:disabled), .linkbtn:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: grid; gap: 16px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .status { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; min-height: 18px; }
+  .status.error { color: var(--error); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .card {
+    padding: 13px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--chip);
+  }
+  .card-label { color: var(--muted); font-size: 12px; }
+  .card-value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .card.pending .card-value { color: var(--warn-text); }
+  .card.approved .card-value { color: var(--ok); }
+  .card.rejected .card-value { color: var(--error); }
+  .conclusion {
+    margin: 14px 0 0;
+    padding: 11px 14px;
+    border-radius: 10px;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border: 1px solid currentColor;
+    font-size: 14px;
+  }
+  .highest {
+    margin: 14px 0 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .highest-title { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
+  .highest-question { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .highest-meta { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+  .entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .entry {
+    display: block;
+    padding: 13px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: inherit;
+    text-decoration: none;
+    transition: border-color .15s, background .15s;
+  }
+  .entry:hover { border-color: var(--accent); background: var(--chip); }
+  .entry-title { font-weight: 650; }
+  .entry-desc { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>后台首页</h1>
+      <p class="subtitle">一眼看清待审积压、最高频知识缺口，再决定今天先处理哪一块。</p>
+    </div>
+    <button id="refresh" type="button">刷新摘要</button>
+  </header>
+
+  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+
+  <main>
+    <section class="panel" aria-labelledby="counts-title">
+      <h2 id="counts-title">审核队列</h2>
+      <div class="cards">
+        <div class="card pending">
+          <div class="card-label">待审</div>
+          <div class="card-value" id="count-pending">—</div>
+        </div>
+        <div class="card approved">
+          <div class="card-label">通过</div>
+          <div class="card-value" id="count-approved">—</div>
+        </div>
+        <div class="card rejected">
+          <div class="card-label">驳回</div>
+          <div class="card-value" id="count-rejected">—</div>
+        </div>
+      </div>
+      <p id="conclusion" class="conclusion">—</p>
+      <div class="highest">
+        <p class="highest-title">最高频知识缺口</p>
+        <p id="highest-question" class="highest-question">—</p>
+        <p id="highest-meta" class="highest-meta"></p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="entries-title">
+      <h2 id="entries-title">去哪处理</h2>
+      <div class="entries">
+        <a class="entry" href="/review">
+          <div class="entry-title">待审队列 →</div>
+          <p class="entry-desc">过垃圾/时效/频次三道闸，通过后写回知识库。</p>
+        </a>
+        <a class="entry" href="/observability">
+          <div class="entry-title">观测总览 →</div>
+          <p class="entry-desc">成本账、评估趋势与置信度校准；可重跑对应作业。</p>
+        </a>
+        <a class="entry" href="/kb">
+          <div class="entry-title">知识录入 →</div>
+          <p class="entry-desc">上传 Markdown 并重建文档域知识库。</p>
+        </a>
+        <a class="entry" href="/rag-eval">
+          <div class="entry-title">RAG 评估 →</div>
+          <p class="entry-desc">四策略检索对照与端到端答案覆盖报告。</p>
+        </a>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script>
+(function () {
+  "use strict";
+
+  var statusLine = document.getElementById("status");
+  var refreshButton = document.getElementById("refresh");
+  var countPending = document.getElementById("count-pending");
+  var countApproved = document.getElementById("count-approved");
+  var countRejected = document.getElementById("count-rejected");
+  var conclusion = document.getElementById("conclusion");
+  var highestQuestion = document.getElementById("highest-question");
+  var highestMeta = document.getElementById("highest-meta");
+
+  function setStatus(message, kind) {
+    statusLine.className = "status" + (kind ? " " + kind : "");
+    statusLine.textContent = message || "";
+  }
+
+  function fmtCount(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? String(n) : "0";
+  }
+
+  function readError(response) {
+    return response.text().then(function (raw) {
+      var data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch (err) { data = null; }
+      if (data && typeof data.detail === "string") return data.detail;
+      return "HTTP " + response.status;
+    });
+  }
+
+  function loadSummary() {
+    refreshButton.disabled = true;
+    setStatus("加载中…");
+    fetch("/api/admin/summary")
+      .then(function (response) {
+        if (!response.ok) {
+          return readError(response).then(function (detail) { throw new Error(detail); });
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        data = data || {};
+        var counts = data.counts || {};
+        countPending.textContent = fmtCount(counts["待审"]);
+        countApproved.textContent = fmtCount(counts["通过"]);
+        countRejected.textContent = fmtCount(counts["驳回"]);
+        conclusion.textContent = data.conclusion || "—";
+
+        var highest = data.highest;
+        if (highest && typeof highest === "object") {
+          highestQuestion.textContent = highest.normalized_question || "（无问题）";
+          highestMeta.textContent =
+            "出现 " + fmtCount(highest.occurrence_count) + " 次 · 状态 " +
+            (highest.review_status || "未知") + " · #" + fmtCount(highest.id);
+        } else {
+          highestQuestion.textContent = "暂无知识缺口";
+          highestMeta.textContent = "先聊几句，让低置信问题进入队列。";
+        }
+        setStatus("已更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false }));
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + (err && err.message ? err.message : String(err)), "error");
+      })
+      .finally(function () {
+        refreshButton.disabled = false;
+      });
+  }
+
+  refreshButton.addEventListener("click", loadSummary);
+  loadSummary();
+})();
+</script>
+</body>
+</html>

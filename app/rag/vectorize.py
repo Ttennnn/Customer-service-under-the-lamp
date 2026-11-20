@@ -6,7 +6,8 @@ first, and only after the matching Milvus upsert succeeds are they marked
 therefore leaves unprocessed rows ``pending``; rerunning the function picks
 them up, and re-upserting the same ``chunk_{id}`` primary key is idempotent.
 
-``vectorize_pending`` handles the incremental path; ``vectorize_all``
+``vectorize_pending`` handles the incremental path; ``vectorize_rows`` is the
+scoped variant that publishes only caller-supplied rows; ``vectorize_all``
 re-embeds every row (including ``done`` ones) to backfill the hybrid
 collection's BM25 ``text`` and metadata from the legacy dense-only setup.
 """
@@ -60,6 +61,30 @@ def vectorize_pending(
         query = query.limit(max_chunks)
     rows = query.all()
     return _vectorize_rows(rows, session, embedder, store, batch_size)
+
+
+def vectorize_rows(
+    session,
+    rows,
+    embedder,
+    store,
+    batch_size: int = 16,
+) -> VectorizeReport:
+    """Embed and upsert only *rows*, committing once per batch.
+
+    Unlike :func:`vectorize_pending`, the caller decides exactly which rows are
+    published.  The approval writeback uses this so vectorizing an approved
+    answer can never publish unrelated pending chunks (for example a stale
+    answer left behind by a failed earlier approval).  The transaction
+    semantics are identical to :func:`vectorize_pending`: each batch is
+    committed only after its Milvus upsert succeeds, and any exception rolls
+    the current batch back and is re-raised.
+
+    The rows are used as given (no status filter); callers that need the
+    incremental path should keep using :func:`vectorize_pending`.
+    """
+    _validate_batch_args(batch_size, None)
+    return _vectorize_rows(list(rows), session, embedder, store, batch_size)
 
 
 def vectorize_all(

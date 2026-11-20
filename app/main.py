@@ -12,6 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app.agent.tools import legacy_tools
+from app.api.admin import api_router as admin_api_router
+from app.api.admin import page_router as admin_page_router
+from app.api.admin_jobs import api_router as admin_jobs_api_router
 from app.api.ch05 import api_router as ch05_api_router
 from app.api.ch05 import page_router as ch05_page_router
 from app.api.ch06 import api_router as ch06_api_router
@@ -21,13 +24,19 @@ from app.api.ch07 import CH07_PAGE
 from app.api.ch07 import api_router as ch07_api_router
 from app.api.ch07 import page_router as ch07_page_router
 from app.api.conversations import api_router as conversations_api_router
+from app.api.feedback import api_router as feedback_api_router
 from app.api.kb import api_router as kb_api_router
 from app.api.kb import page_router as kb_page_router
+from app.api.observability import api_router as observability_api_router
+from app.api.observability import page_router as observability_page_router
 from app.api.rag_eval import api_router as rag_eval_api_router
 from app.api.rag_eval import page_router as rag_eval_page_router
+from app.api.review import api_router as review_api_router
+from app.api.review import page_router as review_page_router
 from app.config import Settings, build_llm, get_settings
 from app.db.session import get_db
 from app.logging_config import configure_file_logging
+from app.observability import flush_tracing
 from app.prompts.customer_service import render_system_prompt
 from app.schemas import ChatRequest, ExtractRequest
 from app.services.chat import stream_chat
@@ -55,6 +64,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        flush_tracing()
         close_ch06_graph(app)
         shutdown_summary_executor()
         shutdown_async_bridge()
@@ -86,11 +96,19 @@ app.include_router(kb_page_router)
 app.include_router(kb_api_router)
 app.include_router(rag_eval_page_router)
 app.include_router(rag_eval_api_router)
+app.include_router(review_page_router)
+app.include_router(review_api_router)
+app.include_router(admin_page_router)
+app.include_router(admin_api_router)
+app.include_router(admin_jobs_api_router)
+app.include_router(observability_page_router)
+app.include_router(observability_api_router)
 app.include_router(ch06_page_router)
 app.include_router(ch06_api_router)
 app.include_router(ch07_page_router)
 app.include_router(ch07_api_router)
 app.include_router(conversations_api_router)
+app.include_router(feedback_api_router)
 app.include_router(ch05_page_router)
 app.include_router(ch05_api_router)
 
