@@ -19,6 +19,7 @@ from app.models import ReviewQueue
 
 PAGE = Path(__file__).resolve().parents[1] / "static" / "admin.html"
 ADMIN_JS = Path(__file__).resolve().parents[1] / "static" / "admin.js"
+ADMIN_CSS = Path(__file__).resolve().parents[1] / "static" / "admin-theme.css"
 
 REVIEW_STATUSES = ("待审", "通过", "驳回")
 
@@ -76,6 +77,18 @@ def admin_js() -> FileResponse:
     return FileResponse(
         ADMIN_JS,
         media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@page_router.get("/static/admin-theme.css", response_class=FileResponse)
+def admin_theme_css() -> FileResponse:
+    """Serve the shared back-office theme layer."""
+    if not ADMIN_CSS.is_file():
+        raise HTTPException(status_code=404, detail="admin-theme.css is missing")
+    return FileResponse(
+        ADMIN_CSS,
+        media_type="text/css",
         headers={"Cache-Control": "no-store"},
     )
 

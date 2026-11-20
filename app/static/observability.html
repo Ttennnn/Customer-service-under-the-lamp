@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>观测总览 · 灯下后台</title>
 <style>
   :root {
@@ -146,6 +146,7 @@
   h1 { font-size: 21px; letter-spacing: .02em; }
   .panel { background: linear-gradient(180deg, rgba(42,35,28,.55), rgba(33,27,22,.9)); }
 </style>
+<link rel="stylesheet" href="/static/admin-theme.css">
 </head>
 <body>
 <div id="admin-nav"></div>
@@ -179,7 +180,7 @@
       <div class="block-head">
         <div>
           <h2 id="eval-title">评估趋势</h2>
-          <p>每轮指标与上一轮对比：↑ 变好、↓ 变差、→ 持平、⚠ 指标缺失。</p>
+          <p>每轮指标与上一轮对比：↑ 变好、↓ 变差、→ 持平、— 缺失。</p>
         </div>
         <button id="eval-run" class="primary" type="button">重跑 评估飞轮</button>
       </div>
@@ -370,7 +371,7 @@
     var value = num(current);
     if (value === null) {
       cell.classList.add("delta-warn");
-      cell.textContent = "— ⚠";
+      cell.textContent = "—";
       cell.title = "本轮没有该指标";
       return cell;
     }
@@ -382,7 +383,7 @@
       return cell;
     }
     if (prev === null) {
-      cell.textContent = text + " ⚠";
+      cell.textContent = text + " · 缺";
       cell.classList.add("delta-warn");
       cell.title = "上一轮缺少该指标，无法比较";
       return cell;

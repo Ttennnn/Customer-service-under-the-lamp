@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>评测详细 · 灯下后台</title>
 <link rel="stylesheet" href="/static/acceptance.css">
+<link rel="stylesheet" href="/static/admin-theme.css">
 </head>
 <body>
 <div id="admin-nav"></div>
@@ -159,7 +160,7 @@
       tr.appendChild(A.el("td", "num", String(row.support == null ? "—" : row.support)));
       var verdict = row.pass == null
         ? ["—", "verdict-na"]
-        : (row.pass ? ["✅", "verdict-pass"] : ["❌ 先回头搞数据", "verdict-fail"]);
+        : (row.pass ? ["通过", "verdict-pass"] : ["先补数据", "verdict-fail"]);
       tr.appendChild(A.el("td", verdict[1], verdict[0]));
       classRows.appendChild(tr);
     });

@@ -3,121 +3,164 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>后台首页 · 灯下</title>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #171310;
-    --panel: #211b16;
-    --surface: #211b16;
-    --surface-2: #2a231c;
-    --text: #f2e9de;
-    --muted: #a29284;
-    --dim: #a29284;
-    --border: #332b24;
-    --accent: #f0b76a;
-    --accent-text: #1a1512;
-    --warn-bg: rgba(240,183,106,.12);
-    --warn-text: #f0b76a;
-    --error: #d97757;
-    --ok: #86a96b;
-    --chip: #2a231c;
-    --green: #86a96b;
-    --red: #d97757;
-    --shadow: 0 18px 50px rgba(0,0,0,.35);
+    --well: #121110;
+    --bg: #121110;
+    --panel: #1a1816;
+    --surface: #1a1816;
+    --raised: #24211d;
+    --line: rgba(240, 233, 223, 0.08);
+    --line-strong: rgba(240, 233, 223, 0.16);
+    --text: #f0e9df;
+    --text-2: #b3a99b;
+    --dim: #8a8073;
+    --accent: #e2ae63;
+    --accent-soft: rgba(226, 174, 99, 0.1);
+    --accent-ink: #1a1512;
+    --ok: #86a06c;
+    --error: #cf7458;
+    --mono: ui-monospace, "Cascadia Code", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 24px 18px 48px;
-    background: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(240,183,106,.12), transparent 70%), var(--bg);
+    padding: 24px 18px 64px;
+    background: var(--bg);
     color: var(--text);
-    font: 14px/1.6 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font: 14px/22px var(--sans);
+    -webkit-font-smoothing: antialiased;
   }
-  .page { max-width: 1060px; margin: 0 auto; }
+  .page { max-width: 1120px; margin: 0 auto; }
   .page-header {
     display: flex;
     gap: 16px;
     align-items: flex-start;
     justify-content: space-between;
     flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin: 24px 0 4px;
   }
-  h1 { margin: 0 0 6px; font-size: 26px; }
-  h2 { margin: 0 0 10px; font-size: 16px; }
-  .subtitle { margin: 0; color: var(--muted); }
-  .linkbtn, button {
-    border: 1px solid var(--border);
-    background: var(--panel);
-    color: var(--text);
-    border-radius: 9px;
-    padding: 7px 13px;
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: border-color .15s, color .15s, background .15s;
-  }
-  button:hover:not(:disabled), .linkbtn:hover { border-color: var(--accent); color: var(--accent); }
-  button:disabled { opacity: .45; cursor: default; }
-  main { display: grid; gap: 16px; }
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-  }
-  .status { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; min-height: 18px; }
+  .subtitle { margin: 0; color: var(--text-2); font-size: 13px; line-height: 20px; }
+  .status { margin: 10px 0 0; color: var(--dim); font-size: 11.5px; line-height: 16px; min-height: 16px; font-variant-numeric: tabular-nums; }
   .status.error { color: var(--error); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-  .card {
-    padding: 13px 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--chip);
+  h1 { margin: 0 0 4px; font-size: 24px; line-height: 32px; font-weight: 500; letter-spacing: 0; }
+  h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 500; letter-spacing: 0; }
+
+  main { display: grid; gap: 16px; margin-top: 20px; }
+  .panel {
+    padding: 18px 20px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
   }
-  .card-label { color: var(--muted); font-size: 12px; }
-  .card-value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.25; }
-  .card.pending .card-value { color: var(--warn-text); }
-  .card.approved .card-value { color: var(--ok); }
-  .card.rejected .card-value { color: var(--error); }
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .panel-note { font: 11.5px/16px var(--mono); color: var(--dim); }
+
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .stats.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat {
+    padding: 11px 14px;
+    background: var(--well);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .stat-label { display: block; font-size: 12px; line-height: 16px; color: var(--dim); }
+  .stat-value {
+    display: block;
+    margin-top: 2px;
+    font: 500 28px/32px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .stat-value.pending { color: var(--accent); }
+  .stat-value.approved { color: var(--ok); }
+  .stat-value.rejected { color: var(--error); }
+  .stat-value.service {
+    font: 500 20px/32px var(--sans);
+    color: var(--text-2);
+  }
+  .stat-value.service.online::before,
+  .stat-value.service.offline::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    border-radius: 50%;
+    vertical-align: 2px;
+  }
+  .stat-value.service.online::before { background: var(--ok); }
+  .stat-value.service.offline::before { background: var(--error); }
+
   .conclusion {
     margin: 14px 0 0;
-    padding: 11px 14px;
-    border-radius: 10px;
-    background: var(--warn-bg);
-    color: var(--warn-text);
-    border: 1px solid currentColor;
-    font-size: 14px;
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid var(--accent);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 24px;
   }
-  .highest {
-    margin: 14px 0 0;
+  .gap {
+    margin-top: 14px;
     padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    background: var(--well);
+    border: 1px solid var(--line);
+    border-radius: 8px;
   }
-  .highest-title { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
-  .highest-question { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-  .highest-meta { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
-  .entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-  .ch10-entries { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .gap-label { margin: 0; font: 11.5px/16px var(--mono); color: var(--dim); }
+  .gap-question { margin: 4px 0 0; font-size: 15px; line-height: 22px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+  .gap-meta { margin: 4px 0 0; font: 11.5px/16px var(--mono); color: var(--dim); }
+
+  .entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  #ch10-entries { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
   .entry {
-    display: block;
-    padding: 13px 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 36px 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     color: inherit;
     text-decoration: none;
-    transition: border-color .15s, background .15s;
+    transition: background-color 0.15s, border-color 0.15s;
   }
-  .entry:hover { border-color: var(--accent); background: var(--chip); }
-  .entry-title { font-weight: 650; }
-  .entry-desc { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; }
-  .page { max-width: 1120px; }
-  h1 { font-size: 21px; letter-spacing: .02em; }
-  .panel { background: linear-gradient(180deg, rgba(42,35,28,.55), rgba(33,27,22,.9)); }
+  .entry:hover { background: var(--raised); border-color: var(--line-strong); }
+  .entry::after {
+    content: "";
+    position: absolute;
+    right: 16px;
+    top: 18px;
+    width: 5px;
+    height: 5px;
+    border-top: 1.5px solid var(--dim);
+    border-right: 1.5px solid var(--dim);
+    transform: rotate(45deg);
+  }
+  .entry:hover::after { border-color: var(--text-2); }
+  .entry-title { font-size: 13.5px; line-height: 20px; font-weight: 500; color: var(--text); }
+  .entry-desc { font-size: 12px; line-height: 17px; color: var(--dim); }
+
+  @media (max-width: 640px) {
+    body { padding: 16px 16px 48px; }
+    .panel { padding: 16px; }
+    .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .stat { padding: 10px; }
+    .stat-value { font-size: 24px; line-height: 28px; }
+    .stat-value.service { font-size: 16px; line-height: 28px; }
+  }
 </style>
+<link rel="stylesheet" href="/static/admin-theme.css">
 </head>
 <body>
 <div id="admin-nav"></div>
@@ -125,7 +168,7 @@
   <header class="page-header">
     <div>
       <h1>后台首页</h1>
-      <p class="subtitle">一眼看清待审积压、最高频知识缺口，再决定今天先处理哪一块。</p>
+      <p class="subtitle">待审积压、最高频知识缺口与 ch10 验收状态</p>
     </div>
     <button id="refresh" type="button">刷新摘要</button>
   </header>
@@ -134,83 +177,91 @@
 
   <main>
     <section class="panel" aria-labelledby="counts-title">
-      <h2 id="counts-title">审核队列</h2>
-      <div class="cards">
-        <div class="card pending">
-          <div class="card-label">待审</div>
-          <div class="card-value" id="count-pending">—</div>
+      <div class="panel-head">
+        <h2 id="counts-title">审核队列</h2>
+        <span class="panel-note">用户反馈 · 低置信问题</span>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-label">待审</span>
+          <span class="stat-value pending" id="count-pending">—</span>
         </div>
-        <div class="card approved">
-          <div class="card-label">通过</div>
-          <div class="card-value" id="count-approved">—</div>
+        <div class="stat">
+          <span class="stat-label">通过</span>
+          <span class="stat-value approved" id="count-approved">—</span>
         </div>
-        <div class="card rejected">
-          <div class="card-label">驳回</div>
-          <div class="card-value" id="count-rejected">—</div>
+        <div class="stat">
+          <span class="stat-label">驳回</span>
+          <span class="stat-value rejected" id="count-rejected">—</span>
         </div>
       </div>
       <p id="conclusion" class="conclusion">—</p>
-      <div class="highest">
-        <p class="highest-title">最高频知识缺口</p>
-        <p id="highest-question" class="highest-question">—</p>
-        <p id="highest-meta" class="highest-meta"></p>
+      <div class="gap">
+        <p class="gap-label">最高频知识缺口</p>
+        <p id="highest-question" class="gap-question">—</p>
+        <p id="highest-meta" class="gap-meta"></p>
       </div>
     </section>
 
     <section class="panel" aria-labelledby="entries-title">
-      <h2 id="entries-title">去哪处理</h2>
+      <div class="panel-head">
+        <h2 id="entries-title">去哪处理</h2>
+      </div>
       <div class="entries">
         <a class="entry" href="/review">
-          <div class="entry-title">待审队列 →</div>
-          <p class="entry-desc">过垃圾/时效/频次三道闸，通过后写回知识库。</p>
+          <span class="entry-title">待审队列</span>
+          <span class="entry-desc">过垃圾、时效、频次三道闸,通过后写回知识库</span>
         </a>
         <a class="entry" href="/observability">
-          <div class="entry-title">观测总览 →</div>
-          <p class="entry-desc">成本账、评估趋势与置信度校准；可重跑对应作业。</p>
+          <span class="entry-title">观测总览</span>
+          <span class="entry-desc">成本账、评估趋势与置信度校准,可重跑对应作业</span>
         </a>
         <a class="entry" href="/kb">
-          <div class="entry-title">知识录入 →</div>
-          <p class="entry-desc">上传 Markdown 并重建文档域知识库。</p>
+          <span class="entry-title">知识录入</span>
+          <span class="entry-desc">上传 Markdown 并重建文档域知识库</span>
         </a>
         <a class="entry" href="/rag-eval">
-          <div class="entry-title">RAG 评估 →</div>
-          <p class="entry-desc">四策略检索对照与端到端答案覆盖报告。</p>
+          <span class="entry-title">RAG 评估</span>
+          <span class="entry-desc">四策略检索对照与端到端答案覆盖报告</span>
         </a>
       </div>
     </section>
 
     <section class="panel" aria-labelledby="ch10-title">
-      <h2 id="ch10-title">ch10 主题分类</h2>
-      <div class="cards">
-        <div class="card">
-          <div class="card-label">验收闸门</div>
-          <div class="card-value" id="ch10-passed">—</div>
+      <div class="panel-head">
+        <h2 id="ch10-title">ch10 主题分类</h2>
+        <span class="panel-note">17 类 · 旁路分类器</span>
+      </div>
+      <div class="stats two">
+        <div class="stat">
+          <span class="stat-label">验收闸门</span>
+          <span class="stat-value" id="ch10-passed">…</span>
         </div>
-        <div class="card">
-          <div class="card-label">分类服务</div>
-          <div class="card-value" id="ch10-service">—</div>
+        <div class="stat">
+          <span class="stat-label">分类服务</span>
+          <span class="stat-value service" id="ch10-service">…</span>
         </div>
       </div>
-      <div class="entries ch10-entries">
+      <div class="entries" id="ch10-entries" style="margin-top:10px">
         <a class="entry" href="/topics">
-          <div class="entry-title">主题分布 →</div>
-          <p class="entry-desc">17 类问题量、样例与类目问题列表。</p>
+          <span class="entry-title">主题分布</span>
+          <span class="entry-desc">17 类问题量、样例与类目问题列表</span>
         </a>
         <a class="entry" href="/acceptance">
-          <div class="entry-title">验收总览 →</div>
-          <p class="entry-desc">九项闸门、三态、逐项重跑与日志。</p>
+          <span class="entry-title">验收总览</span>
+          <span class="entry-desc">九项闸门、三态、逐项重跑与日志</span>
         </a>
         <a class="entry" href="/acceptance/eval">
-          <div class="entry-title">评测详细 →</div>
-          <p class="entry-desc">每类 P/R/F1、阈值扫描、混淆矩阵、模型黄金样例与单句试分类。</p>
+          <span class="entry-title">评测详细</span>
+          <span class="entry-desc">每类 P/R/F1、阈值扫描、混淆矩阵与单句试分类</span>
         </a>
         <a class="entry" href="/acceptance/data">
-          <div class="entry-title">数据产物 →</div>
-          <p class="entry-desc">三份考卷、每类分布、泄漏与覆盖、训练/ONNX 产物。</p>
+          <span class="entry-title">数据产物</span>
+          <span class="entry-desc">三份考卷、每类分布、泄漏与覆盖、训练产物</span>
         </a>
         <a class="entry" href="/acceptance/errors">
-          <div class="entry-title">错例复核 →</div>
-          <p class="entry-desc">漏打/多打/错位对账与逐条错例。</p>
+          <span class="entry-title">错例复核</span>
+          <span class="entry-desc">漏打、多打、错位对账与逐条错例</span>
         </a>
       </div>
     </section>
@@ -272,7 +323,7 @@
         if (highest && typeof highest === "object") {
           highestQuestion.textContent = highest.normalized_question || "（无问题）";
           highestMeta.textContent =
-            "出现 " + fmtCount(highest.occurrence_count) + " 次 · 状态 " +
+            "出现 " + fmtCount(highest.occurrence_count) + " 次 · " +
             (highest.review_status || "未知") + " · #" + fmtCount(highest.id);
         } else {
           highestQuestion.textContent = "暂无知识缺口";
@@ -304,11 +355,14 @@
     })
     .then(function (data) {
       passed.textContent = (data.passed || 0) + " / " + (data.total || 9);
-      service.textContent = data.classifier_online ? "在线" : "离线";
+      var online = Boolean(data.classifier_online);
+      service.textContent = online ? "在线" : "离线";
+      service.className = "stat-value service " + (online ? "online" : "offline");
     })
     .catch(function () {
       passed.textContent = "—";
       service.textContent = "—";
+      service.className = "stat-value service";
     });
 })();
 </script>

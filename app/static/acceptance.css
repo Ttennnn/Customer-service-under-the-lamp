@@ -25,14 +25,13 @@
 body {
   margin: 0;
   color: var(--text);
-  background:
-    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(240, 183, 106, .12), transparent 70%),
-    var(--bg);
+  background: var(--bg);
+  padding: 24px 18px 48px;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   line-height: 1.6;
 }
-.page { max-width: 1120px; margin: 0 auto; padding: 24px 18px 48px; }
+.page { max-width: 1120px; margin: 0 auto; }
 .page-header { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
 h1 { margin: 0 0 5px; font-size: 21px; letter-spacing: .02em; }
 h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: .01em; }

@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>数据产物 · 灯下后台</title>
 <link rel="stylesheet" href="/static/acceptance.css">
+<link rel="stylesheet" href="/static/admin-theme.css">
 </head>
 <body>
 <div id="admin-nav"></div>
@@ -128,9 +129,9 @@
         var cell = item[split] || {};
         tr.appendChild(A.el("td", "num", A.fmtNumber(cell.ratio, 3)));
       });
-      tr.appendChild(A.el("td", null, [true, true, true].map(function (_, index) {
-        return coverage[index] ? "✓" : "×";
-      }).join(" ")));
+      tr.appendChild(A.el("td", "num", [0, 1, 2].filter(function (index) {
+        return Boolean(coverage[index]);
+      }).length + " / 3"));
       classRows.appendChild(tr);
     });
   }
