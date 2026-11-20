@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>验收 · 错例 · 灯下后台</title>
+<title>错例复核 · 灯下后台</title>
 <link rel="stylesheet" href="/static/acceptance.css">
 </head>
 <body>
@@ -13,35 +13,42 @@
   <header class="page-header">
     <div>
       <h1>错例复核</h1>
-      <p class="subtitle">逐条标准/预测对照，按漏打、多打、错位记账；错位一次记两笔。</p>
+      <p class="subtitle">标准/预测逐条对照，按漏打、多打、错位记账。</p>
     </div>
     <a class="linkbtn" href="/acceptance">返回验收总览</a>
   </header>
 
   <nav class="subnav" aria-label="验收子页">
     <a href="/acceptance">总览</a>
-    <a href="/acceptance/eval">评测</a>
-    <a href="/acceptance/data">数据</a>
-    <a class="active" href="/acceptance/errors">错例</a>
+    <a href="/acceptance/eval">评测详细</a>
+    <a href="/acceptance/data">数据产物</a>
+    <a class="active" href="/acceptance/errors">错例复核</a>
   </nav>
 
-  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
-
   <section class="panel">
-    <h2>方向记账</h2>
-    <div id="counts" class="cards"></div>
-    <div id="gate"></div>
+    <div class="cards" id="counts"></div>
+    <div class="toolbar" style="margin-top:12px">
+      <span class="muted">重跑评测会刷新错例</span>
+      <span id="errors-job"></span>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
   </section>
 
-  <section class="panel">
-    <h2>逐条错例</h2>
-    <div class="table-wrap">
+  <section class="panel" id="empty-panel" hidden>
+    <h2>评测报告还没生成</h2>
+    <p id="empty-hint" class="empty"></p>
+    <div id="empty-job"></div>
+  </section>
+
+  <section class="panel" id="content" hidden>
+    <div id="gate"></div>
+    <div class="table-wrap" style="margin-top:10px">
       <table>
         <thead><tr><th>id</th><th>句子</th><th>标准标签</th><th>预测标签</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <p id="empty" class="empty" hidden>没有错例，或评测报告还没生成。</p>
+    <p id="empty" class="empty" hidden>没有错例。</p>
   </section>
 </div>
 
@@ -54,9 +61,15 @@
   var A = window.Acceptance;
   var statusEl = document.getElementById("status");
   var countsEl = document.getElementById("counts");
+  var contentEl = document.getElementById("content");
+  var emptyPanel = document.getElementById("empty-panel");
+  var emptyHint = document.getElementById("empty-hint");
   var gateEl = document.getElementById("gate");
   var rowsEl = document.getElementById("rows");
   var emptyEl = document.getElementById("empty");
+
+  A.mountJobControls(document.getElementById("errors-job"), { job: "ch10-eval" }, load);
+  A.mountJobControls(document.getElementById("empty-job"), { job: "ch10-eval" }, load);
 
   function setStatus(message, kind) {
     statusEl.className = "status" + (kind ? " " + kind : "");
@@ -81,10 +94,11 @@
     gateEl.textContent = "";
     var gate = A.el("div", "gate " + (counts.reconciled ? "pass" : "fail"));
     gate.appendChild(A.el("div", "gate-head"));
-    gate.appendChild(A.el("div", "gate-title", counts.reconciled ? "混淆矩阵笔数对账通过" : "对账不通过，先查评测实现"));
-    gate.appendChild(A.el("div", "gate-detail", "错位明细：" + JSON.stringify(counts.misplaced_pairs || [])));
+    gate.appendChild(A.el("div", "gate-title",
+      counts.reconciled ? "混淆矩阵笔数对账通过" : "对账不通过，先查评测实现"));
+    gate.appendChild(A.el("div", "hint",
+      "错位明细：" + JSON.stringify(counts.misplaced_pairs || [])));
     gateEl.appendChild(gate);
-    A.mountJobControls(gateEl, { job: "ch10-eval" }, load);
 
     rowsEl.textContent = "";
     var errors = data.errors || [];
@@ -108,15 +122,14 @@
     A.jsonFetch("/api/acceptance/errors")
       .then(function (data) {
         if (!data.present) {
+          contentEl.hidden = true;
+          emptyPanel.hidden = false;
+          emptyHint.textContent = data.hint || "make ch10-eval";
           setStatus("评测报告还没生成。", "error");
-          countsEl.textContent = "";
-          gateEl.textContent = "";
-          var node = A.el("div", "gate missing");
-          node.appendChild(A.el("div", "gate-detail", data.hint || "make ch10-eval"));
-          A.mountJobControls(node, { job: "ch10-eval" }, load);
-          gateEl.appendChild(node);
           return;
         }
+        emptyPanel.hidden = true;
+        contentEl.hidden = false;
         render(data);
         setStatus("");
       })

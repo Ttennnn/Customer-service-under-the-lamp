@@ -12,31 +12,39 @@
 <div class="page">
   <header class="page-header">
     <div>
-      <h1>九项验收</h1>
-      <p class="subtitle">语料、黄金闸、训练、ONNX、评测、阈值、混淆矩阵、错例、旁路归类；每项可在此重跑。</p>
+      <h1>验收总览</h1>
+      <p class="subtitle">九项实证一页看完；每项可单独重跑，日志默认收起。</p>
     </div>
     <a class="linkbtn" href="/admin">返回后台首页</a>
   </header>
 
   <nav class="subnav" aria-label="验收子页">
     <a class="active" href="/acceptance">总览</a>
-    <a href="/acceptance/eval">评测</a>
-    <a href="/acceptance/data">数据</a>
-    <a href="/acceptance/errors">错例</a>
+    <a href="/acceptance/eval">评测详细</a>
+    <a href="/acceptance/data">数据产物</a>
+    <a href="/acceptance/errors">错例复核</a>
   </nav>
 
   <section class="panel">
     <div class="cards">
       <div class="card"><div class="card-label">总闸</div><div class="card-value" id="passed">—</div></div>
       <div class="card"><div class="card-label">分类器服务</div><div class="card-value" id="service">—</div></div>
-      <div class="card"><div class="card-label">闸门数</div><div class="card-value" id="total">—</div></div>
+      <div class="card"><div class="card-label">闸门数</div><div class="card-value" id="total">9</div></div>
     </div>
     <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
   </section>
 
   <section class="panel">
     <h2>闸门明细</h2>
-    <div id="gates" class="gate-grid"></div>
+    <div class="table-wrap">
+      <table class="gate-table">
+        <thead>
+          <tr><th>闸门</th><th>状态</th><th>说明</th><th>操作</th></tr>
+        </thead>
+        <tbody id="gate-rows"></tbody>
+      </table>
+    </div>
+    <p class="hint">红的闸门先看「说明」或展开日志；重作业会二次确认。</p>
   </section>
 </div>
 
@@ -47,7 +55,7 @@
   "use strict";
 
   var A = window.Acceptance;
-  var gatesEl = document.getElementById("gates");
+  var rowsEl = document.getElementById("gate-rows");
   var statusEl = document.getElementById("status");
   var passedEl = document.getElementById("passed");
   var serviceEl = document.getElementById("service");
@@ -58,49 +66,41 @@
     statusEl.textContent = message || "";
   }
 
-  function stateText(state) {
-    if (state === "pass") return "通过";
-    if (state === "fail") return "未过线";
-    return "未跑过";
-  }
-
-  function detailText(detail) {
-    if (detail === null || detail === undefined) return "";
-    if (typeof detail !== "object") return String(detail);
-    return Object.keys(detail).map(function (key) {
-      var value = detail[key];
-      if (value === null || value === undefined) value = "—";
-      if (typeof value === "object") value = JSON.stringify(value);
-      return key + "=" + value;
-    }).join(" · ");
-  }
-
   function renderGate(gate) {
-    var card = A.el("div", "gate " + gate.state);
-    var head = A.el("div", "gate-head");
-    head.appendChild(A.el("div", "gate-title", gate.label));
-    head.appendChild(A.el("span", "badge " + gate.state, stateText(gate.state)));
-    card.appendChild(head);
-    card.appendChild(A.el("div", "gate-detail", detailText(gate.detail)));
-    if (gate.hint) {
-      card.appendChild(A.el("div", "gate-detail", "先跑：" + gate.hint));
-    }
-    if (gate.job) {
-      A.mountJobControls(card, gate, load);
-    }
-    return card;
+    var tr = A.el("tr");
+    var nameCell = A.el("td");
+    nameCell.appendChild(A.el("div", null, gate.label));
+    nameCell.appendChild(A.el("div", "muted", gate.job));
+    tr.appendChild(nameCell);
+
+    var stateCell = A.el("td");
+    stateCell.appendChild(A.stateBadge(gate.state));
+    tr.appendChild(stateCell);
+
+    var detailCell = A.el("td");
+    var detail = gate.detail;
+    if (gate.hint) detailCell.appendChild(A.el("div", null, "先跑：" + gate.hint));
+    detailCell.appendChild(A.el("div", null, A.detailText(detail, 220)));
+    tr.appendChild(detailCell);
+
+    var actionCell = A.el("td");
+    if (gate.job) A.mountJobControls(actionCell, gate, load);
+    else actionCell.appendChild(A.el("span", "muted", "—"));
+    tr.appendChild(actionCell);
+    return tr;
   }
 
   function load() {
     setStatus("加载中…");
     A.jsonFetch("/api/acceptance/overview")
       .then(function (data) {
-        passedEl.textContent = (data.passed || 0) + " / " + (data.total || 9);
-        totalEl.textContent = String(data.total || 9);
+        var total = data.total || 9;
+        passedEl.textContent = (data.passed || 0) + " / " + total;
+        totalEl.textContent = String(total);
         serviceEl.textContent = data.classifier_online ? "在线" : "离线";
-        gatesEl.textContent = "";
+        rowsEl.textContent = "";
         (data.gates || []).forEach(function (gate) {
-          gatesEl.appendChild(renderGate(gate));
+          rowsEl.appendChild(renderGate(gate));
         });
         setStatus("");
       })

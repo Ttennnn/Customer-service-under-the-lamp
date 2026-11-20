@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>验收 · 评测 · 灯下后台</title>
+<title>评测详细 · 灯下后台</title>
 <link rel="stylesheet" href="/static/acceptance.css">
 </head>
 <body>
@@ -12,74 +12,86 @@
 <div class="page">
   <header class="page-header">
     <div>
-      <h1>评测</h1>
-      <p class="subtitle">测试集 micro/macro、每类红线、九档阈值、17 张混淆矩阵，以及单句现场试分类。</p>
+      <h1>评测详细</h1>
+      <p class="subtitle">测试集指标、阈值扫描、混淆矩阵、模型黄金样例与单句试分类。</p>
     </div>
     <a class="linkbtn" href="/acceptance">返回验收总览</a>
   </header>
 
   <nav class="subnav" aria-label="验收子页">
     <a href="/acceptance">总览</a>
-    <a class="active" href="/acceptance/eval">评测</a>
-    <a href="/acceptance/data">数据</a>
-    <a href="/acceptance/errors">错例</a>
+    <a class="active" href="/acceptance/eval">评测详细</a>
+    <a href="/acceptance/data">数据产物</a>
+    <a href="/acceptance/errors">错例复核</a>
   </nav>
 
-  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
-
   <section class="panel">
-    <h2>汇总</h2>
-    <div id="summary" class="cards"></div>
-  </section>
-
-  <section class="panel">
-    <h2>模型黄金样例（部署阈值）</h2>
-    <div id="golden-summary" class="cards"></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>id</th><th>标准标签</th><th>预测标签</th></tr></thead>
-        <tbody id="golden-rows"></tbody>
-      </table>
+    <div class="cards" id="summary"></div>
+    <div class="toolbar" style="margin-top:12px">
+      <span class="muted">重跑测试集评测（服务阈值会先校验）</span>
+      <span id="eval-job"></span>
     </div>
-    <p id="golden-empty" class="empty" hidden>评测报告里还没有模型黄金样例。</p>
+    <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
   </section>
 
-  <section class="panel">
-    <h2>每类指标与红线</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>类目</th><th>档位</th><th>红线</th><th class="num">P</th><th class="num">R</th><th class="num">F1</th><th class="num">support</th><th>判定</th></tr></thead>
-        <tbody id="class-rows"></tbody>
-      </table>
+  <section class="panel" id="empty-panel" hidden>
+    <h2>评测还没生成</h2>
+    <p id="empty-hint" class="empty"></p>
+    <div id="empty-job"></div>
+  </section>
+
+  <section class="panel" id="content" hidden>
+    <div class="tabs" id="tabs" role="tablist">
+      <button class="tab active" type="button" data-tab="metrics" role="tab">每类指标</button>
+      <button class="tab" type="button" data-tab="scan" role="tab">阈值扫描</button>
+      <button class="tab" type="button" data-tab="matrices" role="tab">混淆矩阵</button>
+      <button class="tab" type="button" data-tab="golden" role="tab">黄金样例</button>
+      <button class="tab" type="button" data-tab="probe" role="tab">单句试分类</button>
     </div>
-    <p id="class-empty" class="empty" hidden>还没有评测报告。</p>
-  </section>
 
-  <section class="panel">
-    <h2>阈值扫描（验证集）</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>候选阈值</th><th class="num">micro F1</th><th class="num">macro F1</th></tr></thead>
-        <tbody id="scan-rows"></tbody>
-      </table>
-    </div>
-    <p id="scan-empty" class="empty" hidden>还没有阈值扫描报告。</p>
-  </section>
+    <section class="tab-panel" id="tab-metrics">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类目</th><th>档位</th><th>红线</th><th class="num">P</th><th class="num">R</th><th class="num">F1</th><th class="num">support</th><th>判定</th></tr></thead>
+          <tbody id="class-rows"></tbody>
+        </table>
+      </div>
+    </section>
 
-  <section class="panel">
-    <h2>混淆矩阵（17 类）</h2>
-    <div id="matrices" class="matrix-grid"></div>
-    <p id="matrix-empty" class="empty" hidden>还没有混淆矩阵。</p>
-  </section>
+    <section class="tab-panel" id="tab-scan" hidden>
+      <div class="kv" id="scan-summary"></div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead><tr><th>候选阈值</th><th class="num">micro F1</th><th class="num">macro F1</th></tr></thead>
+          <tbody id="scan-rows"></tbody>
+        </table>
+      </div>
+    </section>
 
-  <section class="panel">
-    <h2>单句试分类</h2>
-    <div class="toolbar">
-      <input id="probe-input" type="text" value="买大了想退" aria-label="试分类句子">
-      <button id="probe-run" class="primary" type="button">分类</button>
-      <span id="probe-status" class="muted"></span>
-    </div>
-    <div id="probe-result"></div>
+    <section class="tab-panel" id="tab-matrices" hidden>
+      <div id="matrices" class="matrix-grid"></div>
+    </section>
+
+    <section class="tab-panel" id="tab-golden" hidden>
+      <div class="cards" id="golden-summary"></div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead><tr><th>id</th><th>标准标签</th><th>预测标签</th></tr></thead>
+          <tbody id="golden-rows"></tbody>
+        </table>
+      </div>
+      <p class="hint">模型级黄金样例是诊断展示；部署阈值与全局扫描口径保持不变。</p>
+    </section>
+
+    <section class="tab-panel" id="tab-probe" hidden>
+      <div class="toolbar">
+        <input id="probe-input" type="text" value="买大了想退" aria-label="试分类句子">
+        <button id="probe-run" class="primary" type="button">分类</button>
+        <span id="probe-status" class="muted"></span>
+      </div>
+      <div id="probe-result"></div>
+      <p class="hint">17 类各自过线，过几个打几个；全部不过线时取最高分兜底。</p>
+    </section>
   </section>
 </div>
 
@@ -92,19 +104,22 @@
   var A = window.Acceptance;
   var statusEl = document.getElementById("status");
   var summaryEl = document.getElementById("summary");
+  var contentEl = document.getElementById("content");
+  var emptyPanel = document.getElementById("empty-panel");
+  var emptyHint = document.getElementById("empty-hint");
+  var classRows = document.getElementById("class-rows");
+  var scanSummary = document.getElementById("scan-summary");
+  var scanRows = document.getElementById("scan-rows");
+  var matricesEl = document.getElementById("matrices");
   var goldenSummary = document.getElementById("golden-summary");
   var goldenRows = document.getElementById("golden-rows");
-  var goldenEmpty = document.getElementById("golden-empty");
-  var classRows = document.getElementById("class-rows");
-  var classEmpty = document.getElementById("class-empty");
-  var scanRows = document.getElementById("scan-rows");
-  var scanEmpty = document.getElementById("scan-empty");
-  var matricesEl = document.getElementById("matrices");
-  var matrixEmpty = document.getElementById("matrix-empty");
   var probeInput = document.getElementById("probe-input");
   var probeRun = document.getElementById("probe-run");
   var probeStatus = document.getElementById("probe-status");
   var probeResult = document.getElementById("probe-result");
+
+  A.mountJobControls(document.getElementById("eval-job"), { job: "ch10-eval" }, load);
+  A.mountJobControls(document.getElementById("empty-job"), { job: "ch10-eval" }, load);
 
   function setStatus(message, kind) {
     statusEl.className = "status" + (kind ? " " + kind : "");
@@ -118,61 +133,22 @@
     return node;
   }
 
-  function renderMissing(message) {
-    summaryEl.textContent = "";
-    var cardNode = A.el("div", "gate missing");
-    cardNode.appendChild(A.el("div", "gate-head"));
-    cardNode.appendChild(A.el("div", "gate-detail", message));
-    A.mountJobControls(cardNode, { job: "ch10-eval" }, load);
-    summaryEl.appendChild(cardNode);
-  }
-
   function renderSummary(report) {
     var overall = report.overall || {};
+    var th = report.threshold || {};
+    var golden = report.golden_model;
     summaryEl.textContent = "";
     summaryEl.appendChild(card("micro F1", A.fmtNumber(overall.micro_f1, 4)));
     summaryEl.appendChild(card("macro F1", A.fmtNumber(overall.macro_f1, 4)));
-    summaryEl.appendChild(card("micro P / R",
-      A.fmtNumber(overall.micro_precision, 3) + " / " + A.fmtNumber(overall.micro_recall, 3)));
     summaryEl.appendChild(card("测试集", String(report.dataset_size || 0)));
-    var th = report.threshold || {};
     summaryEl.appendChild(card("阈值", A.fmtNumber(th.threshold, 2) + " · " + (th.source || "—")));
     summaryEl.appendChild(card("错例", String((report.errors || []).length)));
-  }
-
-  function renderGolden(report) {
-    var golden = report.golden_model;
-    goldenSummary.textContent = "";
-    goldenRows.textContent = "";
-    if (!golden) {
-      goldenEmpty.hidden = false;
-      return;
-    }
-    goldenEmpty.hidden = true;
-    goldenSummary.appendChild(card("黄金样例", golden.passed + " / " + golden.total));
-    goldenSummary.appendChild(card("通过率", A.fmtNumber(golden.pass_rate * 100, 1) + "%"));
-    goldenSummary.appendChild(card("多诉求", golden.multi_claim.passed + " / " + golden.multi_claim.total));
-    (golden.mismatches || []).forEach(function (item) {
-      var tr = A.el("tr");
-      tr.appendChild(A.el("td", null, item.id));
-      tr.appendChild(A.el("td", null, (item.gold || []).join("、")));
-      tr.appendChild(A.el("td", null, (item.predicted || []).join("、")));
-      goldenRows.appendChild(tr);
-    });
-    if (!(golden.mismatches || []).length) {
-      var tr = A.el("tr");
-      tr.appendChild(A.el("td", null, "—"));
-      tr.appendChild(A.el("td", null, "全部一致"));
-      tr.appendChild(A.el("td", null, "—"));
-      goldenRows.appendChild(tr);
-    }
+    summaryEl.appendChild(card("模型黄金", golden ? golden.passed + " / " + golden.total : "—"));
   }
 
   function renderClasses(report) {
     classRows.textContent = "";
-    var rows = report.per_class || [];
-    classEmpty.hidden = rows.length > 0;
-    rows.forEach(function (row) {
+    (report.per_class || []).forEach(function (row) {
       var tr = A.el("tr");
       tr.appendChild(A.el("td", null, row.label));
       tr.appendChild(A.el("td", null, row.tier));
@@ -181,7 +157,9 @@
       tr.appendChild(A.el("td", "num", A.fmtNumber(row.recall, 4)));
       tr.appendChild(A.el("td", "num", A.fmtNumber(row.f1, 4)));
       tr.appendChild(A.el("td", "num", String(row.support == null ? "—" : row.support)));
-      var verdict = row.pass == null ? ["—", "verdict-na"] : (row.pass ? ["✅", "verdict-pass"] : ["❌ 先回头搞数据", "verdict-fail"]);
+      var verdict = row.pass == null
+        ? ["—", "verdict-na"]
+        : (row.pass ? ["✅", "verdict-pass"] : ["❌ 先回头搞数据", "verdict-fail"]);
       tr.appendChild(A.el("td", verdict[1], verdict[0]));
       classRows.appendChild(tr);
     });
@@ -189,9 +167,16 @@
 
   function renderScan(report) {
     scanRows.textContent = "";
-    var scan = report.threshold_scan && report.threshold_scan.scan;
-    scanEmpty.hidden = !!(scan && scan.length);
-    (scan || []).forEach(function (row) {
+    scanSummary.textContent = "";
+    var scan = report.threshold_scan;
+    if (!scan) {
+      scanSummary.appendChild(A.el("span", null, "还没有阈值扫描报告。"));
+      return;
+    }
+    scanSummary.appendChild(A.el("span", null, "expected " + A.fmtNumber(scan.expected, 2)));
+    scanSummary.appendChild(A.el("span", null, "best " + A.fmtNumber(scan.best_threshold, 2)));
+    scanSummary.appendChild(A.el("span", null, "matches " + (scan.matches ? "是" : "否")));
+    (scan.scan || []).forEach(function (row) {
       var tr = A.el("tr");
       tr.appendChild(A.el("td", null, A.fmtNumber(row.threshold, 2)));
       tr.appendChild(A.el("td", "num", A.fmtNumber(row.micro_f1, 4)));
@@ -203,9 +188,7 @@
   function renderMatrices(report) {
     matricesEl.textContent = "";
     var matrices = report.confusion_matrices || {};
-    var labels = Object.keys(matrices);
-    matrixEmpty.hidden = labels.length > 0;
-    labels.forEach(function (label) {
+    Object.keys(matrices).forEach(function (label) {
       var item = matrices[label];
       var box = A.el("div", "matrix");
       box.appendChild(A.el("div", "matrix-title", label));
@@ -228,6 +211,37 @@
       box.appendChild(table);
       matricesEl.appendChild(box);
     });
+  }
+
+  function renderGolden(report) {
+    goldenSummary.textContent = "";
+    goldenRows.textContent = "";
+    var golden = report.golden_model;
+    if (!golden) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, "—"));
+      tr.appendChild(A.el("td", null, "评测报告里还没有模型黄金样例"));
+      tr.appendChild(A.el("td", null, "—"));
+      goldenRows.appendChild(tr);
+      return;
+    }
+    goldenSummary.appendChild(card("通过", golden.passed + " / " + golden.total));
+    goldenSummary.appendChild(card("通过率", A.fmtNumber(golden.pass_rate * 100, 1) + "%"));
+    goldenSummary.appendChild(card("多诉求", golden.multi_claim.passed + " / " + golden.multi_claim.total));
+    (golden.mismatches || []).forEach(function (item) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, item.id));
+      tr.appendChild(A.el("td", null, (item.gold || []).join("、")));
+      tr.appendChild(A.el("td", null, (item.predicted || []).join("、")));
+      goldenRows.appendChild(tr);
+    });
+    if (!(golden.mismatches || []).length) {
+      var ok = A.el("tr");
+      ok.appendChild(A.el("td", null, "—"));
+      ok.appendChild(A.el("td", null, "全部一致"));
+      ok.appendChild(A.el("td", null, "—"));
+      goldenRows.appendChild(ok);
+    }
   }
 
   function renderProbe(data) {
@@ -276,15 +290,19 @@
     A.jsonFetch("/api/acceptance/eval")
       .then(function (report) {
         if (!report.present) {
+          contentEl.hidden = true;
+          emptyPanel.hidden = false;
+          emptyHint.textContent = report.hint || "make ch10-eval";
           setStatus("评测报告还没生成。", "error");
-          renderMissing((report.hint || "make ch10-eval"));
           return;
         }
+        emptyPanel.hidden = true;
+        contentEl.hidden = false;
         renderSummary(report);
-        renderGolden(report);
         renderClasses(report);
         renderScan(report);
         renderMatrices(report);
+        renderGolden(report);
         setStatus("");
       })
       .catch(function (err) {
