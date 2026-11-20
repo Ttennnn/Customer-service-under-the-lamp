@@ -100,7 +100,10 @@ def normalize_labels(labels: Iterable[str]) -> list[str]:
         if label not in LABEL2ID:
             raise ValueError(f"unknown topic label: {label!r}")
         seen.add(label)
-    return [label for label in TOPIC_CLASSES if label in seen]
+    selected = [label for label in TOPIC_CLASSES if label in seen]
+    if len(selected) > 1 and FALLBACK_LABEL in selected:
+        selected.remove(FALLBACK_LABEL)
+    return selected
 
 
 def labels_from_scores(

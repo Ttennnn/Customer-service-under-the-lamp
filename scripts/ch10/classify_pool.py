@@ -29,17 +29,13 @@ def main(argv: list[str] | None = None) -> int:
 
     session = get_session_factory()()
     try:
-        if args.reclassify:
-            from app.models import TopicClassification
-
-            session.query(TopicClassification).delete()
-            session.commit()
         result = run(
             session,
             args.base_url,
             min_batch=args.min_batch,
             force=args.force,
             limit=args.limit,
+            reclassify=args.reclassify,
         )
     finally:
         session.close()

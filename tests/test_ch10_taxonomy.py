@@ -61,3 +61,7 @@ def test_paths_are_under_repo_root():
     assert paths.DATA_DIR == paths.ROOT / "data" / "ch10"
     assert paths.REPORT_DIR == paths.DATA_DIR / "reports"
     assert paths.GOLDEN_PATH == paths.DATA_DIR / "golden_samples.jsonl"
+
+
+def test_normalize_drops_fallback_when_specific_label_present():
+    assert taxonomy.normalize_labels(["其他", "尺码"]) == ["尺码"]

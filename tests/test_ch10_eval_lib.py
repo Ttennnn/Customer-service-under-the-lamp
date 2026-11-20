@@ -40,3 +40,22 @@ def test_replay_threshold_returns_scan_and_expected():
     assert out["best_threshold"] in (0.3, 0.5, 0.7)
     assert out["expected"] == 0.5
     assert "matches" in out
+
+
+def test_check_service_threshold_detects_mismatch_and_non_onnx():
+    from scripts.ch10.eval_lib import check_service_threshold
+
+    assert (
+        check_service_threshold(
+            {"threshold": 0.45}, {"threshold": 0.45, "source": "onnx"}
+        )
+        is None
+    )
+    mismatch = check_service_threshold(
+        {"threshold": 0.5}, {"threshold": 0.45, "source": "onnx"}
+    )
+    assert mismatch and "service" in mismatch
+    non_onnx = check_service_threshold(
+        {"threshold": 0.45}, {"threshold": 0.45, "source": "torch"}
+    )
+    assert non_onnx and "onnx" in non_onnx

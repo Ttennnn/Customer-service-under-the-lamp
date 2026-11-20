@@ -67,6 +67,24 @@ def reconcile_errors(report: dict) -> bool:
     )
 
 
+def check_service_threshold(health: dict, threshold_data: dict) -> str | None:
+    """Return an error string when the live service is not using this file."""
+    source = threshold_data.get("source")
+    if source != "onnx":
+        return f"threshold source is {source!r}, expected 'onnx'"
+    try:
+        service_threshold = float(health.get("threshold"))
+    except (TypeError, ValueError):
+        return "service health has no usable threshold"
+    expected = float(threshold_data.get("threshold", 0.0))
+    if abs(service_threshold - expected) > 1e-9:
+        return (
+            f"service threshold {service_threshold} != file {expected}; "
+            "restart the classifier"
+        )
+    return None
+
+
 def replay_threshold(
     val_scores: list[dict],
     candidates,

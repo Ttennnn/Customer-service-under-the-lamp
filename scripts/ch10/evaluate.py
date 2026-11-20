@@ -13,12 +13,14 @@ import httpx
 from app.core.taxonomy import TOPIC_CLASSES
 from scripts.ch10.corpus_lib import read_jsonl
 from scripts.ch10.eval_lib import (
+    check_service_threshold,
     error_directions,
     reconcile_errors,
     red_line_for,
     tier_for,
 )
 from scripts.ch10.train_lib import compute_metrics
+from scripts.ch10.validate_golden import compare_labels
 
 
 def _call_service(base_url: str, texts: list[str]) -> list[dict]:
@@ -35,7 +37,12 @@ def _predict(base_url: str, rows: list[dict], batch_size: int = 32) -> list[dict
     items: list[dict] = []
     for index in range(0, len(rows), batch_size):
         chunk = rows[index : index + batch_size]
-        items.extend(_call_service(base_url, [row["text"] for row in chunk]))
+        batch = _call_service(base_url, [row["text"] for row in chunk])
+        if len(batch) != len(chunk):
+            raise ValueError(
+                f"service returned {len(batch)} items for {len(chunk)} texts"
+            )
+        items.extend(batch)
     return items
 
 
@@ -140,6 +147,23 @@ def _render_markdown(report: dict) -> str:
         f"- 错位：{counts['misplaced_total']}",
         f"- 对账：{'通过' if counts['reconciled'] else '不通过'}",
     ]
+
+    golden = report.get("golden_model")
+    if golden:
+        lines += [
+            "",
+            "## 模型黄金样例",
+            "",
+            f"- 通过：{golden['passed']}/{golden['total']}"
+            f"（{golden['pass_rate']:.1%}）",
+            f"- 多诉求：{golden['multi_claim']['passed']}"
+            f"/{golden['multi_claim']['total']}",
+        ]
+        for mismatch in golden.get("mismatches", []):
+            lines.append(
+                f"- {mismatch['id']}: gold={mismatch['gold']} "
+                f"pred={mismatch['predicted']}"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -148,6 +172,7 @@ def evaluate(
     threshold_path: Path,
     base_url: str,
     out_dir: Path,
+    golden_path: Path | None = None,
 ) -> dict:
     rows = read_jsonl(Path(test_path))
     if not rows:
@@ -155,6 +180,11 @@ def evaluate(
     threshold_data = json.loads(
         Path(threshold_path).read_text(encoding="utf-8")
     )
+    health = httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=10)
+    health.raise_for_status()
+    problem = check_service_threshold(health.json(), threshold_data)
+    if problem:
+        raise ValueError(problem)
     items = _predict(base_url, rows)
 
     gold_sets = [
@@ -162,6 +192,30 @@ def evaluate(
     ]
     pred_sets = [set(item.get("labels", [])) for item in items]
     overall = compute_metrics(gold_sets, pred_sets)
+
+    golden_model = None
+    if golden_path is not None and Path(golden_path).exists():
+        golden_rows = read_jsonl(Path(golden_path))
+        golden_items = _predict(base_url, golden_rows)
+        golden_pred = {
+            row["id"]: list(item.get("labels", []))
+            for row, item in zip(golden_rows, golden_items)
+        }
+        golden_model = compare_labels(golden_rows, golden_pred)
+        multi_rows = [
+            row
+            for row in golden_rows
+            if len(set(row.get("labels", []))) > 1
+        ]
+        golden_model["multi_claim"] = {
+            "total": len(multi_rows),
+            "passed": sum(
+                1
+                for row in multi_rows
+                if set(golden_pred.get(row["id"], []))
+                == set(row["labels"])
+            ),
+        }
 
     try:
         from sklearn.metrics import multilabel_confusion_matrix
@@ -217,6 +271,7 @@ def evaluate(
         "confusion_matrices": matrix_map,
         "error_counts": error_counts,
         "errors": errors,
+        "golden_model": golden_model,
     }
     error_counts["reconciled"] = reconcile_errors(report)
 
@@ -258,6 +313,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8110")
     parser.add_argument("--out", default="data/ch10/reports")
+    parser.add_argument(
+        "--golden", default="data/ch10/golden_samples.jsonl"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -266,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.threshold),
             args.base_url,
             Path(args.out),
+            Path(args.golden),
         )
     except httpx.ConnectError:
         print("evaluate: classifier service is not up; run make classifier-up")

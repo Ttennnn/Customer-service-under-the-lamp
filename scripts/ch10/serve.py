@@ -133,7 +133,10 @@ def _daemon(
         "--threshold",
         threshold,
     ]
-    kwargs: dict = {"cwd": str(paths.ROOT)}
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    kwargs: dict = {"cwd": str(paths.ROOT), "env": env}
     if os.name == "nt":
         kwargs["creationflags"] = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)

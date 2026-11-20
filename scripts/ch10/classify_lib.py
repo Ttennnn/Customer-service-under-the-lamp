@@ -72,10 +72,33 @@ def _existing_ids(session, ids: list[int]) -> set[int]:
     }
 
 
-def write_classifications(session, items: list[dict]) -> int:
+def write_classifications(
+    session, items: list[dict], replace: bool = False
+) -> int:
     if not items:
         return 0
+    for item in items:
+        if not item.get("labels"):
+            raise ValueError("classification labels must not be empty")
     ids = [item["question_id"] for item in items]
+
+    def rows(source: list[dict]):
+        return [
+            TopicClassification(
+                question_id=item["question_id"],
+                labels=list(normalize_labels(item["labels"])),
+            )
+            for item in source
+        ]
+
+    if replace:
+        session.query(TopicClassification).filter(
+            TopicClassification.question_id.in_(ids)
+        ).delete(synchronize_session=False)
+        session.add_all(rows(items))
+        session.commit()
+        return len(items)
+
     existing = _existing_ids(session, ids)
     new_items = [
         item for item in items if item["question_id"] not in existing
@@ -83,15 +106,7 @@ def write_classifications(session, items: list[dict]) -> int:
     if not new_items:
         return 0
 
-    session.add_all(
-        [
-            TopicClassification(
-                question_id=item["question_id"],
-                labels=list(normalize_labels(item["labels"])),
-            )
-            for item in new_items
-        ]
-    )
+    session.add_all(rows(new_items))
     try:
         session.commit()
     except IntegrityError:
@@ -104,15 +119,7 @@ def write_classifications(session, items: list[dict]) -> int:
         ]
         if not retry:
             return 0
-        session.add_all(
-            [
-                TopicClassification(
-                    question_id=item["question_id"],
-                    labels=list(normalize_labels(item["labels"])),
-                )
-                for item in retry
-            ]
-        )
+        session.add_all(rows(retry))
         session.commit()
         return len(retry)
     return len(new_items)
@@ -150,9 +157,16 @@ def run(
     force: bool = False,
     limit: int | None = None,
     service=None,
+    reclassify: bool = False,
 ) -> dict:
     started = time.time()
-    pending = select_unclassified(session, limit=limit)
+
+    def total() -> int:
+        return session.query(TopicClassification).count()
+
+    pending = select_unclassified(
+        session, limit=limit, reclassify=reclassify
+    )
     if not pending:
         return {
             "ok": True,
@@ -160,6 +174,7 @@ def run(
             "reason": "no pending questions",
             "pending": 0,
             "classified": 0,
+            "classified_total": total(),
             "label_counts": {},
             "duration_s": time.time() - started,
         }
@@ -170,6 +185,7 @@ def run(
             "reason": "not enough pending",
             "pending": len(pending),
             "classified": 0,
+            "classified_total": total(),
             "label_counts": {},
             "duration_s": time.time() - started,
         }
@@ -198,11 +214,14 @@ def run(
             "error": str(exc),
             "pending": len(pending),
             "classified": 0,
+            "classified_total": total(),
             "label_counts": {},
             "duration_s": time.time() - started,
         }
 
-    classified = write_classifications(session, items)
+    classified = write_classifications(
+        session, items, replace=reclassify
+    )
     counts = Counter(
         label for item in items for label in item["labels"]
     )
@@ -211,6 +230,7 @@ def run(
         "skipped": False,
         "pending": len(pending),
         "classified": classified,
+        "classified_total": total(),
         "label_counts": dict(counts),
         "duration_s": time.time() - started,
     }

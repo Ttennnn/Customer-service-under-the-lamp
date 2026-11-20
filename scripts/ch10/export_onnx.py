@@ -101,6 +101,10 @@ def export_model(
     rows = read_jsonl(Path(val_path))
     if not rows:
         raise ValueError("validation split is empty")
+    # Persist the tokenizer before the dummy encode mutates its runtime
+    # padding/truncation settings; a future consumer must not inherit
+    # "Fixed: 32" from the export probe.
+    tokenizer.save_pretrained(out_dir)
     dummy = tokenizer(
         rows[0]["text"],
         truncation=True,
@@ -133,7 +137,6 @@ def export_model(
     # the torch reference below runs with dropout and the parity check lies.
     model.eval()
     wrapper.eval()
-    tokenizer.save_pretrained(out_dir)
 
     session = ort.InferenceSession(
         str(onnx_path), providers=["CPUExecutionProvider"]

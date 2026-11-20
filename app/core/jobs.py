@@ -132,6 +132,8 @@ def start_job(name: str) -> dict | None:
     log_file = log_path.open("ab")
     env = dict(os.environ)
     env.update(spec.env)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     kwargs: dict = {
         "cwd": str(paths.ROOT),
         "stdout": log_file,

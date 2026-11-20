@@ -105,3 +105,24 @@ def test_load_or_generate_reuses_frozen_file(tmp_path):
         batch_size=10,
     )
     assert [s.text for s in second] == [s.text for s in first]
+
+
+def test_merge_labeled_ignores_unknown_corrections():
+    real = [
+        Sample(id="r", text="买大了想退", labels=("尺码",), origin="real")
+    ]
+    merged = merge_labeled(real, [], {"missing-id": ["退换货"]})
+    assert merged[0].labels == ("尺码",)
+
+
+def test_remaining_gap_detects_incomplete():
+    from scripts.ch10.synthetic import remaining_gap
+
+    samples = [
+        Sample(
+            id="a", text="猫窝买大了", labels=("尺码",), origin="synthetic"
+        )
+    ]
+    remaining = remaining_gap(samples, {"尺码": 2, "物流": 1})
+    assert remaining["尺码"] == 1
+    assert remaining["物流"] == 1

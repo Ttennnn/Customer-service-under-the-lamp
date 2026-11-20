@@ -60,3 +60,21 @@ def test_apply_corrections_unknown_id_raises():
     out = apply_corrections([s], {"x": ["退换货"]})
     assert out[0].labels == ("退换货",)
     assert out[0].meta["audited"] is True
+
+
+def test_near_dedupe_merges_rewrite_not_just_identical():
+    a = Sample(
+        id="a",
+        text="这猫窝买大了想退",
+        labels=("退换货", "尺码"),
+        origin="synthetic",
+    )
+    b = Sample(
+        id="b",
+        text="这猫窝买大了想退货",
+        labels=("退换货", "尺码"),
+        origin="synthetic",
+    )
+    out, merged = dedupe_near([a, b])
+    assert len(out) == 1
+    assert merged == 1

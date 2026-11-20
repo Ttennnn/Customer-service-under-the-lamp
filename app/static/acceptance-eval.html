@@ -33,6 +33,18 @@
   </section>
 
   <section class="panel">
+    <h2>模型黄金样例（部署阈值）</h2>
+    <div id="golden-summary" class="cards"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>id</th><th>标准标签</th><th>预测标签</th></tr></thead>
+        <tbody id="golden-rows"></tbody>
+      </table>
+    </div>
+    <p id="golden-empty" class="empty" hidden>评测报告里还没有模型黄金样例。</p>
+  </section>
+
+  <section class="panel">
     <h2>每类指标与红线</h2>
     <div class="table-wrap">
       <table>
@@ -80,6 +92,9 @@
   var A = window.Acceptance;
   var statusEl = document.getElementById("status");
   var summaryEl = document.getElementById("summary");
+  var goldenSummary = document.getElementById("golden-summary");
+  var goldenRows = document.getElementById("golden-rows");
+  var goldenEmpty = document.getElementById("golden-empty");
   var classRows = document.getElementById("class-rows");
   var classEmpty = document.getElementById("class-empty");
   var scanRows = document.getElementById("scan-rows");
@@ -123,6 +138,34 @@
     var th = report.threshold || {};
     summaryEl.appendChild(card("阈值", A.fmtNumber(th.threshold, 2) + " · " + (th.source || "—")));
     summaryEl.appendChild(card("错例", String((report.errors || []).length)));
+  }
+
+  function renderGolden(report) {
+    var golden = report.golden_model;
+    goldenSummary.textContent = "";
+    goldenRows.textContent = "";
+    if (!golden) {
+      goldenEmpty.hidden = false;
+      return;
+    }
+    goldenEmpty.hidden = true;
+    goldenSummary.appendChild(card("黄金样例", golden.passed + " / " + golden.total));
+    goldenSummary.appendChild(card("通过率", A.fmtNumber(golden.pass_rate * 100, 1) + "%"));
+    goldenSummary.appendChild(card("多诉求", golden.multi_claim.passed + " / " + golden.multi_claim.total));
+    (golden.mismatches || []).forEach(function (item) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, item.id));
+      tr.appendChild(A.el("td", null, (item.gold || []).join("、")));
+      tr.appendChild(A.el("td", null, (item.predicted || []).join("、")));
+      goldenRows.appendChild(tr);
+    });
+    if (!(golden.mismatches || []).length) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, "—"));
+      tr.appendChild(A.el("td", null, "全部一致"));
+      tr.appendChild(A.el("td", null, "—"));
+      goldenRows.appendChild(tr);
+    }
   }
 
   function renderClasses(report) {
@@ -238,6 +281,7 @@
           return;
         }
         renderSummary(report);
+        renderGolden(report);
         renderClasses(report);
         renderScan(report);
         renderMatrices(report);

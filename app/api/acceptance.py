@@ -34,11 +34,12 @@ class ClassifyRequest(BaseModel):
 
 def _read_json(name: str) -> dict | None:
     try:
-        return json.loads(
+        data = json.loads(
             (Path(REPORT_DIR) / name).read_text(encoding="utf-8")
         )
     except (OSError, json.JSONDecodeError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def _service_health() -> bool:
@@ -101,10 +102,13 @@ def _gates() -> list[dict]:
     errors_md = Path(REPORT_DIR) / "error_samples.md"
     classify = _read_json("classify_run.json")
 
+    augment_leak = (manifest or {}).get("augment_leak")
     corpus_ok = bool(
         manifest
         and all(value == 0 for value in (manifest.get("leak") or {}).values())
         and not manifest.get("coverage_gaps")
+        and augment_leak is not None
+        and int(augment_leak.get("total", 1)) == 0
     )
     golden_ok = bool(
         golden and float(golden.get("pass_rate", 0)) >= 0.8
@@ -112,7 +116,11 @@ def _gates() -> list[dict]:
     train_present = train is not None and model_config.is_file()
     export_ok = bool(export and export.get("ok") is True)
     per_class = (eval_report or {}).get("per_class") or []
-    eval_present = len(per_class) == 17
+    eval_threshold = (eval_report or {}).get("threshold") or {}
+    eval_present = (
+        len(per_class) == 17
+        and eval_threshold.get("source") == "onnx"
+    )
     red = [
         row["label"]
         for row in per_class
@@ -123,13 +131,11 @@ def _gates() -> list[dict]:
     confusion_ok = len(matrices) == 17
     error_counts = (eval_report or {}).get("error_counts") or {}
     errors_ok = error_counts.get("reconciled") is True and errors_md.is_file()
+    classified_total = (
+        int(classify.get("classified_total", 0)) if classify else 0
+    )
     classify_ok = bool(
-        classify
-        and classify.get("ok") is True
-        and (
-            int(classify.get("classified", 0)) > 0
-            or classify.get("skipped") is True
-        )
+        classify and classify.get("ok") is True and classified_total > 0
     )
 
     return [
@@ -143,6 +149,7 @@ def _gates() -> list[dict]:
             and {
                 "counts": manifest.get("counts"),
                 "leak": manifest.get("leak"),
+                "augment_leak": manifest.get("augment_leak"),
                 "coverage_gaps": manifest.get("coverage_gaps"),
             },
         ),
@@ -195,6 +202,7 @@ def _gates() -> list[dict]:
                 .get("overall", {})
                 .get("micro_f1"),
                 "red_lines": red,
+                "golden_model": (eval_report or {}).get("golden_model"),
                 "note": "红线是诊断展示，不是交付硬闸门",
             }
             if eval_report
@@ -374,6 +382,14 @@ def classify_proxy(request: ClassifyRequest) -> dict:
             timeout=30,
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if 400 <= exc.response.status_code < 500:
+            raise HTTPException(
+                status_code=400, detail=exc.response.text
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"classifier service error: {exc}"
+        ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502, detail=f"classifier service unavailable: {exc}"

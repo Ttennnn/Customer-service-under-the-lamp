@@ -34,3 +34,17 @@ def test_stop_windows_kills_tree(monkeypatch):
     jobs.start_job("classify-pool")
     jobs.stop_job("classify-pool")
     assert called and "taskkill" in called[0][0]
+
+
+def test_job_env_forces_utf8(monkeypatch):
+    seen = {}
+    fake = FakeProc()
+
+    def popen(argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        return fake
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", popen)
+    jobs.start_job("ch10-eval")
+    assert seen.get("PYTHONUTF8") == "1"
+    assert seen.get("PYTHONIOENCODING") == "utf-8"

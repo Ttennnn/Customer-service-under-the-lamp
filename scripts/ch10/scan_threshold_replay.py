@@ -10,7 +10,7 @@ import httpx
 
 from app.core.taxonomy import TOPIC_CLASSES
 from scripts.ch10.corpus_lib import read_jsonl
-from scripts.ch10.eval_lib import replay_threshold
+from scripts.ch10.eval_lib import check_service_threshold, replay_threshold
 from scripts.ch10.train_lib import DEFAULT_CANDIDATES
 
 
@@ -37,7 +37,12 @@ def replay(
     items: list[dict] = []
     for index in range(0, len(rows), batch_size):
         chunk = rows[index : index + batch_size]
-        items.extend(_scores(base_url, [row["text"] for row in chunk]))
+        batch = _scores(base_url, [row["text"] for row in chunk])
+        if len(batch) != len(chunk):
+            raise ValueError(
+                f"service returned {len(batch)} items for {len(chunk)} texts"
+            )
+        items.extend(batch)
 
     scores = []
     for row, item in zip(rows, items):
@@ -53,6 +58,11 @@ def replay(
     threshold_data = json.loads(
         Path(threshold_path).read_text(encoding="utf-8")
     )
+    health = httpx.get(f"{base_url.rstrip('/')}/healthz", timeout=10)
+    health.raise_for_status()
+    problem = check_service_threshold(health.json(), threshold_data)
+    if problem:
+        raise ValueError(problem)
     expected = float(threshold_data["threshold"])
     result = replay_threshold(scores, DEFAULT_CANDIDATES, expected)
 

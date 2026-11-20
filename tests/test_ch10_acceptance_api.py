@@ -32,3 +32,33 @@ def test_invalid_topic_label_is_rejected_by_classify_proxy(monkeypatch):
         "/api/acceptance/classify", json={"texts": []}
     )
     assert response.status_code == 400
+
+
+def test_wrong_shape_report_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(acceptance, "REPORT_DIR", tmp_path)
+    (tmp_path / "eval_report.json").write_text("[]", encoding="utf-8")
+    body = TestClient(app).get("/api/acceptance/eval").json()
+    assert body["present"] is False
+
+
+def test_corpus_gate_requires_augment_leak(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(acceptance, "REPORT_DIR", tmp_path)
+    monkeypatch.setattr(acceptance, "DATA_DIR", tmp_path)
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "manifest.json").write_text(
+        json.dumps(
+            {
+                "counts": {"train": 1, "val": 1, "test": 1},
+                "leak": {"train_val": 0, "train_test": 0, "val_test": 0},
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    body = TestClient(app).get("/api/acceptance/overview").json()
+    corpus = next(g for g in body["gates"] if g["id"] == "corpus")
+    assert corpus["present"] is True
+    assert corpus["state"] == "fail"

@@ -74,3 +74,51 @@ def test_service_failure_writes_nothing(session):
     )
     assert out["ok"] is False
     assert session.query(TopicClassification).count() == 0
+
+
+def test_reclassify_failure_keeps_existing(session):
+    question, _ = _seed(session)
+    write_classifications(
+        session, [{"question_id": question.id, "labels": ["尺码"]}]
+    )
+
+    def boom(texts, **kwargs):
+        raise RuntimeError("service down")
+
+    out = run(
+        session,
+        "http://fake",
+        min_batch=1,
+        force=True,
+        service=boom,
+        reclassify=True,
+    )
+    assert out["ok"] is False
+    assert session.query(TopicClassification).count() == 1
+
+
+def test_reclassify_small_pool_keeps_existing(session):
+    question, _ = _seed(session)
+    write_classifications(
+        session, [{"question_id": question.id, "labels": ["尺码"]}]
+    )
+    out = run(
+        session,
+        "http://fake",
+        min_batch=10,
+        force=False,
+        service=lambda texts, **kwargs: [["尺码"]],
+        reclassify=True,
+    )
+    assert out["skipped"] is True
+    assert session.query(TopicClassification).count() == 1
+
+
+def test_write_rejects_empty_labels(session):
+    import pytest
+
+    question, _ = _seed(session)
+    with pytest.raises(ValueError):
+        write_classifications(
+            session, [{"question_id": question.id, "labels": []}]
+        )

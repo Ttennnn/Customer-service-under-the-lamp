@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import shutil
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ from scripts.ch10.llm_io import CallBudget, invoke_structured
 from scripts.ch10.prelabel import prelabel_samples
 from scripts.ch10.prompts import SYNTHETIC_SYSTEM
 from scripts.ch10.schemas import SyntheticBatch
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_RATIOS = {"dialect": 0.15, "typo": 0.10, "multi": 0.15}
 
@@ -65,6 +68,15 @@ def validate_synthetic(samples: list[Sample]) -> list[Sample]:
     return dedupe_exact(valid)
 
 
+def remaining_gap(samples: list[Sample], gap: dict[str, int]) -> dict[str, int]:
+    """Return how many positives each class still needs after ``samples``."""
+    counts = label_counts(samples)
+    return {
+        label: max(0, int(gap.get(label, 0)) - counts.get(label, 0))
+        for label in TOPIC_CLASSES
+    }
+
+
 def _load_samples(path: Path) -> list[Sample]:
     return [
         Sample(
@@ -86,6 +98,8 @@ def _write_generation(
     gap: dict[str, int],
     ratios: dict,
     calls: int,
+    *,
+    complete: bool,
 ) -> None:
     write_jsonl(path, [asdict(sample) for sample in samples])
     counts = label_counts(samples)
@@ -98,6 +112,8 @@ def _write_generation(
         "run_id": run_id,
         "gap": gap,
         "counts": counts,
+        "remaining": remaining_gap(samples, gap),
+        "complete": complete,
         "samples": len(samples),
         "multi_ratio": multi,
         "requested_ratios": ratios,
@@ -131,14 +147,19 @@ def load_or_generate(
     }
     run_id = run_id_for(params, force=force)
     path = out_dir / run_id / "synthetic.jsonl"
-    if path.exists():
-        return validate_synthetic(_load_samples(path))
 
+    samples: list[Sample] = []
+    seen: set[str] = set()
     remaining = {
         label: int(gap.get(label, 0)) for label in TOPIC_CLASSES
     }
-    seen: set[str] = set()
-    samples: list[Sample] = []
+    if path.exists():
+        samples = validate_synthetic(_load_samples(path))
+        seen = {normalize_text(sample.text) for sample in samples}
+        remaining = remaining_gap(samples, gap)
+        if not any(remaining.values()):
+            return samples
+
     rounds = 0
     stale_rounds = 0
     try:
@@ -184,10 +205,27 @@ def load_or_generate(
             if stale_rounds >= 5:
                 break
     except Exception:
-        _write_generation(path, samples, run_id, gap, ratios, budget.calls)
+        _write_generation(
+            path, samples, run_id, gap, ratios, budget.calls, complete=False
+        )
         raise
 
-    _write_generation(path, samples, run_id, gap, ratios, budget.calls)
+    remaining = remaining_gap(samples, gap)
+    if any(remaining.values()):
+        _write_generation(
+            path, samples, run_id, gap, ratios, budget.calls, complete=False
+        )
+        raise RuntimeError(
+            "synthetic generation incomplete: "
+            + ", ".join(
+                f"{label} missing {count}"
+                for label, count in remaining.items()
+                if count
+            )
+        )
+    _write_generation(
+        path, samples, run_id, gap, ratios, budget.calls, complete=True
+    )
     return samples
 
 
@@ -250,7 +288,21 @@ def merge_labeled(
 ) -> list[Sample]:
     combined = list(real_labeled) + list(synthetic)
     if corrections:
-        combined = apply_corrections(combined, corrections)
+        known_ids = {sample.id for sample in combined}
+        invalid = sorted(set(corrections) - known_ids)
+        if invalid:
+            logger.warning(
+                "ignoring %d corrections for unknown ids: %s",
+                len(invalid),
+                invalid[:5],
+            )
+        valid = {
+            sample_id: labels
+            for sample_id, labels in corrections.items()
+            if sample_id in known_ids
+        }
+        if valid:
+            combined = apply_corrections(combined, valid)
     return dedupe_exact(combined)
 
 
@@ -260,7 +312,11 @@ def _archive_corrections(path: Path, run_id: str) -> int:
     data = json.loads(path.read_text(encoding="utf-8"))
     archived = path.with_name(f"audit_corrections.{run_id}.json")
     shutil.copyfile(path, archived)
-    return len(data) if isinstance(data, dict) else 0
+    count = len(data) if isinstance(data, dict) else 0
+    # A regenerated corpus has new content ids; keeping the old active file
+    # would make merge_labeled fail on every unknown id.
+    path.unlink(missing_ok=True)
+    return count
 
 
 def main(argv: list[str] | None = None) -> int:
