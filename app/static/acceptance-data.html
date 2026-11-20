@@ -148,6 +148,8 @@
       " · 近重复先合并再切分 · seed=" + (manifest.seed == null ? "—" : manifest.seed)));
     healthEl.appendChild(A.el("p", "muted",
       "语料构成：" + JSON.stringify(manifest.origin_counts || {})));
+    healthEl.appendChild(A.el("p", "muted",
+      "增强后泄漏：" + JSON.stringify(manifest.augment_leak || {})));
 
     filesEl.textContent = "";
     var files = data.files || [];
