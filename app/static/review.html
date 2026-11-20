@@ -7,44 +7,33 @@
 <title>待审队列 · 灯下后台</title>
 <style>
   :root {
-    --bg: #f5f6f8;
-    --panel: #ffffff;
-    --text: #1d2430;
-    --muted: #5c6675;
-    --border: #d9dee6;
-    --accent: #2563eb;
-    --accent-text: #ffffff;
-    --warn-bg: #fff4e0;
-    --warn-text: #8a4b00;
-    --error: #b42318;
-    --ok: #067647;
-    --chip: #eef2f8;
-    --shadow: 0 18px 50px rgba(15, 23, 42, .18);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14181f;
-      --panel: #1d232d;
-      --text: #e6ebf2;
-      --muted: #9aa6b6;
-      --border: #333d4c;
-      --accent: #6d9bff;
-      --accent-text: #0b1220;
-      --warn-bg: #3a2c12;
-      --warn-text: #ffd28a;
-      --error: #ff8a80;
-      --ok: #6ee7b7;
-      --chip: #252d39;
-      --shadow: 0 18px 50px rgba(0, 0, 0, .55);
-    }
+    color-scheme: dark;
+    --bg: #171310;
+    --panel: #211b16;
+    --surface: #211b16;
+    --surface-2: #2a231c;
+    --text: #f2e9de;
+    --muted: #a29284;
+    --dim: #a29284;
+    --border: #332b24;
+    --accent: #f0b76a;
+    --accent-text: #1a1512;
+    --warn-bg: rgba(240,183,106,.12);
+    --warn-text: #f0b76a;
+    --error: #d97757;
+    --ok: #86a96b;
+    --chip: #2a231c;
+    --green: #86a96b;
+    --red: #d97757;
+    --shadow: 0 18px 50px rgba(0,0,0,.35);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 20px 16px 64px;
-    background: var(--bg);
+    padding: 24px 18px 48px;
+    background: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(240,183,106,.12), transparent 70%), var(--bg);
     color: var(--text);
-    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font: 14px/1.6 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
   .page { max-width: 1060px; margin: 0 auto; }
   .page-header {
@@ -132,7 +121,7 @@
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .row-actions button { padding: 4px 9px; font-size: 12px; }
   .empty { margin: 16px 0 4px; color: var(--muted); text-align: center; }
-  .detail-cell { background: var(--bg); }
+  .detail-cell { background: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(240,183,106,.12), transparent 70%), var(--bg); }
   .detail-box { display: grid; gap: 12px; padding: 4px 2px 8px; }
   .detail-title { margin: 0; font-size: 13px; color: var(--muted); }
   .question-card {
@@ -197,6 +186,9 @@
     th:nth-child(4), td:nth-child(4) { display: none; }
     .page-header { flex-direction: column; }
   }
+  .page { max-width: 1120px; }
+  h1 { font-size: 21px; letter-spacing: .02em; }
+  .panel { background: linear-gradient(180deg, rgba(42,35,28,.55), rgba(33,27,22,.9)); }
 </style>
 </head>
 <body>
