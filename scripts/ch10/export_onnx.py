@@ -77,7 +77,12 @@ def export_model(
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+    # SDPA and the exported math-attention graph can differ numerically on
+    # CPU (we saw ~0.16 probability drift). Export and parity-check against
+    # eager attention so the ONNX graph is the single inference truth.
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_dir, attn_implementation="eager"
+    )
     model.eval()
 
     class _LogitsWrapper(torch.nn.Module):
@@ -124,6 +129,10 @@ def export_model(
         opset_version=opset,
         do_constant_folding=True,
     )
+    # The legacy exporter can leave the module in training mode; without this
+    # the torch reference below runs with dropout and the parity check lies.
+    model.eval()
+    wrapper.eval()
     tokenizer.save_pretrained(out_dir)
 
     session = ort.InferenceSession(

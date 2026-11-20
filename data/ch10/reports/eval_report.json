@@ -1,0 +1,386 @@
+{
+  "generated_at": "2026-11-20T12:05:24.570389+00:00",
+  "dataset_size": 161,
+  "threshold": {
+    "threshold": 0.45,
+    "source": "onnx"
+  },
+  "corpus_composition": {
+    "synthetic": 159,
+    "real": 2
+  },
+  "overall": {
+    "micro_precision": 0.9893617021276596,
+    "micro_recall": 0.9738219895287958,
+    "micro_f1": 0.9815303430079155,
+    "macro_precision": 0.9905731523378583,
+    "macro_recall": 0.9744412450294803,
+    "macro_f1": 0.9821185119004475
+  },
+  "per_class": [
+    {
+      "label": "退换货",
+      "tier": "严",
+      "red_line": 0.9,
+      "precision": 0.9230769230769231,
+      "recall": 0.9230769230769231,
+      "f1": 0.9230769230769231,
+      "support": 13,
+      "pass": true
+    },
+    {
+      "label": "物流",
+      "tier": "严",
+      "red_line": 0.9,
+      "precision": 0.9166666666666666,
+      "recall": 0.9166666666666666,
+      "f1": 0.9166666666666666,
+      "support": 12,
+      "pass": true
+    },
+    {
+      "label": "尺码",
+      "tier": "严",
+      "red_line": 0.9,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12,
+      "pass": true
+    },
+    {
+      "label": "发票",
+      "tier": "严",
+      "red_line": 0.9,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 11,
+      "pass": true
+    },
+    {
+      "label": "质量问题",
+      "tier": "严",
+      "red_line": 0.9,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 13,
+      "pass": true
+    },
+    {
+      "label": "运费",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 11,
+      "pass": true
+    },
+    {
+      "label": "优惠活动",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 10,
+      "pass": true
+    },
+    {
+      "label": "价保",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 10,
+      "pass": true
+    },
+    {
+      "label": "支付",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 10,
+      "pass": true
+    },
+    {
+      "label": "订单修改",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 0.9090909090909091,
+      "f1": 0.9523809523809523,
+      "support": 11,
+      "pass": true
+    },
+    {
+      "label": "库存补货",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 0.9,
+      "f1": 0.9473684210526316,
+      "support": 10,
+      "pass": true
+    },
+    {
+      "label": "商品信息",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 0.9166666666666666,
+      "f1": 0.9565217391304348,
+      "support": 12,
+      "pass": true
+    },
+    {
+      "label": "保修维修",
+      "tier": "中",
+      "red_line": 0.8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12,
+      "pass": true
+    },
+    {
+      "label": "账号",
+      "tier": "宽",
+      "red_line": null,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12,
+      "pass": null
+    },
+    {
+      "label": "会员积分",
+      "tier": "宽",
+      "red_line": null,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 11,
+      "pass": null
+    },
+    {
+      "label": "评价",
+      "tier": "宽",
+      "red_line": null,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 11,
+      "pass": null
+    },
+    {
+      "label": "其他",
+      "tier": "宽",
+      "red_line": null,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 10,
+      "pass": null
+    }
+  ],
+  "confusion_matrices": {
+    "退换货": {
+      "tn": 147,
+      "fp": 1,
+      "fn": 1,
+      "tp": 12
+    },
+    "物流": {
+      "tn": 148,
+      "fp": 1,
+      "fn": 1,
+      "tp": 11
+    },
+    "尺码": {
+      "tn": 149,
+      "fp": 0,
+      "fn": 0,
+      "tp": 12
+    },
+    "发票": {
+      "tn": 150,
+      "fp": 0,
+      "fn": 0,
+      "tp": 11
+    },
+    "质量问题": {
+      "tn": 148,
+      "fp": 0,
+      "fn": 0,
+      "tp": 13
+    },
+    "运费": {
+      "tn": 150,
+      "fp": 0,
+      "fn": 0,
+      "tp": 11
+    },
+    "优惠活动": {
+      "tn": 151,
+      "fp": 0,
+      "fn": 0,
+      "tp": 10
+    },
+    "价保": {
+      "tn": 151,
+      "fp": 0,
+      "fn": 0,
+      "tp": 10
+    },
+    "支付": {
+      "tn": 151,
+      "fp": 0,
+      "fn": 0,
+      "tp": 10
+    },
+    "订单修改": {
+      "tn": 150,
+      "fp": 0,
+      "fn": 1,
+      "tp": 10
+    },
+    "库存补货": {
+      "tn": 151,
+      "fp": 0,
+      "fn": 1,
+      "tp": 9
+    },
+    "商品信息": {
+      "tn": 149,
+      "fp": 0,
+      "fn": 1,
+      "tp": 11
+    },
+    "保修维修": {
+      "tn": 149,
+      "fp": 0,
+      "fn": 0,
+      "tp": 12
+    },
+    "账号": {
+      "tn": 149,
+      "fp": 0,
+      "fn": 0,
+      "tp": 12
+    },
+    "会员积分": {
+      "tn": 150,
+      "fp": 0,
+      "fn": 0,
+      "tp": 11
+    },
+    "评价": {
+      "tn": 150,
+      "fp": 0,
+      "fn": 0,
+      "tp": 11
+    },
+    "其他": {
+      "tn": 151,
+      "fp": 0,
+      "fn": 0,
+      "tp": 10
+    }
+  },
+  "error_counts": {
+    "miss": {
+      "库存补货": 1,
+      "物流": 1,
+      "订单修改": 1,
+      "退换货": 1,
+      "商品信息": 1
+    },
+    "extra": {
+      "退换货": 1,
+      "物流": 1
+    },
+    "misplaced_pairs": [
+      {
+        "gold": "订单修改",
+        "pred": "物流"
+      }
+    ],
+    "miss_total": 5,
+    "extra_total": 2,
+    "misplaced_total": 1,
+    "reconciled": true
+  },
+  "errors": [
+    {
+      "id": "dc8a219142d1",
+      "text": "猫爬架买大了一号,搁家里占地方咋整?",
+      "gold": [
+        "尺码"
+      ],
+      "pred": [
+        "尺码",
+        "退换货"
+      ]
+    },
+    {
+      "id": "146eb259d47b",
+      "text": "冻干开封后咋存啊,还有这玩意儿有现货没",
+      "gold": [
+        "商品信息",
+        "库存补货"
+      ],
+      "pred": [
+        "商品信息"
+      ]
+    },
+    {
+      "id": "110b1d2c6fe2",
+      "text": "东西还没到,能改收货地址不?",
+      "gold": [
+        "物流",
+        "订单修改"
+      ],
+      "pred": [
+        "订单修改"
+      ]
+    },
+    {
+      "id": "5ba380efc82b",
+      "text": "我买的猫窝还没发货,能取消订单不?",
+      "gold": [
+        "订单修改"
+      ],
+      "pred": [
+        "物流"
+      ]
+    },
+    {
+      "id": "6584290ef2c9",
+      "text": "发票抬头开错了,能重开不?顺便问下退货咋弄",
+      "gold": [
+        "发票",
+        "退换货"
+      ],
+      "pred": [
+        "发票"
+      ]
+    },
+    {
+      "id": "d23b9e31f4f5",
+      "text": "这猫粮颗粒太粗了,我家主子嚼不动,能退不",
+      "gold": [
+        "商品信息",
+        "退换货"
+      ],
+      "pred": [
+        "退换货"
+      ]
+    }
+  ]
+}
