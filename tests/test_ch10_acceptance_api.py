@@ -62,3 +62,9 @@ def test_corpus_gate_requires_augment_leak(tmp_path, monkeypatch):
     corpus = next(g for g in body["gates"] if g["id"] == "corpus")
     assert corpus["present"] is True
     assert corpus["state"] == "fail"
+
+
+def test_acceptance_assets_are_served():
+    client = TestClient(app)
+    assert client.get("/static/acceptance.css").status_code == 200
+    assert client.get("/static/acceptance.js").status_code == 200

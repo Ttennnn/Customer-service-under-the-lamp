@@ -13,9 +13,12 @@
   <header class="page-header">
     <div>
       <h1>验收总览</h1>
-      <p class="subtitle">九项实证一页看完；每项可单独重跑，日志默认收起。</p>
+      <p class="subtitle">九项实证一页看完；重跑时才展开作业抽屉。</p>
     </div>
-    <a class="linkbtn" href="/admin">返回后台首页</a>
+    <div class="toolbar" style="margin:0">
+      <button id="refresh" class="small" type="button">刷新</button>
+      <a class="linkbtn" href="/admin">返回后台首页</a>
+    </div>
   </header>
 
   <nav class="subnav" aria-label="验收子页">
@@ -26,25 +29,35 @@
   </nav>
 
   <section class="panel">
-    <div class="cards">
-      <div class="card"><div class="card-label">总闸</div><div class="card-value" id="passed">—</div></div>
-      <div class="card"><div class="card-label">分类器服务</div><div class="card-value" id="service">—</div></div>
-      <div class="card"><div class="card-label">闸门数</div><div class="card-value" id="total">9</div></div>
+    <div class="hero">
+      <div>
+        <div class="hero-label">总闸</div>
+        <div class="hero-value" id="passed">—</div>
+        <div class="progress"><div id="progress" style="width:0"></div></div>
+      </div>
+      <div class="kv">
+        <span>分类器 <strong id="service">—</strong></span>
+        <span>闸门 <strong id="total">9</strong></span>
+        <span id="last-refresh" class="hint"></span>
+      </div>
     </div>
     <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
   </section>
 
   <section class="panel">
-    <h2>闸门明细</h2>
-    <div class="table-wrap">
-      <table class="gate-table">
-        <thead>
-          <tr><th>闸门</th><th>状态</th><th>说明</th><th>操作</th></tr>
-        </thead>
-        <tbody id="gate-rows"></tbody>
-      </table>
+    <h2>九项闸门</h2>
+    <div id="gate-list" class="gate-list"></div>
+    <p class="hint">红色先看摘要；需要排查时点「重跑」，底部抽屉会显示状态与日志。</p>
+  </section>
+
+  <section class="panel job-drawer" id="job-drawer" hidden>
+    <div class="toolbar" style="margin:0 0 6px">
+      <strong id="job-name">—</strong>
+      <span id="job-status" class="muted"></span>
+      <button id="job-stop" class="danger small" type="button">停止</button>
+      <button id="job-close" class="small" type="button">关闭</button>
     </div>
-    <p class="hint">红的闸门先看「说明」或展开日志；重作业会二次确认。</p>
+    <pre id="job-log" class="job-log"></pre>
   </section>
 </div>
 
@@ -55,53 +68,208 @@
   "use strict";
 
   var A = window.Acceptance;
-  var rowsEl = document.getElementById("gate-rows");
-  var statusEl = document.getElementById("status");
+  var HEAVY = A.HEAVY;
   var passedEl = document.getElementById("passed");
+  var progressEl = document.getElementById("progress");
   var serviceEl = document.getElementById("service");
   var totalEl = document.getElementById("total");
+  var lastRefreshEl = document.getElementById("last-refresh");
+  var statusEl = document.getElementById("status");
+  var gateList = document.getElementById("gate-list");
+  var refreshButton = document.getElementById("refresh");
+  var drawer = document.getElementById("job-drawer");
+  var jobNameEl = document.getElementById("job-name");
+  var jobStatusEl = document.getElementById("job-status");
+  var jobStop = document.getElementById("job-stop");
+  var jobClose = document.getElementById("job-close");
+  var jobLog = document.getElementById("job-log");
+
+  var activeJob = null;
+  var pollTimer = null;
 
   function setStatus(message, kind) {
     statusEl.className = "status" + (kind ? " " + kind : "");
     statusEl.textContent = message || "";
   }
 
-  function renderGate(gate) {
-    var tr = A.el("tr");
-    var nameCell = A.el("td");
-    nameCell.appendChild(A.el("div", null, gate.label));
-    nameCell.appendChild(A.el("div", "muted", gate.job));
-    tr.appendChild(nameCell);
-
-    var stateCell = A.el("td");
-    stateCell.appendChild(A.stateBadge(gate.state));
-    tr.appendChild(stateCell);
-
-    var detailCell = A.el("td");
-    var detail = gate.detail;
-    if (gate.hint) detailCell.appendChild(A.el("div", null, "先跑：" + gate.hint));
-    detailCell.appendChild(A.el("div", null, A.detailText(detail, 220)));
-    tr.appendChild(detailCell);
-
-    var actionCell = A.el("td");
-    if (gate.job) A.mountJobControls(actionCell, gate, load);
-    else actionCell.appendChild(A.el("span", "muted", "—"));
-    tr.appendChild(actionCell);
-    return tr;
+  function setRunButtonsDisabled(disabled) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".run-btn"),
+      function (button) { button.disabled = disabled; }
+    );
   }
+
+  function sumLeak(leak) {
+    return Object.keys(leak || {}).reduce(function (total, key) {
+      return total + (Number(leak[key]) || 0);
+    }, 0);
+  }
+
+  function summaryFor(gate) {
+    var d = gate.detail || {};
+    if (gate.state === "missing") {
+      return gate.hint ? "还没跑过 · " + gate.hint : "还没跑过";
+    }
+    switch (gate.id) {
+      case "corpus": {
+        var counts = d.counts || {};
+        var augment = d.augment_leak || {};
+        return "train " + (counts.train || 0) +
+          " / val " + (counts.val || 0) +
+          " / test " + (counts.test || 0) +
+          " · 切分泄漏 " + sumLeak(d.leak) +
+          " · 增强泄漏 " + (augment.total == null ? "—" : augment.total) +
+          " · 覆盖缺口 " + ((d.coverage_gaps || []).length);
+      }
+      case "golden":
+        return "通过率 " + A.fmtNumber((d.pass_rate || 0) * 100, 1) +
+          "% · 不一致 " + (d.mismatches || 0);
+      case "train":
+        return "train " + (d.train_samples || 0) +
+          " / val " + (d.val_samples || 0) +
+          " · 早停 " + (d.early_stopped ? "是" : "否");
+      case "export":
+        return "parity " + A.fmtNumber((d.label_match_rate || 0) * 100, 1) +
+          "% · 阈值 " + A.fmtNumber(d.threshold, 2);
+      case "eval": {
+        var golden = d.golden_model || {};
+        return "micro-F1 " + A.fmtNumber(d.micro_f1, 4) +
+          " · 红线未过 " + ((d.red_lines || []).length) +
+          (golden.total ? " · 模型黄金 " + golden.passed + "/" + golden.total : "");
+      }
+      case "threshold":
+        return "expected " + A.fmtNumber(d.expected, 2) +
+          " · best " + A.fmtNumber(d.best, 2) +
+          " · " + (d.matches ? "一致" : "不一致");
+      case "confusion":
+        return (d.matrices == null ? "—" : d.matrices) + " 张 2×2";
+      case "errors":
+        return "漏打 " + (d.miss_total || 0) +
+          " · 多打 " + (d.extra_total || 0) +
+          " · 错位 " + (d.misplaced_total || 0) +
+          " · 对账 " + (d.reconciled ? "通过" : "不通过");
+      case "classify":
+        return "pending " + (d.pending == null ? "—" : d.pending) +
+          " · classified " + (d.classified == null ? "—" : d.classified) +
+          (d.skipped ? " · 本次跳过" : "");
+      default:
+        return A.detailText(d, 180);
+    }
+  }
+
+  function renderGate(gate) {
+    var row = A.el("div", "gate-row");
+    row.appendChild(A.el("span", "dot " + gate.state));
+    var main = A.el("div");
+    main.appendChild(A.el("div", "gate-name", gate.label));
+    main.appendChild(A.el("div", "gate-summary", summaryFor(gate)));
+    row.appendChild(main);
+    row.appendChild(A.stateBadge(gate.state));
+    var button = A.el("button", "small run-btn", "重跑");
+    button.type = "button";
+    button.addEventListener("click", function () { runJob(gate.job); });
+    row.appendChild(button);
+    return row;
+  }
+
+  function render(data) {
+    var total = data.total || 9;
+    var passed = data.passed || 0;
+    passedEl.textContent = passed + " / " + total;
+    totalEl.textContent = String(total);
+    serviceEl.textContent = data.classifier_online ? "在线" : "离线";
+    progressEl.style.width = Math.round((passed / total) * 100) + "%";
+    lastRefreshEl.textContent = "刷新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    gateList.textContent = "";
+    (data.gates || []).forEach(function (gate) {
+      gateList.appendChild(renderGate(gate));
+    });
+    setRunButtonsDisabled(Boolean(activeJob));
+    refreshButton.disabled = Boolean(activeJob);
+  }
+
+  function showDrawer(job) {
+    jobNameEl.textContent = job;
+    jobStatusEl.textContent = "准备中…";
+    jobLog.textContent = "";
+    jobStop.disabled = false;
+    jobClose.disabled = true;
+    drawer.hidden = false;
+  }
+
+  function finishDrawer(exitCode) {
+    jobStatusEl.textContent = exitCode == null ? "已结束" : "退出码 " + exitCode;
+    jobStop.disabled = true;
+    jobClose.disabled = false;
+    activeJob = null;
+    setRunButtonsDisabled(false);
+    refreshButton.disabled = false;
+  }
+
+  function poll(job) {
+    A.jsonFetch("/api/jobs/" + encodeURIComponent(job) + "/status")
+      .then(function (data) {
+        if (activeJob !== job) return;
+        jobLog.textContent = data.output_tail || "";
+        if (data.running) {
+          jobStatusEl.textContent = "运行中…（" + A.fmtTime(data.started_at) + "）";
+          pollTimer = setTimeout(function () { poll(job); }, 1200);
+          return;
+        }
+        finishDrawer(data.exit_code);
+        if (data.exit_code === 0) {
+          setTimeout(load, 400);
+        }
+      })
+      .catch(function (err) {
+        jobStatusEl.textContent = "状态读取失败：" + err.message;
+        finishDrawer(null);
+      });
+  }
+
+  function runJob(job) {
+    if (activeJob) return;
+    if (!job) return;
+    if (HEAVY.has(job) && !window.confirm("「" + job + "」是重作业，可能跑几分钟。继续？")) {
+      return;
+    }
+    activeJob = job;
+    setRunButtonsDisabled(true);
+    refreshButton.disabled = true;
+    showDrawer(job);
+    A.jsonFetch("/api/jobs/" + encodeURIComponent(job) + "/run", { method: "POST" })
+      .then(function () {
+        jobStatusEl.textContent = "已发起…";
+        poll(job);
+      })
+      .catch(function (err) {
+        jobStatusEl.textContent = "发起失败：" + err.message;
+        finishDrawer(null);
+      });
+  }
+
+  jobStop.addEventListener("click", function () {
+    if (!activeJob) return;
+    A.jsonFetch("/api/jobs/" + encodeURIComponent(activeJob) + "/stop", { method: "POST" })
+      .then(function (data) {
+        jobStatusEl.textContent = data.stopped ? "已请求停止…" : "没有在运行";
+      })
+      .catch(function (err) {
+        jobStatusEl.textContent = "停止失败：" + err.message;
+      });
+  });
+
+  jobClose.addEventListener("click", function () {
+    if (activeJob) return; // don't hide a running job
+    drawer.hidden = true;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  });
 
   function load() {
     setStatus("加载中…");
     A.jsonFetch("/api/acceptance/overview")
       .then(function (data) {
-        var total = data.total || 9;
-        passedEl.textContent = (data.passed || 0) + " / " + total;
-        totalEl.textContent = String(total);
-        serviceEl.textContent = data.classifier_online ? "在线" : "离线";
-        rowsEl.textContent = "";
-        (data.gates || []).forEach(function (gate) {
-          rowsEl.appendChild(renderGate(gate));
-        });
+        render(data || {});
         setStatus("");
       })
       .catch(function (err) {
@@ -109,6 +277,7 @@
       });
   }
 
+  refreshButton.addEventListener("click", load);
   load();
 })();
 </script>

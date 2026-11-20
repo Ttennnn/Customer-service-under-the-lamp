@@ -190,6 +190,7 @@
     splitCards.appendChild(card("val", String(counts.val || 0)));
     splitCards.appendChild(card("test", String(counts.test || 0)));
     splitCards.appendChild(card("增强后泄漏", String(augment.total == null ? "—" : augment.total)));
+    splitCards.appendChild(card("增强后训练", manifest.train_augmented_count == null ? "—" : String(manifest.train_augmented_count)));
     splitCards.appendChild(card("curated", String(manifest.curated_count || 0)));
     renderDistribution(manifest);
     renderLeak(manifest);

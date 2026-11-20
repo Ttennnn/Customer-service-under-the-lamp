@@ -96,8 +96,14 @@
     gate.appendChild(A.el("div", "gate-head"));
     gate.appendChild(A.el("div", "gate-title",
       counts.reconciled ? "混淆矩阵笔数对账通过" : "对账不通过，先查评测实现"));
-    gate.appendChild(A.el("div", "hint",
-      "错位明细：" + JSON.stringify(counts.misplaced_pairs || [])));
+    var pairs = counts.misplaced_pairs || [];
+    var details = A.el("details", "hint");
+    details.appendChild(A.el("summary", null,
+      "错位明细（" + pairs.length + " 对）"));
+    var pre = A.el("pre", "job-log open", JSON.stringify(pairs, null, 2));
+    pre.style.maxHeight = "140px";
+    details.appendChild(pre);
+    gate.appendChild(details);
     gateEl.appendChild(gate);
 
     rowsEl.textContent = "";

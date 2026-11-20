@@ -267,6 +267,30 @@ def _page_for(request_path: str):
     )
 
 
+@page_router.get("/static/acceptance.css", response_class=FileResponse)
+def acceptance_css() -> FileResponse:
+    path = Path(STATIC_DIR) / "acceptance.css"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="acceptance.css is missing")
+    return FileResponse(
+        path,
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@page_router.get("/static/acceptance.js", response_class=FileResponse)
+def acceptance_js() -> FileResponse:
+    path = Path(STATIC_DIR) / "acceptance.js"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="acceptance.js is missing")
+    return FileResponse(
+        path,
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @page_router.get("/acceptance")
 def acceptance_home():
     return _page_for("/acceptance")
