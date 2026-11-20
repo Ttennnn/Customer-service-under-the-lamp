@@ -183,6 +183,23 @@
         </a>
       </div>
     </section>
+
+    <section class="panel" aria-labelledby="ch10-title">
+      <h2 id="ch10-title">ch10 主题分类</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="card-label">验收闸门</div>
+          <div class="card-value" id="ch10-passed">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">分类服务</div>
+          <div class="card-value" id="ch10-service">—</div>
+        </div>
+      </div>
+      <p class="conclusion">
+        <a href="/topics">看主题分布 →</a> · <a href="/acceptance">进入九项验收 →</a>
+      </p>
+    </section>
   </main>
 </div>
 
@@ -259,6 +276,26 @@
 
   refreshButton.addEventListener("click", loadSummary);
   loadSummary();
+})();
+</script>
+<script>
+(function () {
+  "use strict";
+  var passed = document.getElementById("ch10-passed");
+  var service = document.getElementById("ch10-service");
+  fetch("/api/acceptance/overview")
+    .then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    })
+    .then(function (data) {
+      passed.textContent = (data.passed || 0) + " / " + (data.total || 9);
+      service.textContent = data.classifier_online ? "在线" : "离线";
+    })
+    .catch(function () {
+      passed.textContent = "—";
+      service.textContent = "—";
+    });
 })();
 </script>
 </body>

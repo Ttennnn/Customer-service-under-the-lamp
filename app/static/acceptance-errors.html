@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>验收 · 错例 · 灯下后台</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>错例复核</h1>
+      <p class="subtitle">逐条标准/预测对照，按漏打、多打、错位记账；错位一次记两笔。</p>
+    </div>
+    <a class="linkbtn" href="/acceptance">返回验收总览</a>
+  </header>
+
+  <nav class="subnav" aria-label="验收子页">
+    <a href="/acceptance">总览</a>
+    <a href="/acceptance/eval">评测</a>
+    <a href="/acceptance/data">数据</a>
+    <a class="active" href="/acceptance/errors">错例</a>
+  </nav>
+
+  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+
+  <section class="panel">
+    <h2>方向记账</h2>
+    <div id="counts" class="cards"></div>
+    <div id="gate"></div>
+  </section>
+
+  <section class="panel">
+    <h2>逐条错例</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>id</th><th>句子</th><th>标准标签</th><th>预测标签</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="empty" hidden>没有错例，或评测报告还没生成。</p>
+  </section>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script src="/static/acceptance.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var A = window.Acceptance;
+  var statusEl = document.getElementById("status");
+  var countsEl = document.getElementById("counts");
+  var gateEl = document.getElementById("gate");
+  var rowsEl = document.getElementById("rows");
+  var emptyEl = document.getElementById("empty");
+
+  function setStatus(message, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function card(label, value) {
+    var node = A.el("div", "card");
+    node.appendChild(A.el("div", "card-label", label));
+    node.appendChild(A.el("div", "card-value", value));
+    return node;
+  }
+
+  function render(data) {
+    var counts = data.error_counts || {};
+    countsEl.textContent = "";
+    countsEl.appendChild(card("漏打", String(counts.miss_total || 0)));
+    countsEl.appendChild(card("多打", String(counts.extra_total || 0)));
+    countsEl.appendChild(card("错位", String(counts.misplaced_total || 0)));
+    countsEl.appendChild(card("对账", counts.reconciled ? "通过" : "不通过"));
+
+    gateEl.textContent = "";
+    var gate = A.el("div", "gate " + (counts.reconciled ? "pass" : "fail"));
+    gate.appendChild(A.el("div", "gate-head"));
+    gate.appendChild(A.el("div", "gate-title", counts.reconciled ? "混淆矩阵笔数对账通过" : "对账不通过，先查评测实现"));
+    gate.appendChild(A.el("div", "gate-detail", "错位明细：" + JSON.stringify(counts.misplaced_pairs || [])));
+    gateEl.appendChild(gate);
+    A.mountJobControls(gateEl, { job: "ch10-eval" }, load);
+
+    rowsEl.textContent = "";
+    var errors = data.errors || [];
+    emptyEl.hidden = errors.length > 0;
+    errors.forEach(function (item) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, item.id == null ? "—" : item.id));
+      tr.appendChild(A.el("td", null, item.text || "—"));
+      var gold = A.el("td");
+      (item.gold || []).forEach(function (label) { gold.appendChild(A.el("span", "chip", label)); });
+      tr.appendChild(gold);
+      var pred = A.el("td");
+      (item.pred || []).forEach(function (label) { pred.appendChild(A.el("span", "chip", label)); });
+      tr.appendChild(pred);
+      rowsEl.appendChild(tr);
+    });
+  }
+
+  function load() {
+    setStatus("加载中…");
+    A.jsonFetch("/api/acceptance/errors")
+      .then(function (data) {
+        if (!data.present) {
+          setStatus("评测报告还没生成。", "error");
+          countsEl.textContent = "";
+          gateEl.textContent = "";
+          var node = A.el("div", "gate missing");
+          node.appendChild(A.el("div", "gate-detail", data.hint || "make ch10-eval"));
+          A.mountJobControls(node, { job: "ch10-eval" }, load);
+          gateEl.appendChild(node);
+          return;
+        }
+        render(data);
+        setStatus("");
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + err.message, "error");
+      });
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>验收 · 数据 · 灯下后台</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>数据血缘</h1>
+      <p class="subtitle">语料四段、三份考卷、泄漏自检、训练与 ONNX 产物盘点。</p>
+    </div>
+    <a class="linkbtn" href="/acceptance">返回验收总览</a>
+  </header>
+
+  <nav class="subnav" aria-label="验收子页">
+    <a href="/acceptance">总览</a>
+    <a href="/acceptance/eval">评测</a>
+    <a class="active" href="/acceptance/data">数据</a>
+    <a href="/acceptance/errors">错例</a>
+  </nav>
+
+  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+
+  <section class="panel">
+    <h2>三份考卷</h2>
+    <div id="split-cards" class="cards"></div>
+    <div id="dataset-gate"></div>
+  </section>
+
+  <section class="panel">
+    <h2>每类分布</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>类目</th><th class="num">train</th><th class="num">val</th><th class="num">test</th><th class="num">train 占比</th><th class="num">val 占比</th><th class="num">test 占比</th><th>三份覆盖</th></tr></thead>
+        <tbody id="class-rows"></tbody>
+      </table>
+    </div>
+    <p id="class-empty" class="empty" hidden>还没有 manifest。</p>
+  </section>
+
+  <section class="panel">
+    <h2>泄漏与覆盖</h2>
+    <div id="health"></div>
+  </section>
+
+  <section class="panel">
+    <h2>产物盘点</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>文件</th><th class="num">大小</th><th>修改时间</th></tr></thead>
+        <tbody id="files"></tbody>
+      </table>
+    </div>
+    <p id="files-empty" class="empty" hidden>没有可列出的产物。</p>
+  </section>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script src="/static/acceptance.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var A = window.Acceptance;
+  var statusEl = document.getElementById("status");
+  var splitCards = document.getElementById("split-cards");
+  var datasetGate = document.getElementById("dataset-gate");
+  var classRows = document.getElementById("class-rows");
+  var classEmpty = document.getElementById("class-empty");
+  var healthEl = document.getElementById("health");
+  var filesEl = document.getElementById("files");
+  var filesEmpty = document.getElementById("files-empty");
+
+  function setStatus(message, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function card(label, value) {
+    var node = A.el("div", "card");
+    node.appendChild(A.el("div", "card-label", label));
+    node.appendChild(A.el("div", "card-value", value));
+    return node;
+  }
+
+  function fmtSize(bytes) {
+    var n = Number(bytes) || 0;
+    if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+    if (n > 1024) return (n / 1024).toFixed(1) + " KB";
+    return n + " B";
+  }
+
+  function render(data) {
+    splitCards.textContent = "";
+    datasetGate.textContent = "";
+    var manifest = data.manifest || {};
+    var counts = manifest.counts || {};
+    splitCards.appendChild(card("train", String(counts.train || 0)));
+    splitCards.appendChild(card("val", String(counts.val || 0)));
+    splitCards.appendChild(card("test", String(counts.test || 0)));
+    splitCards.appendChild(card("近重复合并", String(manifest.near_duplicates_merged || 0)));
+
+    var leak = manifest.leak || {};
+    var leakClean = Object.keys(leak).every(function (key) { return Number(leak[key]) === 0; });
+    var gate = A.el("div", "gate " + (leakClean ? "pass" : "fail"));
+    gate.appendChild(A.el("div", "gate-head"));
+    gate.appendChild(A.el("div", "gate-title", leakClean ? "泄漏自检通过" : "泄漏自检失败"));
+    gate.appendChild(A.el("div", "gate-detail", "train∩val=" + (leak.train_val || 0) +
+      " · train∩test=" + (leak.train_test || 0) + " · val∩test=" + (leak.val_test || 0)));
+    datasetGate.appendChild(gate);
+    A.mountJobControls(datasetGate, { job: "ch10-dataset" }, load);
+
+    classRows.textContent = "";
+    var perClass = manifest.per_class || {};
+    var labels = Object.keys(perClass);
+    classEmpty.hidden = labels.length > 0;
+    labels.forEach(function (label) {
+      var item = perClass[label] || {};
+      var coverage = (manifest.coverage || {})[label] || [];
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, label));
+      ["train", "val", "test"].forEach(function (split) {
+        var cell = item[split] || {};
+        tr.appendChild(A.el("td", "num", String(cell.count == null ? "—" : cell.count)));
+      });
+      ["train", "val", "test"].forEach(function (split) {
+        var cell = item[split] || {};
+        tr.appendChild(A.el("td", "num", A.fmtNumber(cell.ratio, 3)));
+      });
+      tr.appendChild(A.el("td", null, [true, true, true].map(function (_, index) {
+        return coverage[index] ? "✓" : "×";
+      }).join(" ")));
+      classRows.appendChild(tr);
+    });
+
+    healthEl.textContent = "";
+    var gaps = manifest.coverage_gaps || [];
+    healthEl.appendChild(A.el("p", "muted",
+      "覆盖缺口：" + (gaps.length ? gaps.map(function (gap) {
+        return gap.label + "/" + gap.split;
+      }).join("、") : "无") +
+      " · 近重复先合并再切分 · seed=" + (manifest.seed == null ? "—" : manifest.seed)));
+    healthEl.appendChild(A.el("p", "muted",
+      "语料构成：" + JSON.stringify(manifest.origin_counts || {})));
+
+    filesEl.textContent = "";
+    var files = data.files || [];
+    filesEmpty.hidden = files.length > 0;
+    files.forEach(function (file) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, file.path));
+      tr.appendChild(A.el("td", "num", fmtSize(file.size)));
+      tr.appendChild(A.el("td", null, A.fmtTime(new Date((file.modified_at || 0) * 1000))));
+      filesEl.appendChild(tr);
+    });
+  }
+
+  function renderMissing(hint) {
+    splitCards.textContent = "";
+    classEmpty.hidden = true;
+    datasetGate.textContent = "";
+    var cardNode = A.el("div", "gate missing");
+    cardNode.appendChild(A.el("div", "gate-detail", hint));
+    A.mountJobControls(cardNode, { job: "ch10-dataset" }, load);
+    datasetGate.appendChild(cardNode);
+  }
+
+  function load() {
+    setStatus("加载中…");
+    A.jsonFetch("/api/acceptance/data")
+      .then(function (data) {
+        if (!data.present) {
+          setStatus("数据集还没生成。", "error");
+          renderMissing(data.hint || "make ch10-dataset");
+          return;
+        }
+        render(data);
+        setStatus("");
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + err.message, "error");
+      });
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
