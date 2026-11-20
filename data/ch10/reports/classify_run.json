@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "skipped": false,
+  "pending": 16,
+  "classified": 16,
+  "classified_total": 16,
+  "label_counts": {
+    "退换货": 3,
+    "物流": 1,
+    "商品信息": 4,
+    "库存补货": 2,
+    "其他": 1,
+    "订单修改": 2,
+    "保修维修": 1,
+    "支付": 2
+  },
+  "duration_s": 0.21369338035583496
+}

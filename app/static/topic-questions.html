@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>类目问题 · 灯下后台</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2430; --muted: #5c6675;
+    --border: #d9dee6; --accent: #2563eb; --chip: #eef2f8;
+    --error: #b42318; --shadow: 0 18px 50px rgba(15, 23, 42, .12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f; --panel: #1d232d; --text: #e6ebf2; --muted: #9aa6b6;
+      --border: #333d4c; --accent: #6d9bff; --chip: #252d39;
+      --error: #ff8a80; --shadow: 0 18px 50px rgba(0, 0, 0, .45);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 64px; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .page { max-width: 1120px; margin: 0 auto; }
+  .page-header { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  .subtitle { margin: 0; color: var(--muted); }
+  .linkbtn { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 9px; padding: 7px 13px; font-size: 13px; text-decoration: none; }
+  .linkbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); }
+  .status { min-height: 20px; margin: 8px 0; color: var(--muted); font-size: 13px; }
+  .status.error { color: var(--error); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 1px 8px; margin: 1px 3px 1px 0; font-size: 12px; }
+  .badge-warn { color: #8a4b00; background: #fff4e0; border-radius: 6px; padding: 0 6px; font-size: 12px; }
+  .pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 12px; }
+  .pager button { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 11px; cursor: pointer; }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  .empty { color: var(--muted); padding: 18px 0; }
+</style>
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1 id="title">类目问题</h1>
+      <p class="subtitle" id="subtitle">分页查看这一类下归类到的全部问题；多标签问题会在命中的每个类目下出现。</p>
+    </div>
+    <a class="linkbtn" href="/topics">返回主题分布</a>
+  </header>
+
+  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+
+  <main class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>标准化问法</th>
+            <th>用户原话</th>
+            <th>命中类目</th>
+            <th>来源</th>
+            <th>同义合并</th>
+            <th>审核状态</th>
+            <th>落池时间</th>
+            <th>归类时间</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="empty" hidden>这一类还没有问题。</p>
+    <div class="pager">
+      <span id="page-info" class="muted"></span>
+      <button id="prev" type="button">上一页</button>
+      <button id="next" type="button">下一页</button>
+    </div>
+  </main>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script>
+(function () {
+  "use strict";
+
+  var params = new URLSearchParams(window.location.search);
+  var label = params.get("label") || "";
+  var page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
+  var size = Math.max(1, Math.min(100, parseInt(params.get("size") || "20", 10) || 20));
+
+  var titleEl = document.getElementById("title");
+  var subtitleEl = document.getElementById("subtitle");
+  var statusEl = document.getElementById("status");
+  var rowsEl = document.getElementById("rows");
+  var emptyEl = document.getElementById("empty");
+  var pageInfoEl = document.getElementById("page-info");
+  var prevEl = document.getElementById("prev");
+  var nextEl = document.getElementById("next");
+
+  function setStatus(message, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function fmtTime(value) {
+    if (!value) return "—";
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function cell(row, value) {
+    var td = el("td");
+    td.appendChild(value);
+    row.appendChild(td);
+  }
+
+  function render(data) {
+    titleEl.textContent = "类目问题 · " + data.label;
+    subtitleEl.textContent = "共 " + data.total + " 条；多标签问题在命中的每个类目下都会出现。";
+    rowsEl.textContent = "";
+    emptyEl.hidden = data.total > 0;
+
+    data.items.forEach(function (item) {
+      var tr = el("tr");
+      var textCell = el("td");
+      textCell.appendChild(el("div", null, item.text || "—"));
+      if (!item.normalized) {
+        textCell.appendChild(el("span", "badge-warn", "原话兜底"));
+      }
+      tr.appendChild(textCell);
+
+      cell(tr, el("div", "muted", item.raw_question || "—"));
+
+      var labelsCell = el("td");
+      (item.labels || []).forEach(function (labelName) {
+        labelsCell.appendChild(el("span", "chip", labelName));
+      });
+      tr.appendChild(labelsCell);
+
+      cell(tr, el("div", null, item.source || "—"));
+      cell(tr, el("div", null, item.occurrence_count != null ? item.occurrence_count : "—"));
+      cell(tr, el("div", null, item.review_status || "—"));
+      cell(tr, el("div", null, fmtTime(item.created_at)));
+      cell(tr, el("div", null, fmtTime(item.classified_at)));
+      rowsEl.appendChild(tr);
+    });
+
+    pageInfoEl.textContent = "第 " + data.page + " / " + Math.max(data.pages, 1) + " 页";
+    prevEl.disabled = data.page <= 1;
+    nextEl.disabled = data.page >= data.pages;
+  }
+
+  function go(newPage) {
+    var query = new URLSearchParams({ label: label, page: String(newPage), size: String(size) });
+    window.location.href = "/topics/questions?" + query.toString();
+  }
+
+  function load() {
+    if (!label) {
+      setStatus("地址栏缺少 label 参数。", "error");
+      return;
+    }
+    setStatus("加载中…");
+    fetch("/api/topics/questions?label=" + encodeURIComponent(label) + "&page=" + page + "&size=" + size)
+      .then(function (response) {
+        if (!response.ok) {
+          return response.text().then(function (raw) {
+            var detail = "HTTP " + response.status;
+            try {
+              var data = raw ? JSON.parse(raw) : null;
+              if (data && typeof data.detail === "string") detail = data.detail;
+            } catch (err) { /* keep default */ }
+            throw new Error(detail);
+          });
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        render(data || {});
+        setStatus("");
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + err.message, "error");
+        emptyEl.hidden = true;
+      });
+  }
+
+  prevEl.addEventListener("click", function () { go(page - 1); });
+  nextEl.addEventListener("click", function () { go(page + 1); });
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>验收 · 评测 · 灯下后台</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>评测</h1>
+      <p class="subtitle">测试集 micro/macro、每类红线、九档阈值、17 张混淆矩阵，以及单句现场试分类。</p>
+    </div>
+    <a class="linkbtn" href="/acceptance">返回验收总览</a>
+  </header>
+
+  <nav class="subnav" aria-label="验收子页">
+    <a href="/acceptance">总览</a>
+    <a class="active" href="/acceptance/eval">评测</a>
+    <a href="/acceptance/data">数据</a>
+    <a href="/acceptance/errors">错例</a>
+  </nav>
+
+  <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+
+  <section class="panel">
+    <h2>汇总</h2>
+    <div id="summary" class="cards"></div>
+  </section>
+
+  <section class="panel">
+    <h2>模型黄金样例（部署阈值）</h2>
+    <div id="golden-summary" class="cards"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>id</th><th>标准标签</th><th>预测标签</th></tr></thead>
+        <tbody id="golden-rows"></tbody>
+      </table>
+    </div>
+    <p id="golden-empty" class="empty" hidden>评测报告里还没有模型黄金样例。</p>
+  </section>
+
+  <section class="panel">
+    <h2>每类指标与红线</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>类目</th><th>档位</th><th>红线</th><th class="num">P</th><th class="num">R</th><th class="num">F1</th><th class="num">support</th><th>判定</th></tr></thead>
+        <tbody id="class-rows"></tbody>
+      </table>
+    </div>
+    <p id="class-empty" class="empty" hidden>还没有评测报告。</p>
+  </section>
+
+  <section class="panel">
+    <h2>阈值扫描（验证集）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>候选阈值</th><th class="num">micro F1</th><th class="num">macro F1</th></tr></thead>
+        <tbody id="scan-rows"></tbody>
+      </table>
+    </div>
+    <p id="scan-empty" class="empty" hidden>还没有阈值扫描报告。</p>
+  </section>
+
+  <section class="panel">
+    <h2>混淆矩阵（17 类）</h2>
+    <div id="matrices" class="matrix-grid"></div>
+    <p id="matrix-empty" class="empty" hidden>还没有混淆矩阵。</p>
+  </section>
+
+  <section class="panel">
+    <h2>单句试分类</h2>
+    <div class="toolbar">
+      <input id="probe-input" type="text" value="买大了想退" aria-label="试分类句子">
+      <button id="probe-run" class="primary" type="button">分类</button>
+      <span id="probe-status" class="muted"></span>
+    </div>
+    <div id="probe-result"></div>
+  </section>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script src="/static/acceptance.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var A = window.Acceptance;
+  var statusEl = document.getElementById("status");
+  var summaryEl = document.getElementById("summary");
+  var goldenSummary = document.getElementById("golden-summary");
+  var goldenRows = document.getElementById("golden-rows");
+  var goldenEmpty = document.getElementById("golden-empty");
+  var classRows = document.getElementById("class-rows");
+  var classEmpty = document.getElementById("class-empty");
+  var scanRows = document.getElementById("scan-rows");
+  var scanEmpty = document.getElementById("scan-empty");
+  var matricesEl = document.getElementById("matrices");
+  var matrixEmpty = document.getElementById("matrix-empty");
+  var probeInput = document.getElementById("probe-input");
+  var probeRun = document.getElementById("probe-run");
+  var probeStatus = document.getElementById("probe-status");
+  var probeResult = document.getElementById("probe-result");
+
+  function setStatus(message, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function card(label, value) {
+    var node = A.el("div", "card");
+    node.appendChild(A.el("div", "card-label", label));
+    node.appendChild(A.el("div", "card-value", value));
+    return node;
+  }
+
+  function renderMissing(message) {
+    summaryEl.textContent = "";
+    var cardNode = A.el("div", "gate missing");
+    cardNode.appendChild(A.el("div", "gate-head"));
+    cardNode.appendChild(A.el("div", "gate-detail", message));
+    A.mountJobControls(cardNode, { job: "ch10-eval" }, load);
+    summaryEl.appendChild(cardNode);
+  }
+
+  function renderSummary(report) {
+    var overall = report.overall || {};
+    summaryEl.textContent = "";
+    summaryEl.appendChild(card("micro F1", A.fmtNumber(overall.micro_f1, 4)));
+    summaryEl.appendChild(card("macro F1", A.fmtNumber(overall.macro_f1, 4)));
+    summaryEl.appendChild(card("micro P / R",
+      A.fmtNumber(overall.micro_precision, 3) + " / " + A.fmtNumber(overall.micro_recall, 3)));
+    summaryEl.appendChild(card("测试集", String(report.dataset_size || 0)));
+    var th = report.threshold || {};
+    summaryEl.appendChild(card("阈值", A.fmtNumber(th.threshold, 2) + " · " + (th.source || "—")));
+    summaryEl.appendChild(card("错例", String((report.errors || []).length)));
+  }
+
+  function renderGolden(report) {
+    var golden = report.golden_model;
+    goldenSummary.textContent = "";
+    goldenRows.textContent = "";
+    if (!golden) {
+      goldenEmpty.hidden = false;
+      return;
+    }
+    goldenEmpty.hidden = true;
+    goldenSummary.appendChild(card("黄金样例", golden.passed + " / " + golden.total));
+    goldenSummary.appendChild(card("通过率", A.fmtNumber(golden.pass_rate * 100, 1) + "%"));
+    goldenSummary.appendChild(card("多诉求", golden.multi_claim.passed + " / " + golden.multi_claim.total));
+    (golden.mismatches || []).forEach(function (item) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, item.id));
+      tr.appendChild(A.el("td", null, (item.gold || []).join("、")));
+      tr.appendChild(A.el("td", null, (item.predicted || []).join("、")));
+      goldenRows.appendChild(tr);
+    });
+    if (!(golden.mismatches || []).length) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, "—"));
+      tr.appendChild(A.el("td", null, "全部一致"));
+      tr.appendChild(A.el("td", null, "—"));
+      goldenRows.appendChild(tr);
+    }
+  }
+
+  function renderClasses(report) {
+    classRows.textContent = "";
+    var rows = report.per_class || [];
+    classEmpty.hidden = rows.length > 0;
+    rows.forEach(function (row) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, row.label));
+      tr.appendChild(A.el("td", null, row.tier));
+      tr.appendChild(A.el("td", null, row.red_line == null ? "—" : A.fmtNumber(row.red_line, 2)));
+      tr.appendChild(A.el("td", "num", A.fmtNumber(row.precision, 4)));
+      tr.appendChild(A.el("td", "num", A.fmtNumber(row.recall, 4)));
+      tr.appendChild(A.el("td", "num", A.fmtNumber(row.f1, 4)));
+      tr.appendChild(A.el("td", "num", String(row.support == null ? "—" : row.support)));
+      var verdict = row.pass == null ? ["—", "verdict-na"] : (row.pass ? ["✅", "verdict-pass"] : ["❌ 先回头搞数据", "verdict-fail"]);
+      tr.appendChild(A.el("td", verdict[1], verdict[0]));
+      classRows.appendChild(tr);
+    });
+  }
+
+  function renderScan(report) {
+    scanRows.textContent = "";
+    var scan = report.threshold_scan && report.threshold_scan.scan;
+    scanEmpty.hidden = !!(scan && scan.length);
+    (scan || []).forEach(function (row) {
+      var tr = A.el("tr");
+      tr.appendChild(A.el("td", null, A.fmtNumber(row.threshold, 2)));
+      tr.appendChild(A.el("td", "num", A.fmtNumber(row.micro_f1, 4)));
+      tr.appendChild(A.el("td", "num", A.fmtNumber(row.macro_f1, 4)));
+      scanRows.appendChild(tr);
+    });
+  }
+
+  function renderMatrices(report) {
+    matricesEl.textContent = "";
+    var matrices = report.confusion_matrices || {};
+    var labels = Object.keys(matrices);
+    matrixEmpty.hidden = labels.length > 0;
+    labels.forEach(function (label) {
+      var item = matrices[label];
+      var box = A.el("div", "matrix");
+      box.appendChild(A.el("div", "matrix-title", label));
+      var table = A.el("table");
+      var head = A.el("tr");
+      head.appendChild(A.el("th", null, ""));
+      head.appendChild(A.el("th", null, "pred 0"));
+      head.appendChild(A.el("th", null, "pred 1"));
+      table.appendChild(head);
+      var row0 = A.el("tr");
+      row0.appendChild(A.el("th", null, "gold 0"));
+      row0.appendChild(A.el("td", null, String(item.tn)));
+      row0.appendChild(A.el("td", null, String(item.fp)));
+      table.appendChild(row0);
+      var row1 = A.el("tr");
+      row1.appendChild(A.el("th", null, "gold 1"));
+      row1.appendChild(A.el("td", null, String(item.fn)));
+      row1.appendChild(A.el("td", null, String(item.tp)));
+      table.appendChild(row1);
+      box.appendChild(table);
+      matricesEl.appendChild(box);
+    });
+  }
+
+  function renderProbe(data) {
+    probeResult.textContent = "";
+    var item = (data.items || [])[0];
+    if (!item) {
+      probeResult.appendChild(A.el("p", "empty", "没有返回结果"));
+      return;
+    }
+    probeResult.appendChild(A.el("p", "muted", "命中：" + (item.labels || []).join("、")));
+    var scores = item.scores || {};
+    Object.keys(scores).sort(function (a, b) {
+      return Number(scores[b]) - Number(scores[a]);
+    }).forEach(function (label) {
+      var score = Number(scores[label]) || 0;
+      var row = A.el("div", "score-row");
+      row.appendChild(A.el("div", null, label));
+      var track = A.el("div", "score-track");
+      var fill = A.el("div", "score-fill");
+      fill.style.width = Math.max(1, Math.round(score * 100)) + "%";
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(A.el("div", "num", A.fmtNumber(score, 3)));
+      probeResult.appendChild(row);
+    });
+  }
+
+  function probe() {
+    probeStatus.textContent = "分类中…";
+    A.jsonFetch("/api/acceptance/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts: [probeInput.value] })
+    })
+      .then(function (data) {
+        probeStatus.textContent = "";
+        renderProbe(data || {});
+      })
+      .catch(function (err) {
+        probeStatus.textContent = "失败：" + err.message;
+      });
+  }
+
+  function load() {
+    setStatus("加载中…");
+    A.jsonFetch("/api/acceptance/eval")
+      .then(function (report) {
+        if (!report.present) {
+          setStatus("评测报告还没生成。", "error");
+          renderMissing((report.hint || "make ch10-eval"));
+          return;
+        }
+        renderSummary(report);
+        renderGolden(report);
+        renderClasses(report);
+        renderScan(report);
+        renderMatrices(report);
+        setStatus("");
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + err.message, "error");
+      });
+  }
+
+  probeRun.addEventListener("click", probe);
+  probeInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") probe();
+  });
+  load();
+})();
+</script>
+</body>
+</html>

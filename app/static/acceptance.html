@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>验收总览 · 灯下后台</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+</head>
+<body>
+<div id="admin-nav"></div>
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>九项验收</h1>
+      <p class="subtitle">语料、黄金闸、训练、ONNX、评测、阈值、混淆矩阵、错例、旁路归类；每项可在此重跑。</p>
+    </div>
+    <a class="linkbtn" href="/admin">返回后台首页</a>
+  </header>
+
+  <nav class="subnav" aria-label="验收子页">
+    <a class="active" href="/acceptance">总览</a>
+    <a href="/acceptance/eval">评测</a>
+    <a href="/acceptance/data">数据</a>
+    <a href="/acceptance/errors">错例</a>
+  </nav>
+
+  <section class="panel">
+    <div class="cards">
+      <div class="card"><div class="card-label">总闸</div><div class="card-value" id="passed">—</div></div>
+      <div class="card"><div class="card-label">分类器服务</div><div class="card-value" id="service">—</div></div>
+      <div class="card"><div class="card-label">闸门数</div><div class="card-value" id="total">—</div></div>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">加载中…</p>
+  </section>
+
+  <section class="panel">
+    <h2>闸门明细</h2>
+    <div id="gates" class="gate-grid"></div>
+  </section>
+</div>
+
+<script src="/static/admin.js" defer></script>
+<script src="/static/acceptance.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var A = window.Acceptance;
+  var gatesEl = document.getElementById("gates");
+  var statusEl = document.getElementById("status");
+  var passedEl = document.getElementById("passed");
+  var serviceEl = document.getElementById("service");
+  var totalEl = document.getElementById("total");
+
+  function setStatus(message, kind) {
+    statusEl.className = "status" + (kind ? " " + kind : "");
+    statusEl.textContent = message || "";
+  }
+
+  function stateText(state) {
+    if (state === "pass") return "通过";
+    if (state === "fail") return "未过线";
+    return "未跑过";
+  }
+
+  function detailText(detail) {
+    if (detail === null || detail === undefined) return "";
+    if (typeof detail !== "object") return String(detail);
+    return Object.keys(detail).map(function (key) {
+      var value = detail[key];
+      if (value === null || value === undefined) value = "—";
+      if (typeof value === "object") value = JSON.stringify(value);
+      return key + "=" + value;
+    }).join(" · ");
+  }
+
+  function renderGate(gate) {
+    var card = A.el("div", "gate " + gate.state);
+    var head = A.el("div", "gate-head");
+    head.appendChild(A.el("div", "gate-title", gate.label));
+    head.appendChild(A.el("span", "badge " + gate.state, stateText(gate.state)));
+    card.appendChild(head);
+    card.appendChild(A.el("div", "gate-detail", detailText(gate.detail)));
+    if (gate.hint) {
+      card.appendChild(A.el("div", "gate-detail", "先跑：" + gate.hint));
+    }
+    if (gate.job) {
+      A.mountJobControls(card, gate, load);
+    }
+    return card;
+  }
+
+  function load() {
+    setStatus("加载中…");
+    A.jsonFetch("/api/acceptance/overview")
+      .then(function (data) {
+        passedEl.textContent = (data.passed || 0) + " / " + (data.total || 9);
+        totalEl.textContent = String(data.total || 9);
+        serviceEl.textContent = data.classifier_online ? "在线" : "离线";
+        gatesEl.textContent = "";
+        (data.gates || []).forEach(function (gate) {
+          gatesEl.appendChild(renderGate(gate));
+        });
+        setStatus("");
+      })
+      .catch(function (err) {
+        setStatus("加载失败：" + err.message, "error");
+      });
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

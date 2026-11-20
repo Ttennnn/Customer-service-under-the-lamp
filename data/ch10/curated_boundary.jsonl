@@ -1,0 +1,16 @@
+{"id": "curated_01", "text": "猫砂盆开胶了还能换一个吗", "labels": ["退换货", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_02", "text": "开胶了能换货不", "labels": ["退换货", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_03", "text": "这猫窝开胶了还能退吗", "labels": ["退换货", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_04", "text": "开胶了想换一个", "labels": ["退换货", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_05", "text": "开胶了能换新吗", "labels": ["质量问题", "保修维修"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_06", "text": "开胶了保修期内能修吗", "labels": ["质量问题", "保修维修"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_07", "text": "快递催一下,色差有点大能换货吗", "labels": ["退换货", "物流", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_08", "text": "帮我催下物流,顺便问下有色差能换不", "labels": ["退换货", "物流", "质量问题"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_09", "text": "订单地址写错了能改吗,现在发货了没", "labels": ["物流", "订单修改"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_10", "text": "想改收货地址,顺便查下发货了吗", "labels": ["物流", "订单修改"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_11", "text": "积分能抵钱吗,这个月满减还有吗", "labels": ["优惠活动", "会员积分"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_12", "text": "会员积分能当钱用吗,满减券还能领不", "labels": ["优惠活动", "会员积分"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_13", "text": "订单能取消吗,退款多久到账", "labels": ["退换货", "订单修改"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_14", "text": "想取消订单,钱什么时候退", "labels": ["退换货", "订单修改"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_15", "text": "你家猫粮好吃不", "labels": ["其他"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}
+{"id": "curated_16", "text": "猫粮味道怎么样", "labels": ["其他"], "origin": "curated", "source_refs": [], "meta": {"source": "review_boundary_fix"}}

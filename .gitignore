@@ -3,9 +3,19 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-ml/
 .pytest_cache/
 .data/
 log/
 .worktrees/
+
+# ch10 model artifacts; golden samples and reports stay tracked
+data/ch10/model/
+data/ch10/onnx/
+data/ch10/dataset/
+data/ch10/generated/
+data/ch10/corpus_*.jsonl
+data/ch10/sample_review.md
+log/classifier.*
 
 .idea/

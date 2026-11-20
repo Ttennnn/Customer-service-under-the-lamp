@@ -1,0 +1,16 @@
+# ch10 ML stack for the isolated Python 3.12 .venv-ml environment.
+# The main .venv stays on requirements.txt and never imports these packages.
+#
+# PyTorch 2.6.0 + CUDA 12.4 is the release line that explicitly ships a
+# cu124 wheel and supports CPython 3.12 (Context7: /pytorch/pytorch
+# RELEASE.md). The CUDA wheel comes from PyTorch's own index; the Makefile
+# passes --extra-index-url for it.
+-r requirements.txt
+torch==2.6.0+cu124
+transformers==4.57.3
+accelerate>=1.0,<2
+scikit-learn>=1.5,<2
+onnx>=1.16,<2
+onnxruntime>=1.20,<2
+tokenizers>=0.21,<1
+numpy>=1.26,<3

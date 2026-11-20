@@ -1,0 +1,117 @@
+{
+  "model_name": "hfl/chinese-roberta-wwm-ext",
+  "train_samples": 2116,
+  "val_samples": 133,
+  "max_length": 128,
+  "epochs": 8,
+  "batch_size": 16,
+  "learning_rate": 2e-05,
+  "seed": 42,
+  "fp16": true,
+  "duration_s": 54.06238412857056,
+  "best_checkpoint": "data\\ch10\\model\\checkpoints\\checkpoint-399",
+  "early_stopped": true,
+  "epoch_metrics": [
+    {
+      "eval_loss": 0.189742311835289,
+      "eval_micro_f1": 0.859106529209622,
+      "eval_macro_f1": 0.8097279538434234,
+      "eval_runtime": 0.1225,
+      "eval_samples_per_second": 1085.571,
+      "eval_steps_per_second": 40.811,
+      "epoch": 1.0,
+      "step": 133
+    },
+    {
+      "eval_loss": 0.10401204973459244,
+      "eval_micro_f1": 0.9539473684210527,
+      "eval_macro_f1": 0.9540778127556493,
+      "eval_runtime": 0.1174,
+      "eval_samples_per_second": 1132.696,
+      "eval_steps_per_second": 42.583,
+      "epoch": 2.0,
+      "step": 266
+    },
+    {
+      "eval_loss": 0.07469189167022705,
+      "eval_micro_f1": 0.9773462783171522,
+      "eval_macro_f1": 0.9772354762338373,
+      "eval_runtime": 0.1169,
+      "eval_samples_per_second": 1138.029,
+      "eval_steps_per_second": 42.783,
+      "epoch": 3.0,
+      "step": 399
+    },
+    {
+      "eval_loss": 0.060893308371305466,
+      "eval_micro_f1": 0.9773462783171522,
+      "eval_macro_f1": 0.9772354762338373,
+      "eval_runtime": 0.1138,
+      "eval_samples_per_second": 1168.281,
+      "eval_steps_per_second": 43.92,
+      "epoch": 4.0,
+      "step": 532
+    },
+    {
+      "eval_loss": 0.052711330354213715,
+      "eval_micro_f1": 0.974025974025974,
+      "eval_macro_f1": 0.974139501001639,
+      "eval_runtime": 0.1147,
+      "eval_samples_per_second": 1159.968,
+      "eval_steps_per_second": 43.608,
+      "epoch": 5.0,
+      "step": 665
+    }
+  ],
+  "torch_threshold_scan": {
+    "best_threshold": 0.55,
+    "best_micro_f1": 0.9741935483870968,
+    "scan": [
+      {
+        "threshold": 0.3,
+        "micro_f1": 0.9587301587301587,
+        "macro_f1": 0.959264077147887
+      },
+      {
+        "threshold": 0.35,
+        "micro_f1": 0.9679487179487181,
+        "macro_f1": 0.9676035532892208
+      },
+      {
+        "threshold": 0.4,
+        "micro_f1": 0.9710610932475885,
+        "macro_f1": 0.9706792933891824
+      },
+      {
+        "threshold": 0.45,
+        "micro_f1": 0.9710610932475885,
+        "macro_f1": 0.9706792933891824
+      },
+      {
+        "threshold": 0.5,
+        "micro_f1": 0.9741935483870968,
+        "macro_f1": 0.974139501001639
+      },
+      {
+        "threshold": 0.55,
+        "micro_f1": 0.9741935483870968,
+        "macro_f1": 0.974139501001639
+      },
+      {
+        "threshold": 0.6,
+        "micro_f1": 0.970873786407767,
+        "macro_f1": 0.9706995285214188
+      },
+      {
+        "threshold": 0.65,
+        "micro_f1": 0.9641693811074918,
+        "macro_f1": 0.9637588781642689
+      },
+      {
+        "threshold": 0.7,
+        "micro_f1": 0.9504950495049505,
+        "macro_f1": 0.94986998927538
+      }
+    ]
+  }
+}
