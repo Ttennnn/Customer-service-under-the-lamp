@@ -1,0 +1,19 @@
+{
+  "total": 30,
+  "passed": 29,
+  "pass_rate": 0.9666666666666667,
+  "mismatches": [
+    {
+      "id": "g23",
+      "gold": [
+        "其他"
+      ],
+      "predicted": [
+        "商品信息"
+      ]
+    }
+  ],
+  "min_pass_rate": 0.8,
+  "model": "deepseek-chat",
+  "generated_at": "2026-11-20T11:32:02.530487+00:00"
+}
