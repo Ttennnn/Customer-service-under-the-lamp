@@ -12,6 +12,8 @@
     { href: "/admin", label: "后台首页" },
     { href: "/review", label: "待审队列" },
     { href: "/observability", label: "观测总览" },
+    { href: "/topics", label: "主题分布" },
+    { href: "/acceptance", label: "验收" },
     { href: "/kb", label: "知识录入" },
     { href: "/rag-eval", label: "RAG 评估" }
   ];
