@@ -37,7 +37,11 @@ KB_PAGE = Path(__file__).resolve().parents[1] / "static" / "kb.html"
 @page_router.get("/kb", response_class=FileResponse)
 def kb_page() -> FileResponse:
     """Serve the self-contained knowledge-entry page."""
-    return FileResponse(KB_PAGE, media_type="text/html")
+    return FileResponse(
+        KB_PAGE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def has_frontmatter(text: str) -> bool:

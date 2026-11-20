@@ -17,7 +17,11 @@ api_router = APIRouter(prefix="/rag-eval/api")
 def rag_eval_page():
     if not PAGE.is_file():
         raise HTTPException(status_code=500, detail="rag eval page is missing")
-    return FileResponse(PAGE, media_type="text/html")
+    return FileResponse(
+        PAGE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @api_router.get("/status")
