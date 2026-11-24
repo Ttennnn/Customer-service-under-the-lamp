@@ -1,180 +1,212 @@
 # 灯下 · 电商售后智能客服 Agent
 
-一个按章节逐步构建的电商售后客服 Agent：从纯对话闭环一路做到 RAG 知识库、
-LangGraph 工作流、意图识别、上下文管理、MCP 工具系统、可观测性与数据飞轮。
-默认以「灯下」店铺的售后知识（商品、退货退款、售后手册、FAQ）为知识库。
+**一个会查订单、讲政策，也敢说「没有依据」的售后客服 Agent。**
 
-- 对话接口：`POST /chat`，SSE 流式输出
-- 模型：默认 DeepSeek（OpenAI 兼容协议，可换任意兼容服务）
-- 检索：Milvus 混合检索 + BGE 重排 + 证据置信度门控
-- 数据：MySQL 8 存会话/工单/审计，SQLite 存 LangGraph checkpoint
+LangGraph 工作流 · 混合检索 RAG · 证据置信度闸门 · MCP 工具 · 数据飞轮
 
-## 功能概览
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-SSE-009688?logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1.2-1C3C3C)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![Milvus](https://img.shields.io/badge/Milvus-3.0-00A1EA)
+![Tests](https://img.shields.io/badge/pytest-1066%20cases-brightgreen)
 
-| 章节 | 能力 |
-|---|---|
-| ch01 | 纯对话闭环，多轮消息落库 |
-| ch02 | 工具调用（订单、FAQ、工单） |
-| ch03 | RAG 知识库：Markdown 切分、向量化、FAQ 召回 |
-| ch04 | RAG 进阶：混合检索、RRF、重排、低置信度问题池 |
-| ch05 | LangGraph Agent 工作流与置信度闸门 |
-| ch06 | 意图识别、指代消解、订单选择中断 |
-| ch07 | 会话上下文管理：摘要与分层压缩、token 预算 |
-| ch08 | 工具系统：注册、校验、超时重试、审计、MCP 接入 |
-| ch09 | 可观测性与数据飞轮：Langfuse、成本报表、待审队列 |
-| ch10 | 多标签主题分类器（独立 ML 环境，可选 ONNX 服务） |
+---
+
+电商客服最容易出问题的地方，往往不是「不会聊」，而是：
+
+- 问退货政策时**编造条款**；
+- 问订单进度时**靠模型记忆瞎猜**；
+- 聊到十几轮后**上下文爆炸**、开始答非所问；
+- 答错了也**没人知道**，同样的问题下次继续错。
+
+这个项目围绕这四个问题，从一个纯对话闭环开始，逐章加上工具调用、RAG、
+Agent 工作流、意图识别、上下文管理、工具系统、可观测性与数据飞轮，最后用
+一个独立的多标签主题分类器把问题池自动归类。
+
+每一章都有对应的开发记录（`dev-notes/`），记录了设计取舍、失败尝试和验收证据。
+
+## 核心设计
+
+- **有证据才回答**：知识型问题先检索、再重排、再算证据置信度；证据不足时明确
+  「无法确认」，并写入低置信度问题池，而不是让模型自由发挥。
+- **业务数据走工具**：订单、商品、物流、保修、退货状态都通过工具/ MCP 获取，
+  不依赖模型记忆；写操作有权限白名单、参数校验、超时重试与审计日志。
+- **上下文可预算**：按模型窗口计算 token 预算，历史消息用「摘要 + 分层压缩」
+  表示，长会话不会无脑塞满。
+- **可运营的闭环**：低置信度问题进入待审队列，审核、评测、QA 挖掘再回流知识库，
+  形成数据飞轮。
+
+## 架构一览
+
+```mermaid
+flowchart LR
+    U["浏览器 / 管理页"] -->|"POST /chat (SSE)"| API["FastAPI"]
+    API --> HIST[("MySQL<br/>会话 / 工单 / 审计")]
+    API --> CTX["上下文组装<br/>token 预算 · 摘要 · 分层"]
+    CTX --> G["LangGraph Agent"]
+    G --> I["意图识别<br/>指代消解"]
+    G --> T["工具调用"]
+    T --> B["内置工具<br/>订单 · 商品 · FAQ · 工单"]
+    T --> M["MCP 工具<br/>物流 · 保修 · 退货状态"]
+    T --> R["RAG"]
+    R --> RW["查询改写"] --> HR["混合召回<br/>BM25 + 向量"] --> RR["重排"] --> EG["证据置信度闸门"]
+    G --> LLM["LLM<br/>DeepSeek / OpenAI 兼容"]
+    LLM --> API
+    API --> LF["Langfuse Trace"]
+    EG -->|"证据不足"| LQ[("低置信度问题池")]
+    LQ --> RV["待审队列"] --> FW["评测 / QA 挖掘<br/>回流知识库"]
+```
+
+一次请求的路径：
+
+1. 前端通过 `POST /chat` 建立 SSE 流；
+2. 读取会话历史，按 token 预算组装上下文（摘要、分层、最近窗口）；
+3. LangGraph 识别意图、消解指代，决定直接回答还是调用工具；
+4. 工具执行（内置 / MCP）或 RAG 检索（改写 → 混合召回 → 重排）；
+5. 证据闸门判断是否足够回答，流式输出答案，同时写审计、Trace 和问题池。
+
+## 功能地图
+
+| 章节 | 能力 | 关键实现 |
+|---|---|---|
+| ch01 | 纯对话闭环，多轮消息落库 | FastAPI + SSE、MySQL 会话表 |
+| ch02 | 工具调用 | 订单、商品、FAQ、工单四类工具 |
+| ch03 | RAG 知识库 | Markdown 切分、embedding、Milvus FAQ 召回 |
+| ch04 | RAG 进阶 | Dense / BM25 / Hybrid / Hybrid+Rerank 四策略，低置信度池 |
+| ch05 | Agent 工作流 | LangGraph 状态机、步数与 token 预算、置信度闸门 |
+| ch06 | 意图与对话管理 | 9 类意图、指代消解、订单选择中断 |
+| ch07 | 上下文管理 | 分层压缩、滚动摘要、token 预算与降级 |
+| ch08 | 工具系统 | ToolSpec 注册、读写权限、校验、超时重试、审计、MCP |
+| ch09 | 可观测性与数据飞轮 | Langfuse、成本报表、待审队列、评测与 QA 挖掘 |
+| ch10 | 多标签主题分类器 | 17 类主题、语料/合成/审核/训练/ONNX、独立推理服务 |
+
+## 关键设计
+
+### 证据置信度闸门
+
+知识型问题并不会「检索到就回答」。混合召回和重排之后，系统会结合检索分数与
+证据一致性计算置信度；低于阈值时回答固定拒答文案，并把问题与当时召回的片段
+一起写入低置信度问题池。混合意图（既有知识问题又有业务操作）也有额外约束：
+知识部分只能回答「无法确认」，业务事实照常返回。
+
+### 上下文管理
+
+应用不假设模型窗口无限大，而是从窗口大小反推预算：系统提示、输出、安全余量、
+证据、摘要各自预留，剩余空间再分配给历史。历史消息不是原样堆积，而是
+「最近窗口原文 + 较早消息半压缩 + 更早消息摘要」三层表示。
+
+### 工具系统
+
+所有工具统一注册为 `ToolSpec`，声明名称、参数、权限（读/写）和来源（内置/MCP）。
+执行层负责参数校验、超时、重试、结果截断和审计；写工具必须在白名单内，
+模型幻觉出的工具名不会落到数据库。审计日志记录每次调用的参数、结果摘要、
+状态（成功/失败/超时/校验拦下/权限拒绝）。
+
+### RAG 四策略
+
+同一份知识库支持四种检索策略：纯向量、纯 BM25、混合（RRF）、混合后重排。
+`/rag-eval` 页面可以并排对照结果；默认线上链路是混合 + 重排，并对失败做降级。
+
+### 数据飞轮
+
+低置信度问题 → 待审队列 → 人工审核/标注 → 评测集与 QA 挖掘 → 知识库更新。
+批处理任务与主服务分离，按单进程设计，调度交给 Makefile / cron。
+
+### 主题分类器（ch10）
+
+17 类多标签分类（退换货、物流、尺码、发票、质量问题、运费、价保、支付……），
+从语料构建、预标注、合成数据、人工审核、训练、阈值扫描到 ONNX 导出形成完整
+流水线。训练环境独立（`.venv-ml`，Python 3.12），推理服务跑在 8110 端口，
+不占用主服务的依赖。
 
 ## 技术栈
 
-- **Web**：FastAPI、Uvicorn、Server-Sent Events
-- **编排**：LangChain、LangGraph（SQLite checkpoint）
-- **模型**：DeepSeek（`OPENAI_BASE_URL` 可切换 OpenAI 兼容服务）
-- **存储**：MySQL 8 + SQLAlchemy + PyMySQL
-- **检索**：Milvus 3.0、`BAAI/bge-m3` 向量、`BAAI/bge-reranker-v2-m3` 重排
-  （SiliconFlow API）
-- **观测**：Langfuse v3（可选）
-- **前端**：管理页为原生 HTML/JS/CSS；`frontend/` 是旧的 React + Vite 聊天组件
-- **分类器（ch10）**：PyTorch、Transformers、ONNX（独立 `.venv-ml`，Python 3.12）
-
-## 目录结构
-
-```
-app/
-  api/         页面与 API 路由（chat、kb、review、topics、admin…）
-  agent/       LangGraph 工作流、意图识别、指代消解、置信度
-  rag/         文档切分、embedding、Milvus、重排、证据自检
-  services/    聊天编排、历史/上下文、摘要任务
-  tools/       工具注册与执行、内置 FAQ/订单/物流/工单、审计
-  db/          模型、按章节的 DDL 初始化、seed
-  jobs/        知识库构建、评估、成本报表、数据飞轮
-  static/      管理页面 HTML/JS/CSS
-knowledge/     知识库 Markdown（商品、售后、退货退款、FAQ）
-sql/           各章节 DDL
-mcp_servers/   物流（8101）与售后（8102）MCP Server
-scripts/ch10/  分类器语料、训练、导出、评估脚本
-tests/         pytest 测试 + quickstart shell 测试
-dev-notes/     每章开发记录（设计取舍、验收证据）
-docs/          运维手册与设计文档
-```
+| 领域 | 技术 |
+|---|---|
+| Web | FastAPI、Uvicorn、Server-Sent Events |
+| Agent | LangChain、LangGraph 1.2（SQLite checkpoint） |
+| 模型 | DeepSeek（OpenAI 兼容协议，可切换其他兼容服务） |
+| 存储 | MySQL 8、SQLAlchemy、PyMySQL |
+| 检索 | Milvus 3.0、`BAAI/bge-m3`、`BAAI/bge-reranker-v2-m3` |
+| 观测 | Langfuse v3、OpenTelemetry |
+| 工具协议 | MCP 1.30（物流 / 售后两个本地 Server） |
+| 分类器 | PyTorch、Transformers、ONNX Runtime（独立环境） |
+| 前端 | 原生 HTML/JS/CSS；`frontend/` 保留旧版 React + Vite 组件 |
 
 ## 快速开始
 
 ### 前置条件
 
-- Windows 10/11 + Git Bash（`start.bat` 依赖 Git Bash 和 PowerShell）
-- Python 3.13（仓库的 `.venv` 已验证 3.13.13；ch10 分类器另需 Python 3.12）
-- Docker Desktop（提供 MySQL 8 与 Milvus）
+- Windows 10/11 + Git Bash（`start.bat` 需要 Git Bash 与 PowerShell）
+- Python 3.13（ch10 分类器另需 Python 3.12）
+- Docker Desktop（MySQL 8 + Milvus）
 - 一个 OpenAI 兼容的 LLM API Key，以及 SiliconFlow embedding Key
 
-### 1. 配置环境变量
+### 1. 配置与安装
 
 ```bash
 cp .env.example .env
-```
+# 至少填写 OPENAI_API_KEY / EMBEDDING_API_KEY
 
-至少填写：
-
-```dotenv
-OPENAI_API_KEY=sk-...
-EMBEDDING_API_KEY=sk-...
-```
-
-其余字段按需调整（数据库、Milvus、检索参数、ch07 预算、ch09 Langfuse 等）。
-`.env` 已在 `.gitignore` 中，不要提交。
-
-### 2. 安装依赖
-
-```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-Linux/macOS 将路径换成 `.venv/bin/python`。
+> `start.sh` 优先使用最新章节 worktree 的 `.venv`，没有才回退仓库根 `.venv`。
+> 依赖请装在脚本实际使用的环境里（`./start.sh --print-target` 可查看）。
 
-> `start.sh` 优先使用最新章节 worktree 自己的 `.venv`，没有才回退仓库根的
-> `.venv`。依赖请装在脚本实际使用的那个环境里（用 `./start.sh --print-target`
-> 可以看到 `python=` 指向哪个解释器）。
+### 2. 启动依赖、初始化数据库与知识库（仅首次）
 
-### 3. 启动依赖（MySQL + Milvus）
+<details>
+<summary>展开完整初始化命令</summary>
 
 ```bash
+# MySQL 8 + Milvus（start.sh 也会自动做这一步）
 docker compose up -d
-```
 
-也可以跳过这一步：`start.sh` 会在启动前检查 `3306` / `19530`，未就绪时自动
-启动 Docker Desktop 并执行 `docker compose up -d`，最多等待 180 秒。
-
-> 四个服务已配置 `restart: unless-stopped`，Docker Desktop 也已开启登录自启，
-> 正常情况下开机后会自动恢复。
-
-### 4. 初始化数据库（仅首次）
-
-```bash
-# ch03 知识库表（幂等）
+# 表结构：幂等脚本
 .venv/Scripts/python.exe -m app.db.init_ch03
-
-# 基础表：conversations / messages / faq / tickets + FAQ 种子数据
 .venv/Scripts/python.exe -m app.db.seed
-
-# ch04 问题池 / 忠实性用例表（幂等）
 .venv/Scripts/python.exe -m app.db.init_ch04
 
-# ch05–ch08 是一次性增量 DDL（ALTER / CREATE，不要重复执行）
+# ch05–ch08：一次性增量 DDL（ALTER / CREATE，不要重复执行）
 docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch05_low_confidence_source.sql
 docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch06_ticket_type.sql
 docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch07-ddl.sql
 docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch07-layers.sql
 docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch08-ddl.sql
 
-# 幂等初始化脚本
+# 表结构：幂等脚本
 .venv/Scripts/python.exe -m app.db.init_ch09
 .venv/Scripts/python.exe -m app.db.init_ch10
-```
 
-已有数据卷的环境不需要重复执行。
-
-### 5. 构建知识库（仅首次）
-
-```bash
+# 从 knowledge/ 构建知识库并向量化到 Milvus
 .venv/Scripts/python.exe -m app.jobs.build_knowledge
 ```
 
-从 `knowledge/` 读取 Markdown，切分后写入 MySQL 并向量化到 Milvus。任务可续跑、
-按指纹复用已存在的块；常用参数：
+</details>
 
-```bash
-# 只重新摄入文档块，不向量化（可稍后补跑）
-.venv/Scripts/python.exe -m app.jobs.build_knowledge --reset --no-vectorize
+### 3. 启动
 
-# 清空全部（含挖掘出的 QA）后重建，必须显式确认
-.venv/Scripts/python.exe -m app.jobs.build_knowledge --reset-all --yes
-```
-
-### 6. 启动服务
-
-推荐直接双击 `start.bat`，或在 Git Bash 中：
+双击 `start.bat`，或在 Git Bash 中：
 
 ```bash
 ./start.sh
 ```
 
-脚本会：
+脚本会自动选择最新的 `feature/chNN-*` 分支、准备 worktree、检查并拉起
+MySQL / Milvus、清理 8000 端口、启动服务并打开浏览器。
 
-1. 选择最新的 `feature/chNN-*` 分支（本地优先），必要时创建 worktree 并复制 `.env`；
-2. 选择 worktree 的 `.venv`，没有则回退仓库根 `.venv`；
-3. 检查并在需要时启动 MySQL / Milvus，等待端口就绪；
-4. 结束占用 8000 端口的旧进程（含 uvicorn reload 父进程）；
-5. 启动 `python run.py`，轮询 `http://127.0.0.1:8000/` 后打开浏览器。
+常用开关：
 
-可选环境变量：
-
-| 变量 | 默认 | 作用 |
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| `NO_BROWSER` | `0` | 设为 `1` 不自动打开浏览器 |
-| `START_TIMEOUT` | `60` | 等待应用 HTTP 就绪的秒数 |
+| `NO_BROWSER` | `0` | `1` 不自动打开浏览器 |
+| `START_TIMEOUT` | `60` | 等待应用就绪的秒数 |
 | `INFRA_TIMEOUT` | `180` | 等待 Docker / MySQL / Milvus 的秒数 |
 | `INFRA_PORTS` | `3306 19530` | 启动前必须监听的端口 |
-| `SKIP_INFRA_CHECK` | `0` | 设为 `1` 跳过依赖预检 |
+| `SKIP_INFRA_CHECK` | `0` | `1` 跳过依赖预检 |
 
 也可以手动启动（需自行保证依赖已就绪）：
 
@@ -182,124 +214,152 @@ docker exec -i cs_customer_mysql mysql -uroot -proot cs_customer < sql/ch08-ddl.
 python run.py
 ```
 
-### 访问页面
+## 体验入口
+
+启动后访问 `http://127.0.0.1:8000/`：
 
 | 路径 | 用途 |
 |---|---|
-| `/` | 客服聊天（ch07 会话上下文 + 订单选择 / 退款表单） |
-| `/ch05` `/ch06` `/ch07` | 各阶段的聊天页面 |
+| `/` | 客服聊天（会话上下文 + 订单选择 / 退款表单） |
 | `/kb` | 知识库录入与重建 |
-| `/rag-eval` | RAG 四策略对照评估 |
+| `/rag-eval` | RAG 四策略并排评估 |
 | `/review` | 低置信度问题待审队列 |
 | `/topics` `/topics/questions` | 主题分布与类目问题 |
 | `/acceptance` | 验收总览（数据 / 评测 / 错例） |
-| `/admin` | 后台首页 |
 | `/observability` | 观测总览 |
+| `/admin` | 后台首页 |
+
+## 项目结构
+
+```
+app/
+  api/         页面与 API 路由
+  agent/       LangGraph 工作流、意图、指代消解、置信度
+  rag/         切分、embedding、Milvus、重排、证据自检
+  services/    聊天编排、历史/上下文、摘要
+  tools/       工具注册与执行、内置工具、MCP、审计
+  db/          模型、按章节 DDL 初始化、seed
+  jobs/        知识构建、评估、成本、飞轮
+  static/      管理页面
+knowledge/     知识库 Markdown（商品 / 售后 / 退货 / FAQ）
+sql/           各章节权威 DDL
+mcp_servers/   物流（8101）与售后（8102）MCP Server
+scripts/ch10/  分类器语料、训练、导出、评估
+tests/         pytest + quickstart shell 测试
+dev-notes/     每章开发记录
+docs/          运维手册与设计文档
+```
 
 ## 测试
 
 ```bash
+# 默认使用仓库根 .venv
 make test
-# 等价于
-.venv/Scripts/python.exe -m pytest -q
 
-# 若依赖装在 worktree 的 venv 里，显式指定解释器：
+# 依赖装在 worktree 的 venv 时，显式指定解释器
 make PYTHON=.worktrees/<slug>/.venv/Scripts/python.exe test
+
+# 等价于
+<venv>/Scripts/python.exe -m pytest -q
 ```
 
-quickstart 启动脚本的 shell 测试：
+当前测试套件共有 **1066 个 pytest 用例**（`pytest --collect-only` 统计），
+覆盖工具执行、检索策略、上下文预算、提示词契约、API 与数据管道。
+
+启动脚本另有 shell 测试：
 
 ```bash
-bash tests/quickstart/test_start_sh.sh
-bash tests/quickstart/test_kill_tree.sh
+bash tests/quickstart/test_start_sh.sh   # 13 passed
+bash tests/quickstart/test_kill_tree.sh  # 3 passed
 ```
 
 ## 可选组件
 
-### MCP 物流 / 售后工具（ch08）
+<details>
+<summary><b>MCP 物流 / 售后工具（ch08）</b></summary>
 
-默认关闭（`MCP_ENABLED=false`）。需要时先启动两个 Server：
+默认 `MCP_ENABLED=false`。启动两个本地 Server：
 
 ```bash
 .venv/Scripts/python.exe -m mcp_servers.logistics_server    # 8101
 .venv/Scripts/python.exe -m mcp_servers.aftersales_server   # 8102
 ```
 
-然后在 `.env` 中设置 `MCP_ENABLED=true` 并重启主服务。注意 `mcp` 包必须装在
-运行这两个 Server 的解释器里（与主服务使用的 venv 保持一致）。
+再在 `.env` 中设置 `MCP_ENABLED=true` 并重启主服务。MCP 工具：
+`query_logistics`、`query_warranty`、`query_return_status`。
 
-### Langfuse 可观测性（ch09）
+</details>
+
+<details>
+<summary><b>Langfuse 可观测性（ch09）</b></summary>
 
 ```bash
 make langfuse-up    # Web UI: http://localhost:3000
 make langfuse-down
 ```
 
-未启动 Langfuse 时，日志里会出现
-`opentelemetry ... Failed to export spans`，属于噪音，不影响聊天。
-详见 `docs/ch09-operations.md`。
+未启动时日志里的 `opentelemetry ... Failed to export spans` 属于噪音，不影响聊天。
+详见 [`docs/ch09-operations.md`](docs/ch09-operations.md)。
 
-### 主题分类器（ch10）
+</details>
 
-分类器使用独立的 `.venv-ml`（Python 3.12），不影响主服务：
+<details>
+<summary><b>主题分类器（ch10）</b></summary>
 
 ```bash
-make ch10-env        # 创建 .venv-ml 并安装 requirements-ch10.txt
-make classifier-up   # 启动 HTTP 分类服务，端口 8110
-make classifier-down # 停止
-make ch10-eval       # 启动分类服务并跑评测
+make ch10-env        # 创建 .venv-ml（Python 3.12）
+make classifier-up   # 启动 8110 推理服务
+make classifier-down
+make ch10-eval       # 启动服务并跑评测
 ```
 
-### 前端聊天组件（旧版）
+</details>
 
-主页面由后端直接提供。`frontend/` 是早期的 React + Vite 组件，仍可单独开发：
+<details>
+<summary><b>旧版 React 聊天组件</b></summary>
+
+主页面由后端直接提供。`frontend/` 组件仍可单独开发：
 
 ```bash
 cd frontend
 npm install
-npm run dev          # http://localhost:5173，后端已允许该来源的 CORS
+npm run dev          # http://localhost:5173
 ```
+
+</details>
 
 ## 常见问题
 
-**聊天回复「客服服务暂时不可用,请稍后重试」**
+**回复「客服服务暂时不可用,请稍后重试」**
 
-99% 是后端依赖未启动：`/chat` 读取会话历史时连不上 MySQL。排查顺序：
+通常是依赖没启动：`/chat` 读取会话历史时连不上 MySQL。按顺序检查：
 
 ```bash
-docker compose ps -a                 # 容器是否 Exited
-netstat -ano | grep ":3306 "         # 3306 是否监听
-tail -n 50 <worktree>/log/app.log    # 找 SQLAlchemy / pymysql 堆栈
+docker compose ps -a               # 容器是否 Exited
+netstat -ano | grep ":3306 "       # 3306 是否监听
+tail -n 50 <worktree>/log/app.log  # 查看 SQLAlchemy / pymysql 堆栈
 ```
 
-恢复：启动 Docker Desktop → `docker compose up -d`，或直接重新运行 `start.sh`
-（会自动完成这两步）。
-
-**本机装了原生 MySQL，为什么不用它？**
-
-本项目的数据在 compose 的 `cs_customer_mysql` 容器（数据卷 `aitest_mysql_data`）
-里。仓库根的 `.env` 指向 `localhost:3306`，原生 MySQL 如果占用该端口会冲突，
-请保持原生 MySQL 服务停止。
+重新运行 `start.sh` 会自动完成「启动 Docker → 拉起依赖 → 等待端口」。
 
 **冷启动要多久？**
 
-Docker Desktop + MySQL + Milvus 冷启动一般 30–60 秒。`start.sh` 会等到端口就绪
-才启动应用；Milvus 在端口打开后可能还需数秒才完全健康，极短时间内问知识库问题
-可能得到保守拒答，稍等即可。
+Docker Desktop + MySQL + Milvus 一般 30–60 秒。脚本会等到 3306/19530 就绪再
+启动应用；Milvus 在端口打开后可能还需数秒才完全健康，稍等即可。
 
 **`docker compose down` 会丢数据吗？**
 
-不会。`down` 只删除容器，保留数据卷；`down -v` 才会删除数据卷（`aitest_*`）。
-日常停止用 `docker compose stop` 或直接关 Docker Desktop 即可。
+不会，容器删除但数据卷保留；只有 `down -v` 才会删除数据卷。
 
-**8000 端口被占用**
+## 文档
 
-`start.sh` 会自动结束监听 8000 的进程及其 python 父进程；手动启动 `run.py` 时
-需要自己处理。
+- [`dev-notes/`](dev-notes/)：ch01–ch10 每章的设计、实现与验收记录
+- [`docs/ch09-operations.md`](docs/ch09-operations.md)：Langfuse、批处理与运维
+- [`docs/superpowers/`](docs/superpowers/)：快捷启动脚本的设计与计划
+- [`sql/`](sql/)：各章节权威 DDL
 
-## 开发记录与文档
+## 说明
 
-- `dev-notes/ch01.md` … `dev-notes/ch10.md`：每章的设计取舍、实现与验收证据
-- `docs/ch09-operations.md`：Langfuse、批处理任务与运维操作
-- `docs/superpowers/`：快捷启动脚本的设计与实施计划
-- `sql/`：各章节权威 DDL；`tests/`：pytest 与 shell 测试
+- 知识库中的「灯下」店铺、商品与售后政策均为虚构示例数据。
+- 运行需要自备 LLM 与 embedding API Key，相关费用由使用者承担。
+- 本项目目前未声明开源许可证；如需复用或商用，请先联系作者。
